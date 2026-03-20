@@ -16,7 +16,6 @@ const __dirname = path.dirname(__filename)
 import productRoutes from "./routes/products.js"
 import checkoutRoutes from "./routes/checkoutRoutes.js"
 import orderRoutes from "./routes/orders.js"
-import webhookRoutes from "./routes/webhookRoutes.js"
 import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
 import stripeRoutes from "./routes/stripe.js"
@@ -26,6 +25,7 @@ import productionRoutes from "./routes/production.js"
 import exportOrdersRoutes from "./routes/exportOrders.js"
 import productionSheetRoutes from "./routes/productionSheet.js"
 import quoteRoutes from "./routes/quotes.js"
+import shippingRoutes from "./routes/shipping.js"
 
 dotenv.config()
 
@@ -43,40 +43,36 @@ app.use(cors({
   credentials: true
 }))
 
-/* ================= WEBHOOK ================= */
-app.use("/api/webhook", express.raw({ type: "application/json" }))
-app.use("/api/webhook", webhookRoutes)
+/* ================= STRIPE WEBHOOK ================= */
+/* ⚠️ MUST COME BEFORE JSON PARSER */
+app.use(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  stripeRoutes
+)
 
-/* ================= MIDDLEWARE ================= */
+/* ================= NORMAL MIDDLEWARE ================= */
 app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
-/* ================= STATIC FILES (CRITICAL) ================= */
+/* ================= STATIC FILES ================= */
 app.use("/uploads", express.static(path.join(__dirname, "uploads")))
 
-/* ================= DEBUG BODY ================= */
-app.use((req, res, next) => {
-  if (req.method === "POST") {
-    console.log("📦 BODY RECEIVED:", req.body)
-  }
-  next()
-})
-
 /* ================= ROUTES ================= */
+app.use("/api/stripe", stripeRoutes)
 app.use("/api/products", productRoutes)
 app.use("/api/checkout", checkoutRoutes)
 app.use("/api/orders", orderRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
-app.use("/api/stripe", stripeRoutes)
 app.use("/api/analytics", analyticsRoutes)
-
 app.use("/api/production", productionRoutes)
 app.use("/api/quotes", quoteRoutes)
-
 app.use("/api/export-orders", exportOrdersRoutes)
 app.use("/api/production-sheet", productionSheetRoutes)
+app.use("/api/shipping", shippingRoutes)
 
 /* ================= TEST ================= */
 app.get("/test", (req, res) => {
@@ -118,7 +114,7 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5050
 
-    server.listen(PORT, () => {
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`)
     })
 

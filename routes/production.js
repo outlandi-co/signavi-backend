@@ -9,13 +9,12 @@ router.get("/", async (req, res) => {
     const quotes = await Quote.find()
     const orders = await Order.find()
 
-    const jobs = [
+    const all = [
       ...quotes.map(q => ({ ...q.toObject(), type: "quote" })),
       ...orders.map(o => ({ ...o.toObject(), type: "order" }))
     ]
 
-    /* 🔥 GROUP INTO COLUMNS */
-    const columns = {
+    const grouped = {
       pending: [],
       printing: [],
       ready: [],
@@ -24,21 +23,16 @@ router.get("/", async (req, res) => {
       delivered: []
     }
 
-    jobs.forEach(job => {
+    all.forEach(job => {
       const status = job.status || "pending"
-
-      if (!columns[status]) {
-        columns.pending.push(job)
-      } else {
-        columns[status].push(job)
-      }
+      if (!grouped[status]) grouped[status] = []
+      grouped[status].push(job)
     })
 
-    res.json(columns)
-
+    res.json(grouped)
   } catch (err) {
     console.error("PRODUCTION ERROR:", err)
-    res.status(500).json({ error: "Failed to load production data" })
+    res.status(500).json({ message: err.message })
   }
 })
 

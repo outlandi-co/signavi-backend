@@ -1,39 +1,38 @@
 import mongoose from "mongoose"
 
-const OrderSchema = new mongoose.Schema({
-
-  orderId: String,
-
-  /* 🔥 CUSTOMER INFO */
-  customerName: String,
-  email: String,
-  printType: String,
-  artwork: String,
-
-  items: [
-    {
-      productId: String,
-      name: String,
-      price: Number,
-      quantity: Number,
-      size: String,
-      color: String
-    }
-  ],
-
-  total: Number,
-
+const orderSchema = new mongoose.Schema({
+  customerName: {
+    type: String,
+    default: "Store Order"
+  },
+  email: {
+    type: String,
+    default: ""
+  },
+  quantity: {
+    type: Number,
+    default: 1
+  },
+  price: {
+    type: Number,
+    required: true
+  },
+  printType: {
+    type: String,
+    default: "checkout"
+  },
+  artwork: {
+    type: String,
+    default: null
+  },
   status: {
     type: String,
-    enum: ["pending", "printing", "ready", "shipping", "shipped", "delivered"],
     default: "pending"
   },
-
   trackingNumber: {
     type: String,
     default: ""
   }
-
 }, { timestamps: true })
 
-export default mongoose.model("Order", OrderSchema)
+export default mongoose.model("Order", orderSchema)
