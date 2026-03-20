@@ -7,11 +7,8 @@ import { requireAuth } from "../middleware/auth.js"
 const router = express.Router()
 
 /* ---------------- REGISTER ADMIN ---------------- */
-
 router.post("/register", async (req, res) => {
-
   try {
-
     const { email, password } = req.body || {}
 
     if (!email || !password) {
@@ -39,23 +36,17 @@ router.post("/register", async (req, res) => {
     })
 
   } catch (error) {
-
     console.error("Register error:", error)
 
     res.status(500).json({
       error: "Registration failed"
     })
-
   }
-
 })
 
 /* ---------------- LOGIN ---------------- */
-
 router.post("/login", async (req, res) => {
-
   try {
-
     const { email, password } = req.body || {}
 
     if (!email || !password) {
@@ -80,6 +71,7 @@ router.post("/login", async (req, res) => {
       { expiresIn: "1d" }
     )
 
+    // 🍪 optional cookie (not required for your setup but fine to keep)
     res.cookie("token", token, {
       httpOnly: true,
       sameSite: "lax",
@@ -88,29 +80,23 @@ router.post("/login", async (req, res) => {
     })
 
     res.json({
-  message: "Login successful",
-  role: user.role,
-  token
-})
+      message: "Login successful",
+      role: user.role,
+      token
+    })
 
   } catch (error) {
-
     console.error("Login error:", error)
 
     res.status(500).json({
       error: "Login failed"
     })
-
   }
-
 })
 
-/* ---------------- PROFILE (PROTECTED ROUTE) ---------------- */
-
+/* ---------------- PROFILE ---------------- */
 router.get("/profile", requireAuth, async (req, res) => {
-
   try {
-
     const user = await User.findById(req.user.id).select("-password")
 
     if (!user) {
@@ -118,20 +104,16 @@ router.get("/profile", requireAuth, async (req, res) => {
     }
 
     res.json({
-      message: "Authenticated user",
       user
     })
 
   } catch (error) {
-
     console.error("Profile error:", error)
 
     res.status(500).json({
       error: "Failed to fetch profile"
     })
-
   }
-
 })
 
 export default router
