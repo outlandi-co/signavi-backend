@@ -1,51 +1,124 @@
 import express from "express"
 import Order from "../models/Order.js"
-import Product from "../models/Product.js"
 
 const router = express.Router()
 
 router.get("/", async (req, res) => {
   try {
-
-    const orders = await Order.find()
+    const orders = await Order.find({})
 
     let totalRevenue = 0
-    const productSales = {}
+    let totalCOGS = 0
+    let totalFees = 0
+
+    const monthlyMap = {}
+    const productMap = {}
 
     orders.forEach(order => {
+      const price = order.price || order.total || 0
+      const cost = order.cost || 0
+      const fee = order.fees || price * 0.03
 
-      totalRevenue += order.total || 0
+      totalRevenue += price
+      totalCOGS += cost
+      totalFees += fee
 
-      order.items.forEach(item => {
+      /* ================= MONTHLY ================= */
+      const date = new Date(order.createdAt || Date.now())
+      const month = date.toLocaleString("default", { month: "short" })
 
-        if (!productSales[item.name]) {
-          productSales[item.name] = 0
+      if (!monthlyMap[month]) {
+        monthlyMap[month] = {
+          month,
+          revenue: 0,
+          profit: 0
         }
+      }
 
-        productSales[item.name] += item.quantity
+      monthlyMap[month].revenue += price
+      monthlyMap[month].profit += (price - cost - fee)
 
-      })
+      /* ================= PRODUCT ANALYTICS ================= */
+      if (Array.isArray(order.items)) {
+        order.items.forEach(item => {
+          const name = item.name || "Unknown"
+          const itemRevenue = (item.price || 0) * (item.quantity || 1)
+          const itemCost = (item.cost || 0) * (item.quantity || 1)
 
+          if (!productMap[name]) {
+            productMap[name] = {
+              name,
+              revenue: 0,
+              cost: 0,
+              profit: 0,
+              quantity: 0
+            }
+          }
+
+          productMap[name].revenue += itemRevenue
+          productMap[name].cost += itemCost
+          productMap[name].profit += (itemRevenue - itemCost)
+          productMap[name].quantity += item.quantity || 1
+        })
+      }
     })
 
-    const topProducts = Object.entries(productSales)
-      .map(([name, sold]) => ({ name, sold }))
-      .sort((a, b) => b.sold - a.sold)
-      .slice(0, 5)
+    const totalProfit = totalRevenue - totalCOGS - totalFees
 
-    const lowInventory = await Product.find({
-      quantity: { $lt: 5 }
-    })
+    const monthly = Object.values(monthlyMap)
+    const products = Object.values(productMap)
+
+    /* ================= AI INSIGHTS ================= */
+    const insights = []
+
+    if (totalRevenue === 0) {
+      insights.push("No revenue yet — start pushing sales 🚀")
+    }
+
+    if (totalProfit > 0) {
+      insights.push("You're profitable — scale what works 🔥")
+    } else {
+      insights.push("You're losing money — adjust pricing or costs")
+    }
+
+    if (products.length > 0) {
+      const topProduct = products.sort((a, b) => b.revenue - a.revenue)[0]
+      insights.push(`Top product: ${topProduct.name} 💰`)
+    }
+
+    if (products.length > 0) {
+      const mostProfitable = [...products].sort((a, b) => b.profit - a.profit)[0]
+      insights.push(`Most profitable: ${mostProfitable.name} 📈`)
+    }
+
+    if (totalFees > totalProfit * 0.3) {
+      insights.push("Fees are too high — increase pricing slightly")
+    }
+
+    if (monthly.length > 1) {
+      const last = monthly[monthly.length - 1]
+      const prev = monthly[monthly.length - 2]
+
+      if (last.revenue > prev.revenue) {
+        insights.push("Revenue trending up 📊")
+      } else {
+        insights.push("Revenue dropped — review strategy")
+      }
+    }
 
     res.json({
-      totalOrders: orders.length,
       totalRevenue,
-      topProducts,
-      lowInventory
+      totalProfit,
+      totalFees,
+      totalCOGS,
+      monthly,
+      products, // 🔥 NEW
+      insights
     })
 
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    console.error("ANALYTICS ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 

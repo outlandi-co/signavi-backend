@@ -16,11 +16,12 @@ router.get("/", async (req, res) => {
 
     const grouped = {
       pending: [],
+      approved: [],   // 🔥 NEW
       printing: [],
       ready: [],
       shipping: [],
       shipped: [],
-      delivered: []
+      denied: []      // 🔥 NEW
     }
 
     all.forEach(job => {
@@ -31,7 +32,6 @@ router.get("/", async (req, res) => {
 
     res.json(grouped)
   } catch (err) {
-    console.error("PRODUCTION ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })

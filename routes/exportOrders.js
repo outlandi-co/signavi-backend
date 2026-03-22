@@ -3,15 +3,40 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
+/* ================= EXPORT WITH FILTERS ================= */
 router.get("/", async (req, res) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 })
+    const { start, end, status } = req.query
+
+    let query = {}
+
+    /* 📅 DATE FILTER */
+    if (start || end) {
+      query.createdAt = {}
+
+      if (start) query.createdAt.$gte = new Date(start)
+      if (end) query.createdAt.$lte = new Date(end)
+    }
+
+    /* 📊 STATUS FILTER */
+    if (status && status !== "all") {
+      query.status = status
+    }
+
+    const orders = await Order.find(query).sort({ createdAt: -1 }).lean()
 
     let csv = "Order ID,Product,Qty,Price,Total,Status,Date\n"
 
     orders.forEach(order => {
+      const date = new Date(order.createdAt).toLocaleString()
+
+      if (!order.items || order.items.length === 0) {
+        csv += `${order.orderId || order._id},N/A,0,0,${order.total || 0},${order.status},${date}\n`
+        return
+      }
+
       order.items.forEach(item => {
-        csv += `${order.orderId},${item.name},${item.quantity},${item.price},${order.total},${order.status},${order.createdAt}\n`
+        csv += `${order.orderId || order._id},${item.name || "Unknown"},${item.quantity || 0},${item.price || 0},${order.total || 0},${order.status},${date}\n`
       })
     })
 
@@ -20,6 +45,7 @@ router.get("/", async (req, res) => {
     res.send(csv)
 
   } catch (err) {
+    console.error("❌ EXPORT FILTER ERROR:", err)
     res.status(500).json({ error: err.message })
   }
 })

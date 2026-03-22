@@ -1,38 +1,59 @@
 import mongoose from "mongoose"
 
 const orderSchema = new mongoose.Schema({
-  customerName: {
+
+  customerName: { type: String, default: "Store Order" },
+  email: { type: String, default: "" },
+  message: { type: String, default: "" },
+
+  shippingAddress: {
+    name: String,
+    street: String,
+    city: String,
+    state: String,
+    zip: String,
+    country: String
+  },
+
+  quantity: { type: Number, default: 1 },
+  items: { type: Array, default: [] },
+
+  source: {
     type: String,
-    default: "Store Order"
+    enum: ["quote", "store"],
+    default: "store"
   },
-  email: {
+
+  price: { type: Number, default: 0 },
+  shippingCost: { type: Number, default: 0 },
+  finalPrice: { type: Number, default: 0 },
+
+  approvalStatus: {
     type: String,
-    default: ""
-  },
-  quantity: {
-    type: Number,
-    default: 1
-  },
-  price: {
-    type: Number,
-    required: true
-  },
-  printType: {
-    type: String,
-    default: "checkout"
-  },
-  artwork: {
-    type: String,
-    default: null
-  },
-  status: {
-    type: String,
+    enum: ["pending", "approved", "denied"],
     default: "pending"
   },
-  trackingNumber: {
+
+  artwork: { type: String, default: null },
+
+  status: {
     type: String,
-    default: ""
-  }
+    enum: ["pending", "approved", "printing", "shipping", "shipped", "denied"],
+    default: "pending"
+  },
+
+  trackingNumber: { type: String, default: "" },
+  trackingLink: { type: String, default: "" },
+  shippedAt: Date,
+
+  timeline: [
+    {
+      status: String,
+      note: String,
+      date: { type: Date, default: Date.now }
+    }
+  ]
+
 }, { timestamps: true })
 
 export default mongoose.model("Order", orderSchema)

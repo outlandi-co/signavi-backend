@@ -1,80 +1,60 @@
 import express from "express"
-import fetch from "node-fetch"
+import Order from "../models/Order.js"
+import { getTrackingLink } from "../utils/tracking.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-router.post("/rates", async (req, res) => {
+router.patch("/:id/tracking", async (req, res) => {
   try {
-    const { items, address } = req.body || {}
+    const { trackingNumber } = req.body
 
-    if (!items || !Array.isArray(items)) {
-      return res.status(400).json({ error: "Invalid items" })
+    if (!trackingNumber) {
+      return res.status(400).json({ message: "Tracking required" })
     }
 
-    const totalWeight = items.reduce(
-      (sum, item) =>
-        sum + (Number(item.weight) || 1) * (Number(item.quantity) || 1),
-      0
+    console.log("🔍 PARAM ID:", req.params.id)
+
+const order = await Order.findOne({ _id: req.params.id })
+
+console.log("📦 ORDER FOUND:", order)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const trackingLink = getTrackingLink(trackingNumber)
+
+    const alreadyShipped = order.status === "shipped"
+
+    order.trackingNumber = trackingNumber
+    order.trackingLink = trackingLink
+    order.status = "shipped"
+
+    if (!alreadyShipped) {
+      order.timeline.push({ status: "shipped", date: new Date() })
+    }
+
+    await order.save()
+
+    console.log("📦 Tracking added:", order._id)
+
+    /* 📧 EMAIL */
+    sendOrderStatusEmail(
+      order.email,
+      "shipped",
+      order.orderId,
+      null,
+      trackingNumber
     )
 
-    const shipment = {
-      address_from: {
-        name: "Signavi",
-        street1: "123 Main St",
-        city: "Merced",
-        state: "CA",
-        zip: "95340",
-        country: "US"
-      },
-      address_to: address || {
-        name: "Customer",
-        street1: "510 Townsend St",
-        city: "San Francisco",
-        state: "CA",
-        zip: "94103",
-        country: "US"
-      },
-      parcels: [{
-        length: "10",
-        width: "8",
-        height: "4",
-        distance_unit: "in",
-        weight: totalWeight || 1,
-        mass_unit: "lb"
-      }],
-      async: false
-    }
+    req.app.get("io").emit("jobUpdated")
 
-    const response = await fetch("https://api.goshippo.com/shipments/", {
-      method: "POST",
-      headers: {
-        Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(shipment)
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      console.error("❌ Shippo API error:", data)
-      return res.status(500).json({ error: "Shippo failed" })
-    }
-
-    const rates = data.rates.map(rate => ({
-      id: rate.object_id,
-      provider: rate.provider,
-      service: rate.servicelevel?.name,
-      amount: Number(rate.amount),
-      currency: rate.currency,
-      estimatedDays: rate.estimated_days
-    }))
-
-    res.json(rates)
+    res.json(order)
 
   } catch (err) {
-    console.error("❌ Shipping error:", err.message)
-    res.status(500).json({ error: err.message })
+    console.error("❌ Tracking error:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 

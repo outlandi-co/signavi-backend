@@ -12,6 +12,12 @@ const productSchema = new mongoose.Schema({
 
   price: Number,
 
+  /* 🔥 NEW: COST FOR PROFIT + TAXES */
+  cost: {
+    type: Number,
+    default: 0
+  },
+
   category: String,
 
   quantity: Number,

@@ -71,14 +71,7 @@ router.post("/login", async (req, res) => {
       { expiresIn: "1d" }
     )
 
-    // 🍪 optional cookie (not required for your setup but fine to keep)
-    res.cookie("token", token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: false,
-      maxAge: 1000 * 60 * 60 * 24
-    })
-
+    // 🔥 IMPORTANT: frontend needs this
     res.json({
       message: "Login successful",
       role: user.role,
@@ -95,23 +88,42 @@ router.post("/login", async (req, res) => {
 })
 
 /* ---------------- PROFILE ---------------- */
-router.get("/profile", requireAuth, async (req, res) => {
+router.get("/profile", async (req, res) => {
+  console.log("🔥 PROFILE HIT")
+
   try {
-    const user = await User.findById(req.user.id).select("-password")
+    const authHeader = req.headers.authorization
+
+    if (!authHeader) {
+      console.log("❌ No auth header")
+      return res.status(401).json({ error: "No token provided" })
+    }
+
+    const token = authHeader.split(" ")[1]
+
+    if (!token) {
+      console.log("❌ Token missing after split")
+      return res.status(401).json({ error: "Invalid token format" })
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+
+    console.log("🔑 DECODED:", decoded)
+
+    const user = await User.findById(decoded.id).select("-password")
 
     if (!user) {
+      console.log("❌ User not found in DB")
       return res.status(404).json({ error: "User not found" })
     }
 
-    res.json({
-      user
-    })
+    return res.json({ user })
 
   } catch (error) {
-    console.error("Profile error:", error)
+    console.error("❌ PROFILE ERROR:", error)
 
-    res.status(500).json({
-      error: "Failed to fetch profile"
+    return res.status(401).json({
+      error: "Invalid or expired token"
     })
   }
 })
