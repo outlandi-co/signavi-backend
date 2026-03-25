@@ -1,123 +1,117 @@
-import express from "express"
+ import express from "express"
 import Order from "../models/Order.js"
+import Quote from "../models/Quote.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-router.get("/", async (req, res) => {
+/* ================= VALID STATUSES ================= */
+const validStatuses = [
+  "pending",
+  "approved",
+  "artwork_sent",
+  "printing",
+  "ready",
+  "shipping",
+  "shipped",
+  "denied"
+]
+
+/* ================= UPDATE STATUS ================= */
+router.patch("/:id/status", async (req, res) => {
   try {
-    const orders = await Order.find({})
+    const { status, trackingNumber, trackingLink } = req.body
 
-    let totalRevenue = 0
-    let totalCOGS = 0
-    let totalFees = 0
+    console.log("🔥 STATUS UPDATE:", req.params.id, status)
 
-    const monthlyMap = {}
-    const productMap = {}
+    /* 🔥 VALIDATE STATUS */
+    if (!validStatuses.includes(status)) {
+      console.warn("⚠️ Invalid status:", status)
+      return res.status(400).json({ message: "Invalid status" })
+    }
 
-    orders.forEach(order => {
-      const price = order.price || order.total || 0
-      const cost = order.cost || 0
-      const fee = order.fees || price * 0.03
+    let order = await Order.findById(req.params.id)
 
-      totalRevenue += price
-      totalCOGS += cost
-      totalFees += fee
+    /* ================= IF NOT ORDER → CHECK QUOTE ================= */
+    if (!order) {
+      const quote = await Quote.findById(req.params.id)
 
-      /* ================= MONTHLY ================= */
-      const date = new Date(order.createdAt || Date.now())
-      const month = date.toLocaleString("default", { month: "short" })
-
-      if (!monthlyMap[month]) {
-        monthlyMap[month] = {
-          month,
-          revenue: 0,
-          profit: 0
-        }
+      if (!quote) {
+        return res.status(404).json({ message: "Not found anywhere" })
       }
 
-      monthlyMap[month].revenue += price
-      monthlyMap[month].profit += (price - cost - fee)
-
-      /* ================= PRODUCT ANALYTICS ================= */
-      if (Array.isArray(order.items)) {
-        order.items.forEach(item => {
-          const name = item.name || "Unknown"
-          const itemRevenue = (item.price || 0) * (item.quantity || 1)
-          const itemCost = (item.cost || 0) * (item.quantity || 1)
-
-          if (!productMap[name]) {
-            productMap[name] = {
-              name,
-              revenue: 0,
-              cost: 0,
-              profit: 0,
-              quantity: 0
+      const updatedQuote = await Quote.findByIdAndUpdate(
+        req.params.id,
+        {
+          status,
+          trackingNumber,
+          trackingLink,
+          $push: {
+            timeline: {
+              status,
+              date: new Date()
             }
           }
+        },
+        { returnDocument: "after" }
+      )
 
-          productMap[name].revenue += itemRevenue
-          productMap[name].cost += itemCost
-          productMap[name].profit += (itemRevenue - itemCost)
-          productMap[name].quantity += item.quantity || 1
-        })
+      if (updatedQuote?.email) {
+        await sendOrderStatusEmail(
+          updatedQuote.email,
+          status,
+          updatedQuote._id,
+          null,
+          trackingNumber
+        )
       }
-    })
 
-    const totalProfit = totalRevenue - totalCOGS - totalFees
+      req.app.get("io")?.emit("jobUpdated")
 
-    const monthly = Object.values(monthlyMap)
-    const products = Object.values(productMap)
+      console.log("✅ QUOTE STATUS UPDATED:", updatedQuote?._id)
 
-    /* ================= AI INSIGHTS ================= */
-    const insights = []
-
-    if (totalRevenue === 0) {
-      insights.push("No revenue yet — start pushing sales 🚀")
+      return res.json(updatedQuote)
     }
 
-    if (totalProfit > 0) {
-      insights.push("You're profitable — scale what works 🔥")
-    } else {
-      insights.push("You're losing money — adjust pricing or costs")
+    /* ================= UPDATE ORDER ================= */
+    const updatedOrder = await Order.findByIdAndUpdate(
+      req.params.id,
+      {
+        status,
+        trackingNumber,
+        trackingLink,
+        $push: {
+          timeline: {
+            status,
+            date: new Date()
+          }
+        }
+      },
+      { returnDocument: "after" }
+    )
+
+    if (!updatedOrder) {
+      return res.status(404).json({ message: "Order not found" })
     }
 
-    if (products.length > 0) {
-      const topProduct = products.sort((a, b) => b.revenue - a.revenue)[0]
-      insights.push(`Top product: ${topProduct.name} 💰`)
+    if (updatedOrder?.email) {
+      await sendOrderStatusEmail(
+        updatedOrder.email,
+        status,
+        updatedOrder._id,
+        null,
+        trackingNumber
+      )
     }
 
-    if (products.length > 0) {
-      const mostProfitable = [...products].sort((a, b) => b.profit - a.profit)[0]
-      insights.push(`Most profitable: ${mostProfitable.name} 📈`)
-    }
+    req.app.get("io")?.emit("jobUpdated")
 
-    if (totalFees > totalProfit * 0.3) {
-      insights.push("Fees are too high — increase pricing slightly")
-    }
+    console.log("✅ ORDER STATUS UPDATED:", updatedOrder._id)
 
-    if (monthly.length > 1) {
-      const last = monthly[monthly.length - 1]
-      const prev = monthly[monthly.length - 2]
-
-      if (last.revenue > prev.revenue) {
-        insights.push("Revenue trending up 📊")
-      } else {
-        insights.push("Revenue dropped — review strategy")
-      }
-    }
-
-    res.json({
-      totalRevenue,
-      totalProfit,
-      totalFees,
-      totalCOGS,
-      monthly,
-      products, // 🔥 NEW
-      insights
-    })
+    res.json(updatedOrder)
 
   } catch (err) {
-    console.error("ANALYTICS ERROR:", err)
+    console.error("❌ STATUS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })

@@ -1,77 +1,95 @@
 import express from "express"
 import Stripe from "stripe"
 import dotenv from "dotenv"
-import Product from "../models/Product.js" // 🔥 NEW
+import Order from "../models/Order.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 dotenv.config()
+
+console.log("🔥 STRIPE ROUTES LOADED") // 🔥 DEBUG
 
 const router = express.Router()
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
 /* ================= CREATE CHECKOUT ================= */
-router.post("/create-checkout-session", async (req, res) => {
+router.post("/create-checkout-session/:id", async (req, res) => {
   try {
-    const { items, customer = {}, discountPercent } = req.body
+    console.log("🔥 HIT STRIPE ROUTE:", req.params.id)
 
-    /* 🔥 FETCH PRODUCTS TO GET COST */
-    const enrichedItems = await Promise.all(
-      items.map(async (item) => {
-        const product = await Product.findById(item.productId).lean()
+    const { id } = req.params
 
-        return {
-          ...item,
-          cost: product?.cost || 0 // 🔥 REAL COST
-        }
-      })
-    )
+    const order = await Order.findById(id)
 
-    /* ================= STRIPE LINE ITEMS ================= */
-    const line_items = enrichedItems.map(item => ({
-      price_data: {
-        currency: "usd",
-        product_data: {
-          name: item.name
-        },
-        unit_amount: Math.round(item.price * 100)
-      },
-      quantity: item.quantity
-    }))
-
-    /* ================= DISCOUNT ================= */
-    let discounts = []
-
-    if (discountPercent) {
-      const coupon = await stripe.coupons.create({
-        percent_off: discountPercent,
-        duration: "once"
-      })
-
-      discounts = [{ coupon: coupon.id }]
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
     }
 
-    /* ================= CREATE SESSION ================= */
+    const amount = Math.round((order.finalPrice || order.price || 0) * 100)
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
-      line_items,
-      discounts,
-      customer_email: customer.email || undefined,
 
-      metadata: {
-        type: "store",
-        customerName: customer.name || "Store Order",
-        items: JSON.stringify(enrichedItems) // 🔥 STORE COST HERE
-      },
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `Order #${order._id}`
+            },
+            unit_amount: amount
+          },
+          quantity: 1
+        }
+      ],
 
-      success_url: "http://localhost:5173/success",
-      cancel_url: "http://localhost:5173/store"
+      success_url: `http://localhost:5050/api/stripe/success?orderId=${order._id}`,
+      cancel_url: `http://localhost:5173/cancel`
     })
 
     res.json({ url: session.url })
 
   } catch (err) {
-    console.error("❌ Stripe error:", err)
-    res.status(500).json({ error: err.message })
+    console.error("❌ STRIPE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= SUCCESS ================= */
+router.get("/success", async (req, res) => {
+  try {
+    const { orderId } = req.query
+
+    const order = await Order.findById(orderId)
+
+    if (!order) {
+      return res.status(404).send("Order not found")
+    }
+
+    order.status = "paid"
+    order.timeline.push({
+      status: "paid",
+      date: new Date()
+    })
+
+    await order.save()
+
+    console.log("💰 PAYMENT SUCCESS:", orderId)
+
+    if (order.email) {
+      await sendOrderStatusEmail(
+        order.email,
+        "paid",
+        order._id,
+        order
+      )
+    }
+
+    res.redirect("http://localhost:5173/success")
+
+  } catch (err) {
+    console.error("❌ SUCCESS ERROR:", err)
+    res.status(500).send("Payment success error")
   }
 })
 

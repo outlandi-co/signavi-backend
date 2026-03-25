@@ -102,6 +102,7 @@ router.patch("/:id/tracking", async (req, res) => {
 })
 
 /* ================= CONVERT ================= */
+/* ================= CONVERT ================= */
 router.post("/:id/convert", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
@@ -110,13 +111,32 @@ router.post("/:id/convert", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
+    /* 🔥 BUILD ITEMS (FALLBACK OR FROM BODY) */
+    const items =
+      req.body.items && req.body.items.length > 0
+        ? req.body.items
+        : [
+            {
+              name: quote.printType || "Custom Item",
+              quantity: quote.quantity || 1,
+              price: Number(req.body.price || 0)
+            }
+          ]
+
     const order = await Order.create({
       customerName: quote.customerName,
       email: quote.email,
+
+      /* 🔥 CRITICAL FIX */
+      items,
+
       quantity: quote.quantity,
-      price: req.body.price,
+      price: Number(req.body.price || 0),
+      finalPrice: Number(req.body.price || 0),
+
       printType: quote.printType,
       artwork: quote.artwork,
+
       status: "pending"
     })
 
@@ -131,7 +151,6 @@ router.post("/:id/convert", async (req, res) => {
     res.status(500).json({ message: err.message })
   }
 })
-
 /* ================= DELETE ================= */
 router.delete("/:id", async (req, res) => {
   try {

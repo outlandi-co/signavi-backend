@@ -1,10 +1,7 @@
 import nodemailer from "nodemailer"
 import fs from "fs"
-import PDFDocument from "pdfkit"
 import path from "path"
-import { getTrackingLink } from "./tracking.js"
-
-/* ================= EMAIL ================= */
+import PDFDocument from "pdfkit"
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -14,134 +11,141 @@ const transporter = nodemailer.createTransport({
   }
 })
 
-/* ================= ORDER STATUS EMAIL ================= */
+/* 🔥 FRONTEND URL (NOT BACKEND) */
+const FRONTEND_URL = "http://localhost:5173"
 
+/* ================= PDF ================= */
+const generateInvoicePDF = (order = {}) => {
+  return new Promise((resolve, reject) => {
+    try {
+      const filePath = path.join("uploads", `invoice-${order._id}.pdf`)
+      const doc = new PDFDocument()
+
+      const stream = fs.createWriteStream(filePath)
+      doc.pipe(stream)
+
+      doc.fontSize(20).text("Signavi Invoice", { align: "center" })
+      doc.moveDown()
+
+      doc.text(`Order ID: ${order._id || "N/A"}`)
+      doc.text(`Customer: ${order.customerName || "N/A"}`)
+      doc.moveDown()
+
+      const items = order.items || []
+
+     if (!items.length) {
+  doc.text("No item details provided")
+} else {
+  items.forEach(item => {
+    doc.text(
+      `${item.name || "Item"} | Qty: ${item.quantity || 0} | $${item.price || 0}`
+    )
+  })
+}
+
+      doc.moveDown()
+
+      const total = order.total || order.finalPrice || 0
+      doc.text(`Total: $${total}`, { align: "right" })
+
+      doc.end()
+
+      stream.on("finish", () => resolve(filePath))
+      stream.on("error", reject)
+
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+/* ================= TEMPLATE ================= */
+const buildEmailTemplate = ({ status, orderId, total }) => {
+
+  /* 🔥 FIXED LINK */
+  const paymentLink = `${FRONTEND_URL}/checkout/${orderId}`
+
+  let actionSection = ""
+
+  if (status === "artwork_sent" || status === "approved") {
+    actionSection = `
+      <div style="margin:30px 0;text-align:center;">
+        <a href="${paymentLink}"
+          target="_blank"
+          style="padding:14px 24px;background:black;color:white;border-radius:6px;text-decoration:none;">
+          💳 Complete Purchase
+        </a>
+      </div>
+    `
+  }
+
+  let paidSection = ""
+  if (status === "paid") {
+    paidSection = `
+      <h2 style="text-align:center;color:#10b981;">
+        Payment Received: $${Number(total || 0).toFixed(2)}
+      </h2>
+      <p style="text-align:center;">
+        Your invoice is attached below.
+      </p>
+    `
+  }
+
+  return `
+    <div style="background:#020617;padding:30px;color:white;font-family:Arial;">
+      <h1 style="text-align:center;">${(status || "UPDATE").toUpperCase()}</h1>
+      <p style="text-align:center;">Order: ${orderId}</p>
+      ${actionSection}
+      ${paidSection}
+    </div>
+  `
+}
+
+/* ================= SEND ================= */
 export const sendOrderStatusEmail = async (
   email,
   status,
   orderId,
-  invoicePath = null,
-  trackingNumber = null
+  orderData = {}
 ) => {
   try {
+    if (!email) return
 
-    let trackingHtml = ""
+    console.log("📧 Sending email to:", email)
 
-    if (trackingNumber) {
-      const link = getTrackingLink(trackingNumber)
-
-      trackingHtml = `
-        <p><b>Tracking Number:</b> ${trackingNumber}</p>
-        <p><a href="${link}" target="_blank">📦 Track Package</a></p>
-      `
+    const safeOrder = {
+      _id: orderId,
+      customerName: orderData?.customerName || "Customer",
+      items: orderData?.items || [],
+      total: orderData?.total || orderData?.finalPrice || 0
     }
 
-    const mailOptions = {
-      from: `"Signavi Store" <${process.env.EMAIL_USER}>`,
+    let attachments = []
+
+    if (status === "paid") {
+      const filePath = await generateInvoicePDF(safeOrder)
+
+      attachments.push({
+        filename: `invoice-${orderId}.pdf`,
+        path: filePath
+      })
+    }
+
+    await transporter.sendMail({
+      from: `"Signavi" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: `📦 Order Update - ${orderId}`,
-      html: `
-        <h2>Order Update</h2>
-        <p>Order <b>${orderId}</b> is now:</p>
-        <h3>${status.toUpperCase()}</h3>
-        ${trackingHtml}
-      `
-    }
+      subject: `Order ${status}`,
+      html: buildEmailTemplate({
+        status,
+        orderId,
+        total: safeOrder.total
+      }),
+      attachments
+    })
 
-    if (invoicePath && fs.existsSync(invoicePath)) {
-      mailOptions.attachments = [
-        { filename: "invoice.pdf", path: invoicePath }
-      ]
-    }
-
-    await transporter.sendMail(mailOptions)
-
-    console.log("📧 Status Email sent:", email)
+    console.log("✅ Email sent:", email)
 
   } catch (err) {
-    console.error("❌ STATUS EMAIL ERROR:", err)
+    console.error("❌ EMAIL ERROR:", err)
   }
-}
-
-/* ================= ARTWORK EMAIL (NEW 🔥) ================= */
-
-export const sendArtworkEmail = async (order) => {
-  try {
-    if (!order) {
-      throw new Error("Order missing")
-    }
-
-    if (!order.artwork) {
-      throw new Error("No artwork found")
-    }
-
-    const filePath = path.resolve("uploads", order.artwork)
-
-    console.log("📁 Artwork path:", filePath)
-
-    if (!fs.existsSync(filePath)) {
-      throw new Error("Artwork file missing on server")
-    }
-
-await transporter.sendMail({
-  from: `"Signavi Store" <${process.env.EMAIL_USER}>`,
-  to: [
-    process.env.EMAIL_USER,
-    order.email
-  ].filter(Boolean),
-  subject: `🎨 Artwork - Order ${order._id}`,
-  html: `
-    <h2>Artwork Ready</h2>
-    <p><b>Order:</b> ${order._id}</p>
-    <p><b>Customer:</b> ${order.customerName}</p>
-  `,
-  attachments: [
-    {
-      filename: order.artwork,
-      path: filePath
-    }
-  ]
-})
-
-    console.log("📧 Artwork Email sent")
-
-  } catch (err) {
-    console.error("❌ ARTWORK EMAIL ERROR:", err)
-    throw err // 🔥 important so route can respond correctly
-  }
-}
-
-/* ================= INVOICE ================= */
-
-export const generateInvoice = (order) => {
-
-  const filePath = path.resolve(`invoices/invoice-${order._id}.pdf`)
-
-  if (!fs.existsSync("invoices")) {
-    fs.mkdirSync("invoices")
-  }
-
-  const doc = new PDFDocument()
-
-  doc.pipe(fs.createWriteStream(filePath))
-
-  doc.fontSize(20).text("SIGNAVI INVOICE", { align: "center" })
-  doc.moveDown()
-
-  doc.text(`Order ID: ${order._id}`)
-  doc.text(`Customer: ${order.customerName}`)
-  doc.text(`Email: ${order.email}`)
-
-  doc.moveDown()
-
-  order.items?.forEach(item => {
-    doc.text(`${item.name} x${item.quantity} - $${item.price}`)
-  })
-
-  doc.moveDown()
-  doc.text(`Total: $${order.total}`)
-
-  doc.end()
-
-  return filePath
 }

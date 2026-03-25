@@ -36,9 +36,20 @@ const orderSchema = new mongoose.Schema({
 
   artwork: { type: String, default: null },
 
+  /* 🔥 FIXED STATUS ENUM */
   status: {
     type: String,
-    enum: ["pending", "approved", "printing", "shipping", "shipped", "denied"],
+    enum: [
+      "pending",
+      "approved",
+      "artwork_sent", // ✅ needed for email approval
+      "printing",
+      "ready",        // ✅ needed for production flow
+      "shipping",
+      "shipped",
+      "denied",
+      "paid"          // ✅ needed for payment confirmation
+    ],
     default: "pending"
   },
 

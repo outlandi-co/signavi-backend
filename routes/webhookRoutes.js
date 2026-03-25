@@ -2,15 +2,15 @@ import express from "express"
 import Stripe from "stripe"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 dotenv.config()
 
 const router = express.Router()
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-/* ================= STRIPE WEBHOOK ================= */
+/* ⚠️ IMPORTANT: RAW BODY REQUIRED */
 router.post("/", async (req, res) => {
-
   const sig = req.headers["stripe-signature"]
 
   let event
@@ -22,81 +22,51 @@ router.post("/", async (req, res) => {
       process.env.STRIPE_WEBHOOK_SECRET
     )
   } catch (err) {
-    console.error("❌ WEBHOOK ERROR:", err.message)
+    console.error("❌ WEBHOOK SIGNATURE ERROR:", err.message)
     return res.status(400).send(`Webhook Error: ${err.message}`)
   }
 
-  console.log("🔥 EVENT:", event.type)
-
-  /* ================= CHECKOUT SUCCESS ================= */
+  /* ================= HANDLE EVENTS ================= */
   if (event.type === "checkout.session.completed") {
-
     const session = event.data.object
 
-    try {
+    const orderId = session.metadata?.orderId
 
-      /* 🔥 PREVENT DUPLICATE ORDERS */
-      const existing = await Order.findOne({
-        stripeSessionId: session.id
-      })
+    if (!orderId) {
+      console.warn("⚠️ No orderId in metadata")
+      return res.sendStatus(200)
+    }
 
-      if (existing) {
-        console.log("⚠️ Duplicate order prevented")
-        return res.json({ received: true })
-      }
+    const order = await Order.findById(orderId)
 
-      /* ================= PARSE ITEMS ================= */
-      let items = []
+    if (!order) {
+      console.warn("⚠️ Order not found:", orderId)
+      return res.sendStatus(200)
+    }
 
-      try {
-        items = JSON.parse(session.metadata?.items || "[]")
-      } catch {
-        console.warn("⚠️ No items found in metadata")
-      }
+    /* 🔥 MARK AS PAID (SECURE) */
+    order.status = "paid"
+    order.timeline.push({
+      status: "paid",
+      date: new Date()
+    })
 
-      /* ================= FORMAT ITEMS ================= */
-      const formattedItems = items.map(item => ({
-        name: item.name,
-        price: Number(item.price || 0),
-        quantity: Number(item.quantity || 1),
-        cost: Number(item.cost || 0) // 🔥 CRITICAL FOR TAXES
-      }))
+    await order.save()
 
-      /* ================= TOTAL ================= */
-      const total = (session.amount_total || 0) / 100
+    console.log("💰 WEBHOOK PAYMENT CONFIRMED:", orderId)
 
-      /* ================= CREATE ORDER ================= */
-      const newOrder = await Order.create({
-        type: "order",
-        customerName: session.metadata?.customerName || "Store Order",
-        email: session.customer_email || "",
-        items: formattedItems,
-        total,
-        status: "pending",
-        stripeSessionId: session.id,
-
-        timeline: [
-          {
-            status: "pending",
-            date: new Date()
-          }
-        ]
-      })
-
-      console.log("✅ ORDER CREATED:", newOrder._id)
-
-      /* ================= REALTIME UPDATE ================= */
-      const io = req.app.get("io")
-      if (io) {
-        io.emit("jobUpdated")
-      }
-
-    } catch (err) {
-      console.error("❌ ORDER CREATION ERROR:", err)
+    /* 🔥 SEND EMAIL */
+    if (order.email) {
+      await sendOrderStatusEmail(
+        order.email,
+        "paid",
+        order._id,
+        order
+      )
     }
   }
 
-  res.json({ received: true })
+  res.sendStatus(200)
 })
 
 export default router

@@ -1,18 +1,13 @@
 {
   "name": "signavi-backend",
   "version": "1.0.0",
-  "description": "",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "-": "^0.0.1",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.9.0",
@@ -27,9 +22,9 @@
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
     "nodemailer": "^8.0.3",
+    "openai": "^6.32.0",
     "pdfkit": "^0.18.0",
     "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3",
     "stripe": "^20.4.1"
   },
   "devDependencies": {

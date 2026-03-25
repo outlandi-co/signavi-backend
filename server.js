@@ -41,7 +41,7 @@ const app = express()
 
 /* ================= DEBUG ================= */
 app.use((req, res, next) => {
-  console.log(`🔥 ${req.method} ${req.url}`)
+  console.log(`🔥 ${req.method} ${req.originalUrl}`)
   next()
 })
 
@@ -63,11 +63,12 @@ app.use(cors({
   credentials: true
 }))
 
-/* ================= STRIPE WEBHOOK ================= */
+/* ================= STRIPE WEBHOOK (RAW BODY FIRST) ================= */
+/* ⚠️ MUST come BEFORE express.json() */
 app.use("/api/webhook", express.raw({ type: "application/json" }))
 
 /* ================= NORMAL MIDDLEWARE ================= */
-app.use(express.json())
+app.use(express.json({ limit: "10mb" })) // 🔥 prevents large upload crash
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
@@ -75,7 +76,7 @@ app.use(cookieParser())
 const uploadsPath = path.join(__dirname, "uploads")
 
 if (!fs.existsSync(uploadsPath)) {
-  fs.mkdirSync(uploadsPath)
+  fs.mkdirSync(uploadsPath, { recursive: true })
   console.log("📁 Created uploads folder")
 }
 
@@ -88,7 +89,7 @@ app.use("/api/webhook", webhookRoutes)
 app.use("/api/stripe", stripeRoutes)
 app.use("/api/products", productRoutes)
 app.use("/api/checkout", checkoutRoutes)
-app.use("/api/orders", orderRoutes) // 🔥 YOUR EMAIL ROUTE LIVES HERE
+app.use("/api/orders", orderRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
@@ -131,9 +132,13 @@ io.on("connection", (socket) => {
 /* ================= START ================= */
 async function startServer() {
   try {
+    if (!process.env.MONGO_URI) {
+      throw new Error("❌ MONGO_URI missing in .env")
+    }
+
     await mongoose.connect(process.env.MONGO_URI, {
-  dbName: "signavi_studio"
-})
+      dbName: "signavi_studio"
+    })
 
     console.log("✅ MongoDB connected")
 
@@ -155,7 +160,7 @@ async function startServer() {
     }, 1000 * 60 * 10)
 
   } catch (error) {
-    console.error("❌ MongoDB connection error:", error)
+    console.error("❌ SERVER START ERROR:", error)
     process.exit(1)
   }
 }
