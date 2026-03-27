@@ -5,6 +5,7 @@ import fs from "fs"
 import Order from "../models/Order.js"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
+import { Parser } from "json2csv"
 
 const router = express.Router()
 
@@ -50,7 +51,6 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       ]
     })
 
-    console.log("✅ ORDER CREATED:", newOrder._id)
     res.status(201).json(newOrder)
 
   } catch (err) {
@@ -62,13 +62,9 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 /* ================= STATUS ================= */
 router.patch("/:id/status", async (req, res) => {
   try {
-    const { status, trackingNumber, trackingLink, price, finalPrice } = req.body
+    const { status, price, finalPrice, trackingNumber, trackingLink } = req.body
 
-    console.log("🔥 STATUS UPDATE:", {
-      id: req.params.id,
-      status,
-      price
-    })
+    console.log("🔥 STATUS UPDATE:", req.params.id, status)
 
     let order = await Order.findById(req.params.id)
 
@@ -95,7 +91,6 @@ router.patch("/:id/status", async (req, res) => {
 
       await order.save()
 
-      /* ================= STRIPE ================= */
       let checkoutUrl = null
 
       if (status === "payment_required") {
@@ -113,71 +108,94 @@ router.patch("/:id/status", async (req, res) => {
         }
       }
 
-      /* ================= EMAIL ================= */
       if (order.email && ["payment_required", "paid", "shipped"].includes(status)) {
-        try {
-          await sendOrderStatusEmail(
-            order.email,
-            status,
-            order._id,
-            {
-              ...order.toObject(),
-              checkoutUrl
-            }
-          )
-        } catch (err) {
-          console.error("❌ EMAIL ERROR:", err)
-        }
+        await sendOrderStatusEmail(
+          order.email,
+          status,
+          order._id,
+          {
+            ...order.toObject(),
+            checkoutUrl
+          }
+        )
       }
 
       req.app.get("io")?.emit("jobUpdated")
       return res.json(order)
     }
 
-    /* ================= QUOTE ================= */
+    /* ================= QUOTE → ORDER ================= */
     let quote = await Quote.findById(req.params.id)
 
     if (quote) {
 
-      if (!quote.timeline) quote.timeline = []
-
-      if (status) {
-        quote.status = status
-        quote.timeline.push({ status, date: new Date() })
-      }
-
-      if (price !== undefined) quote.price = Number(price)
-      if (finalPrice !== undefined) quote.finalPrice = Number(finalPrice)
-
-      await quote.save()
+      console.log("🔄 CONVERTING QUOTE → ORDER")
 
       if (status === "payment_required") {
 
+        if (!price || price <= 0) {
+          return res.status(400).json({
+            message: "Price required before sending payment"
+          })
+        }
+
         const newOrder = await Order.create({
-          customerName: String(quote.customerName || "Unknown Customer").trim(),
+          customerName: quote.customerName || "Unknown Customer",
           email: quote.email || "",
-          quantity: Number(quote.quantity) || 1,
+          quantity: quote.quantity || 1,
           printType: quote.printType || "screenprint",
           artwork: quote.artwork || null,
 
-          price: Number(price) || 0,
-          finalPrice: Number(finalPrice || price) || 0,
+          price: Number(price),
+          finalPrice: Number(finalPrice || price),
 
-          items: [],
+          items: quote.items || [],
 
           source: "quote",
           status: "payment_required",
 
           timeline: [
-            { status: "payment_required", date: new Date() }
+            { status: "payment_required", date: new Date(), note: "Converted from quote" }
           ]
         })
 
+        /* 🔥 STRIPE */
+        let checkoutUrl = null
+
+        try {
+          const response = await fetch(
+            `http://localhost:5050/api/stripe/create-checkout-session/${newOrder._id}`,
+            { method: "POST" }
+          )
+
+          const data = await response.json()
+          checkoutUrl = data?.url || null
+
+        } catch (err) {
+          console.error("⚠️ Stripe failed:", err.message)
+        }
+
+        /* 🔥 EMAIL */
+        if (newOrder.email) {
+          await sendOrderStatusEmail(
+            newOrder.email,
+            "payment_required",
+            newOrder._id,
+            {
+              ...newOrder.toObject(),
+              checkoutUrl
+            }
+          )
+        }
+
+        /* 🔥 DELETE OLD QUOTE (optional but recommended) */
+        await Quote.findByIdAndDelete(quote._id)
+
         req.app.get("io")?.emit("jobUpdated")
+
         return res.json(newOrder)
       }
 
-      req.app.get("io")?.emit("jobUpdated")
       return res.json(quote)
     }
 
@@ -188,30 +206,17 @@ router.patch("/:id/status", async (req, res) => {
     res.status(500).json({ message: err.message })
   }
 })
-
 /* ================= SAVE INVOICE ================= */
 router.patch("/:id/invoice", async (req, res) => {
   try {
     const { items, total } = req.body
 
-    console.log("🧾 INVOICE REQUEST:", req.params.id)
-
     const order = await Order.findById(req.params.id)
 
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
+    if (!order) return res.status(404).json({ message: "Order not found" })
 
     if (order.status === "paid") {
-      return res.status(400).json({
-        message: "Invoice locked after payment"
-      })
-    }
-
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({
-        message: "Invoice must have items"
-      })
+      return res.status(400).json({ message: "Invoice locked" })
     }
 
     const cleanItems = items.map(item => ({
@@ -221,20 +226,10 @@ router.patch("/:id/invoice", async (req, res) => {
     }))
 
     order.items = cleanItems
-    order.price = Number(total) || 0
-    order.finalPrice = Number(total) || 0
-
-    if (!order.timeline) order.timeline = []
-
-    order.timeline.push({
-      status: "invoice_updated",
-      date: new Date(),
-      note: "Invoice saved"
-    })
+    order.price = total
+    order.finalPrice = total
 
     await order.save()
-
-    console.log("✅ INVOICE SAVED:", order._id)
 
     req.app.get("io")?.emit("jobUpdated")
 
@@ -242,6 +237,75 @@ router.patch("/:id/invoice", async (req, res) => {
 
   } catch (err) {
     console.error("❌ INVOICE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= AUTO ARCHIVE ================= */
+router.patch("/auto-archive", async (req, res) => {
+  try {
+    const days = Number(req.body.days || 7)
+
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - days)
+
+    const result = await Order.updateMany(
+      {
+        status: "shipped",
+        updatedAt: { $lt: cutoff }
+      },
+      {
+        $set: { status: "archive" }
+      }
+    )
+
+    res.json({ archived: result.modifiedCount })
+
+  } catch (err) {
+    console.error("❌ AUTO ARCHIVE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= SALES ================= */
+router.get("/sales", async (req, res) => {
+  try {
+    const orders = await Order.find({
+      status: { $in: ["paid", "shipped"] }
+    })
+
+    const totalRevenue = orders.reduce((sum, o) => sum + (o.finalPrice || 0), 0)
+
+    res.json({
+      totalRevenue,
+      totalOrders: orders.length
+    })
+
+  } catch (err) {
+    console.error("❌ SALES ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= EXPORT ================= */
+router.get("/export", async (req, res) => {
+  try {
+    const orders = await Order.find({
+      status: { $in: ["paid", "shipped"] }
+    }).lean()
+
+    const parser = new Parser({
+      fields: ["customerName", "email", "finalPrice", "status", "createdAt"]
+    })
+
+    const csv = parser.parse(orders)
+
+    res.header("Content-Type", "text/csv")
+    res.attachment("sales.csv")
+    res.send(csv)
+
+  } catch (err) {
+    console.error("❌ EXPORT ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
