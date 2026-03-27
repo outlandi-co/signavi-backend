@@ -6,29 +6,60 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 dotenv.config()
 
-console.log("🔥 STRIPE ROUTES LOADED") // 🔥 DEBUG
+console.log("🔥 STRIPE ROUTES LOADED")
 
 const router = express.Router()
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2023-10-16"
+})
+
+const FRONTEND_URL = "http://localhost:5173"
 
 /* ================= CREATE CHECKOUT ================= */
 router.post("/create-checkout-session/:id", async (req, res) => {
   try {
-    console.log("🔥 HIT STRIPE ROUTE:", req.params.id)
-
     const { id } = req.params
 
+    /* 🔥 ONLY ORDERS (NO QUOTES ANYMORE) */
     const order = await Order.findById(id)
 
     if (!order) {
+      console.log("❌ ORDER NOT FOUND:", id)
       return res.status(404).json({ message: "Order not found" })
     }
 
-    const amount = Math.round((order.finalPrice || order.price || 0) * 100)
+    /* 🔥 ENFORCE PAYMENT STAGE */
+    if (order.status !== "payment_required") {
+      return res.status(400).json({
+        message: "❌ Order is not ready for payment"
+      })
+    }
+
+    /* ================= SAFE AMOUNT ================= */
+    const baseAmount = Number(order.finalPrice || order.price || 0)
+
+    console.log("💵 ORDER PRICE:", {
+      price: order.price,
+      finalPrice: order.finalPrice,
+      parsed: baseAmount
+    })
+
+    if (!baseAmount || baseAmount <= 0) {
+      return res.status(400).json({
+        message: "❌ Price not set. Please approve first."
+      })
+    }
+
+    const amount = Math.round(baseAmount * 100)
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       mode: "payment",
+
+      metadata: {
+        orderId: order._id.toString()
+      },
 
       line_items: [
         {
@@ -43,9 +74,11 @@ router.post("/create-checkout-session/:id", async (req, res) => {
         }
       ],
 
-      success_url: `http://localhost:5050/api/stripe/success?orderId=${order._id}`,
-      cancel_url: `http://localhost:5173/cancel`
+      success_url: `${FRONTEND_URL}/success/${order._id}`,
+      cancel_url: `${FRONTEND_URL}/cancel`
     })
+
+    console.log("✅ STRIPE SESSION:", session.url)
 
     res.json({ url: session.url })
 
@@ -55,41 +88,88 @@ router.post("/create-checkout-session/:id", async (req, res) => {
   }
 })
 
-/* ================= SUCCESS ================= */
-router.get("/success", async (req, res) => {
+/* ================= WEBHOOK ================= */
+router.post("/webhook", async (req, res) => {
+  console.log("🌐 WEBHOOK HIT")
+
+  const sig = req.headers["stripe-signature"]
+
+  let event
+
   try {
-    const { orderId } = req.query
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    )
 
-    const order = await Order.findById(orderId)
-
-    if (!order) {
-      return res.status(404).send("Order not found")
-    }
-
-    order.status = "paid"
-    order.timeline.push({
-      status: "paid",
-      date: new Date()
-    })
-
-    await order.save()
-
-    console.log("💰 PAYMENT SUCCESS:", orderId)
-
-    if (order.email) {
-      await sendOrderStatusEmail(
-        order.email,
-        "paid",
-        order._id,
-        order
-      )
-    }
-
-    res.redirect("http://localhost:5173/success")
+    console.log("🔥 EVENT:", event.type)
 
   } catch (err) {
-    console.error("❌ SUCCESS ERROR:", err)
-    res.status(500).send("Payment success error")
+    console.error("❌ SIGNATURE ERROR:", err.message)
+    return res.status(400).send("Webhook Error")
+  }
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object
+
+      const orderId = session.metadata?.orderId
+
+      console.log("💰 PAYMENT SUCCESS:", orderId)
+
+      if (!orderId) return res.sendStatus(200)
+
+      const order = await Order.findById(orderId)
+
+      if (!order) {
+        console.log("❌ ORDER NOT FOUND:", orderId)
+        return res.sendStatus(200)
+      }
+
+      if (order.status === "paid") {
+        console.log("⚠️ ALREADY PAID:", orderId)
+        return res.sendStatus(200)
+      }
+
+      /* 🔥 SAFE TIMELINE */
+      if (!order.timeline) order.timeline = []
+
+      /* ================= UPDATE ================= */
+      order.status = "paid"
+
+      order.timeline.push({
+        status: "paid",
+        date: new Date()
+      })
+
+      await order.save()
+
+      console.log("✅ ORDER MARKED AS PAID:", orderId)
+
+      /* ================= EMAIL ================= */
+      if (order.email) {
+        console.log("📧 SENDING PAID EMAIL:", order.email)
+
+        await sendOrderStatusEmail(
+          order.email,
+          "paid",
+          orderId,
+          order
+        )
+
+        console.log("✅ EMAIL SENT")
+      }
+
+      /* 🔥 LIVE UPDATE */
+      req.app.get("io")?.emit("jobUpdated")
+    }
+
+    res.sendStatus(200)
+
+  } catch (err) {
+    console.error("❌ WEBHOOK ERROR:", err)
+    res.sendStatus(500)
   }
 })
 

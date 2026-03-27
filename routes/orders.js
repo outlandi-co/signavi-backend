@@ -1,108 +1,224 @@
 import express from "express"
+import multer from "multer"
+import path from "path"
+import fs from "fs"
 import Order from "../models/Order.js"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* ================= STATUS UPDATE ================= */
-router.patch("/:id/status", async (req, res) => {
+/* ================= MULTER ================= */
+const uploadPath = path.resolve("uploads")
+
+if (!fs.existsSync(uploadPath)) {
+  fs.mkdirSync(uploadPath, { recursive: true })
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadPath),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + "-" + file.originalname)
+})
+
+const upload = multer({ storage })
+
+/* ================= CREATE ORDER ================= */
+router.post("/", upload.single("artwork"), async (req, res) => {
   try {
-    const { status, trackingNumber, trackingLink } = req.body
 
-    let order = await Order.findById(req.params.id)
+    const name = req.body.customerName || req.body.name || "Unknown Customer"
 
-    if (!order) {
-      const quote = await Quote.findById(req.params.id)
-      if (!quote) return res.status(404).json({ message: "Not found" })
+    const newOrder = await Order.create({
+      customerName: String(name).trim(),
+      email: req.body.email || "",
+      quantity: Number(req.body.quantity) || 1,
+      printType: req.body.printType || "screenprint",
+      artwork: req.file ? req.file.filename : null,
 
-      const updatedQuote = await Quote.findByIdAndUpdate(
-        req.params.id,
-        {
-          status,
-          trackingNumber,
-          trackingLink,
-          $push: { timeline: { status, date: new Date() } }
-        },
-        { returnDocument: "after" }
-      )
+      source: req.body.source || "store",
 
-      if (updatedQuote?.email) {
-        await sendOrderStatusEmail(
-          updatedQuote.email,
-          status,
-          updatedQuote._id,
-          updatedQuote
-        )
-      }
+      price: Number(req.body.price) || 0,
+      finalPrice: Number(req.body.finalPrice) || 0,
 
-      req.app.get("io")?.emit("jobUpdated")
-      return res.json(updatedQuote)
-    }
+      status: "pending",
 
-    const updatedOrder = await Order.findByIdAndUpdate(
-      req.params.id,
-      {
-        status,
-        trackingNumber,
-        trackingLink,
-        $push: { timeline: { status, date: new Date() } }
-      },
-      { returnDocument: "after" }
-    )
+      timeline: [
+        { status: "pending", date: new Date(), note: "Order created" }
+      ]
+    })
 
-    if (updatedOrder?.email) {
-      await sendOrderStatusEmail(
-        updatedOrder.email,
-        status,
-        updatedOrder._id,
-        updatedOrder
-      )
-    }
-
-    req.app.get("io")?.emit("jobUpdated")
-
-    res.json(updatedOrder)
+    console.log("✅ ORDER CREATED:", newOrder._id)
+    res.status(201).json(newOrder)
 
   } catch (err) {
-    console.error("❌ STATUS ERROR:", err)
+    console.error("❌ CREATE ORDER ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= APPROVE VIA EMAIL ================= */
-router.get("/approve/:id", async (req, res) => {
+/* ================= STATUS ================= */
+router.patch("/:id/status", async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id)
+    const { status, trackingNumber, trackingLink, price, finalPrice } = req.body
 
-    if (!order) return res.status(404).send("Order not found")
+    console.log("🔥 STATUS UPDATE:", {
+      id: req.params.id,
+      status,
+      price
+    })
 
-    order.status = "paid"
-    order.timeline.push({ status: "paid", date: new Date() })
+    let order = await Order.findById(req.params.id)
 
-    await order.save()
+    /* ================= ORDER ================= */
+    if (order) {
 
-    if (order.email) {
-      await sendOrderStatusEmail(
-        order.email,
-        "paid",
-        order._id,
-        order
-      )
+      if (status === "payment_required" && (!price || price <= 0)) {
+        return res.status(400).json({
+          message: "Price required before sending payment"
+        })
+      }
+
+      if (!order.timeline) order.timeline = []
+
+      if (status) {
+        order.status = status
+        order.timeline.push({ status, date: new Date() })
+      }
+
+      if (price !== undefined) order.price = Number(price)
+      if (finalPrice !== undefined) order.finalPrice = Number(finalPrice)
+      if (trackingNumber !== undefined) order.trackingNumber = trackingNumber
+      if (trackingLink !== undefined) order.trackingLink = trackingLink
+
+      await order.save()
+
+      /* ================= SAFE STRIPE ================= */
+      let checkoutUrl = null
+
+      if (status === "payment_required") {
+        try {
+          const response = await fetch(
+            `http://localhost:5050/api/stripe/create-checkout-session/${order._id}`,
+            { method: "POST" }
+          )
+
+          const data = await response.json()
+          checkoutUrl = data?.url || null
+
+          console.log("💳 STRIPE LINK:", checkoutUrl)
+
+        } catch (err) {
+          console.error("⚠️ Stripe failed (safe):", err.message)
+        }
+      }
+
+      /* ================= EMAIL ================= */
+      if (order.email && ["payment_required", "paid", "shipped"].includes(status)) {
+        try {
+          await sendOrderStatusEmail(
+            order.email,
+            status,
+            order._id,
+            {
+              ...order.toObject(),
+              checkoutUrl
+            }
+          )
+
+          console.log("📧 EMAIL SENT:", status)
+
+        } catch (err) {
+          console.error("❌ EMAIL ERROR:", err)
+        }
+      }
+
+      req.app.get("io")?.emit("jobUpdated")
+      return res.json(order)
     }
 
-    req.app.get("io")?.emit("jobUpdated")
+    /* ================= QUOTE ================= */
+    let quote = await Quote.findById(req.params.id)
 
-    res.send(`
-      <div style="text-align:center;margin-top:50px;font-family:Arial;">
-        <h1>✅ Payment Confirmed</h1>
-        <p>Your order has been processed.</p>
-      </div>
-    `)
+    if (quote) {
+
+      if (!quote.timeline) quote.timeline = []
+
+      if (status) {
+        quote.status = status
+        quote.timeline.push({ status, date: new Date() })
+      }
+
+      if (price !== undefined) quote.price = Number(price)
+      if (finalPrice !== undefined) quote.finalPrice = Number(finalPrice)
+
+      await quote.save()
+
+      /* 🔥 CONVERT QUOTE → ORDER */
+      if (status === "payment_required") {
+
+        const newOrder = await Order.create({
+          customerName: String(quote.customerName || "Unknown Customer").trim(),
+          email: quote.email || "",
+          quantity: Number(quote.quantity) || 1,
+          printType: quote.printType || "screenprint",
+          artwork: quote.artwork || null,
+
+          price: Number(price) || 0,
+          finalPrice: Number(finalPrice || price) || 0,
+
+          source: "quote",
+          status: "payment_required",
+
+          timeline: [
+            { status: "payment_required", date: new Date() }
+          ]
+        })
+
+        let checkoutUrl = null
+
+        try {
+          const response = await fetch(
+            `http://localhost:5050/api/stripe/create-checkout-session/${newOrder._id}`,
+            { method: "POST" }
+          )
+
+          const data = await response.json()
+          checkoutUrl = data?.url || null
+
+        } catch (err) {
+          console.error("⚠️ Stripe failed:", err.message)
+        }
+
+        if (newOrder.email) {
+          try {
+            await sendOrderStatusEmail(
+              newOrder.email,
+              "payment_required",
+              newOrder._id,
+              {
+                ...newOrder.toObject(),
+                checkoutUrl
+              }
+            )
+          } catch (err) {
+            console.error("❌ EMAIL ERROR:", err)
+          }
+        }
+
+        req.app.get("io")?.emit("jobUpdated")
+        return res.json(newOrder)
+      }
+
+      req.app.get("io")?.emit("jobUpdated")
+      return res.json(quote)
+    }
+
+    return res.status(404).json({ message: "Not found" })
 
   } catch (err) {
-    console.error("❌ APPROVE ROUTE ERROR:", err)
-    res.status(500).send("Server error")
+    console.error("❌ STATUS ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 

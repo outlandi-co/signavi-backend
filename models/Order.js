@@ -2,66 +2,44 @@ import mongoose from "mongoose"
 
 const orderSchema = new mongoose.Schema({
 
-  customerName: { type: String, default: "Store Order" },
+  customerName: { type: String, default: "Unknown" },
   email: { type: String, default: "" },
-  message: { type: String, default: "" },
-
-  shippingAddress: {
-    name: String,
-    street: String,
-    city: String,
-    state: String,
-    zip: String,
-    country: String
-  },
 
   quantity: { type: Number, default: 1 },
-  items: { type: Array, default: [] },
+  printType: { type: String, default: "screenprint" },
+  artwork: { type: String, default: null },
+
+  price: { type: Number, default: 0 },
+  finalPrice: { type: Number, default: 0 },
 
   source: {
     type: String,
-    enum: ["quote", "store"],
+    enum: ["store", "quote"],
     default: "store"
   },
 
-  price: { type: Number, default: 0 },
-  shippingCost: { type: Number, default: 0 },
-  finalPrice: { type: Number, default: 0 },
-
-  approvalStatus: {
-    type: String,
-    enum: ["pending", "approved", "denied"],
-    default: "pending"
-  },
-
-  artwork: { type: String, default: null },
-
-  /* 🔥 FIXED STATUS ENUM */
   status: {
     type: String,
     enum: [
       "pending",
-      "approved",
-      "artwork_sent", // ✅ needed for email approval
+      "payment_required",
+      "paid",
       "printing",
-      "ready",        // ✅ needed for production flow
-      "shipping",
+      "ready",
       "shipped",
-      "denied",
-      "paid"          // ✅ needed for payment confirmation
+      "denied"
     ],
     default: "pending"
   },
 
   trackingNumber: { type: String, default: "" },
   trackingLink: { type: String, default: "" },
-  shippedAt: Date,
 
   timeline: [
     {
       status: String,
-      note: String,
-      date: { type: Date, default: Date.now }
+      date: { type: Date, default: Date.now },
+      note: String
     }
   ]
 
