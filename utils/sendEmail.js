@@ -55,9 +55,7 @@ const generateInvoicePDF = (order = {}) => {
           const qty = Number(item.quantity) || 1
           const price = Number(item.price) || 0
 
-          doc.text(
-            `${item.name || "Item"} | Qty: ${qty} | $${price.toFixed(2)}`
-          )
+          doc.text(`${item.name || "Item"} | Qty: ${qty} | $${price.toFixed(2)}`)
         })
       }
 
@@ -81,81 +79,121 @@ const generateInvoicePDF = (order = {}) => {
   })
 }
 
+/* ================= TABLE ================= */
+const buildInvoiceTable = (items = []) => {
+  if (!items.length) {
+    return `<p style="text-align:center;">No item details provided</p>`
+  }
+
+  return `
+    <table style="width:100%;border-collapse:collapse;margin-top:20px;color:white;">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:8px;border-bottom:2px solid #666;">Item</th>
+          <th style="text-align:center;padding:8px;border-bottom:2px solid #666;">Qty</th>
+          <th style="text-align:right;padding:8px;border-bottom:2px solid #666;">Price</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map(item => {
+          const qty = Number(item.quantity) || 1
+          const price = Number(item.price) || 0
+
+          return `
+            <tr>
+              <td style="padding:8px;border-bottom:1px solid #444;">
+                ${item.name || "Item"}
+              </td>
+              <td style="padding:8px;border-bottom:1px solid #444;text-align:center;">
+                ${qty}
+              </td>
+              <td style="padding:8px;border-bottom:1px solid #444;text-align:right;">
+                $${price.toFixed(2)}
+              </td>
+            </tr>
+          `
+        }).join("")}
+      </tbody>
+    </table>
+  `
+}
+
 /* ================= TEMPLATE ================= */
 const buildEmailTemplate = ({
   status,
   orderId,
   total,
-  checkoutUrl
+  checkoutUrl,
+  items
 }) => {
 
   const fallbackLink = `${FRONTEND_URL}/checkout/${orderId}`
   const paymentLink = checkoutUrl || fallbackLink
 
-  let actionSection = ""
-  let paidSection = ""
+  const invoiceTable = buildInvoiceTable(items)
 
-  /* 💳 PAYMENT BUTTON (ONLY WHEN NEEDED) */
+  let actionSection = ""
+  let statusSection = ""
+
+  /* 🔥 ALWAYS SHOW BUTTON WHEN PAYMENT REQUIRED */
   if (status === "payment_required") {
     actionSection = `
-      <div style="text-align:center;margin-bottom:20px;">
-        <a href="${paymentLink}"
-          target="_blank"
+      <div style="text-align:center;margin-bottom:25px;">
+        <a href="${paymentLink}" target="_blank"
           style="
             display:inline-block;
-            padding:16px 28px;
-            background:#16a34a;
+            padding:18px 32px;
+            background:#22c55e;
             color:white;
-            border-radius:8px;
+            border-radius:10px;
             text-decoration:none;
+            font-size:18px;
             font-weight:bold;
-            font-size:16px;
           ">
           💳 Pay Now
         </a>
       </div>
     `
-  }
 
-  /* 🧾 PAYMENT REQUIRED */
-  if (status === "payment_required") {
-    paidSection = `
+    statusSection = `
       <h2 style="text-align:center;color:#f59e0b;">
         Invoice Ready: $${Number(total || 0).toFixed(2)}
       </h2>
       <p style="text-align:center;">
-        Please review your invoice and complete payment above.
+        Please review your invoice below and complete payment above.
       </p>
     `
   }
 
-  /* ✅ PAID */
   if (status === "paid") {
-    paidSection = `
+    statusSection = `
       <h2 style="text-align:center;color:#10b981;">
         Payment Received: $${Number(total || 0).toFixed(2)}
       </h2>
       <p style="text-align:center;">
-        Thank you! Your order is now in production.
-      </p>
-      <p style="text-align:center;">
-        Your invoice is attached for your records.
+        Your order is now in production.
       </p>
     `
   }
 
   return `
     <div style="background:#020617;padding:25px;color:white;font-family:Arial;">
-
+      
       ${actionSection}
 
-      <h1 style="text-align:center;margin-top:10px;">
+      <h1 style="text-align:center;">
         ${(status || "UPDATE").toUpperCase()}
       </h1>
 
       <p style="text-align:center;">Order: ${orderId}</p>
 
-      ${paidSection}
+      ${statusSection}
+
+      ${invoiceTable}
+
+      <h3 style="text-align:right;margin-top:20px;">
+        Total: $${Number(total || 0).toFixed(2)}
+      </h3>
 
     </div>
   `
@@ -169,17 +207,27 @@ export const sendOrderStatusEmail = async (
   orderData = {}
 ) => {
   try {
-    if (!email) {
-      console.log("⚠️ No email provided")
-      return
-    }
+    if (!email) return
 
     console.log("📧 Sending email to:", email)
 
     const safeOrder = {
       _id: orderId,
       customerName: orderData?.customerName || "Customer",
-      items: orderData?.items || [],
+
+      items: orderData?.items?.length
+        ? orderData.items
+        : [
+            {
+              name: orderData?.printType || "Custom Order",
+              quantity: Number(orderData?.quantity) || 1,
+              price:
+                Number(orderData?.price) ||
+                Number(orderData?.finalPrice) ||
+                0
+            }
+          ],
+
       total:
         Number(orderData?.total) ||
         Number(orderData?.finalPrice) ||
@@ -188,21 +236,13 @@ export const sendOrderStatusEmail = async (
 
     let attachments = []
 
-    /* 🔥 ATTACH INVOICE BEFORE + AFTER PAYMENT */
-    if (status === "paid" || status === "payment_required") {
-      try {
-        const filePath = await generateInvoicePDF(safeOrder)
+    if (["paid", "payment_required"].includes(status)) {
+      const filePath = await generateInvoicePDF(safeOrder)
 
-        attachments.push({
-          filename: `invoice-${orderId}.pdf`,
-          path: filePath
-        })
-
-        console.log("🧾 Invoice attached:", filePath)
-
-      } catch (err) {
-        console.error("❌ INVOICE ERROR:", err)
-      }
+      attachments.push({
+        filename: `invoice-${orderId}.pdf`,
+        path: filePath
+      })
     }
 
     await transporter.sendMail({
@@ -213,7 +253,8 @@ export const sendOrderStatusEmail = async (
         status,
         orderId,
         total: safeOrder.total,
-        checkoutUrl: orderData?.checkoutUrl
+        checkoutUrl: orderData?.checkoutUrl,
+        items: safeOrder.items
       }),
       attachments
     })
