@@ -20,7 +20,7 @@ export const createShippingLabel = async (order) => {
     }
 
     const addressTo = {
-      name: order.customerName || "Customer",
+      name: order.customerName,
       street1: order.address || "123 Customer St",
       city: order.city || "Merced",
       state: order.state || "CA",
@@ -29,11 +29,11 @@ export const createShippingLabel = async (order) => {
     }
 
     const parcel = {
-      length: "10",
-      width: "8",
-      height: "2",
+      length: String(order.length || 10),
+      width: String(order.width || 8),
+      height: String(order.height || 2),
       distance_unit: "in",
-      weight: "1",
+      weight: String(order.weight || 1),
       mass_unit: "lb"
     }
 
@@ -44,11 +44,15 @@ export const createShippingLabel = async (order) => {
       async: false
     })
 
-    const rate = shipment.rates?.[0]
+    /* 🔥 SELECT RATE BASED ON ORDER */
+    const rate = shipment.rates.find(r =>
+      r.provider.toUpperCase() === (order.carrier || "USPS") &&
+      r.servicelevel.name.toLowerCase().includes(
+        (order.serviceLevel || "").toLowerCase()
+      )
+    ) || shipment.rates[0]
 
-    if (!rate) {
-      throw new Error("No shipping rates returned")
-    }
+    if (!rate) throw new Error("No shipping rates found")
 
     const transaction = await shippoClient.transactions.create({
       rate: rate.object_id,
@@ -59,11 +63,14 @@ export const createShippingLabel = async (order) => {
     return {
       trackingNumber: transaction.tracking_number,
       trackingLink: transaction.tracking_url_provider,
-      labelUrl: transaction.label_url
+      labelUrl: transaction.label_url,
+      carrier: rate.provider,
+      service: rate.servicelevel.name,
+      cost: rate.amount
     }
 
   } catch (err) {
-    console.error("❌ SHIPPO ERROR:", err.message)
+    console.error("❌ SHIPPING ERROR:", err.message)
     throw err
   }
 }

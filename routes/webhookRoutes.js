@@ -9,8 +9,7 @@ dotenv.config()
 const router = express.Router()
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-/* ⚠️ IMPORTANT: RAW BODY REQUIRED */
-router.post("/", async (req, res) => {
+router.post("/", express.raw({ type: "application/json" }), async (req, res) => {
   const sig = req.headers["stripe-signature"]
 
   let event
@@ -22,51 +21,64 @@ router.post("/", async (req, res) => {
       process.env.STRIPE_WEBHOOK_SECRET
     )
   } catch (err) {
-    console.error("❌ WEBHOOK SIGNATURE ERROR:", err.message)
+    console.error("❌ WEBHOOK ERROR:", err.message)
     return res.status(400).send(`Webhook Error: ${err.message}`)
   }
 
-  /* ================= HANDLE EVENTS ================= */
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object
+  try {
 
-    const orderId = session.metadata?.orderId
+    /* ================= CHECKOUT COMPLETE ================= */
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object
+      const orderId = session.metadata?.orderId
 
-    if (!orderId) {
-      console.warn("⚠️ No orderId in metadata")
-      return res.sendStatus(200)
+      const order = await Order.findById(orderId)
+      if (!order) return res.sendStatus(200)
+
+      order.status = "paid"
+      order.stripeSessionId = session.id
+      order.stripePaymentIntentId = session.payment_intent
+      order.amountReceived = session.amount_total
+
+      order.timeline.push({
+        status: "paid",
+        date: new Date()
+      })
+
+      await order.save()
+
+      if (order.email) {
+        await sendOrderStatusEmail(order.email, "paid", order._id, order)
+      }
     }
 
-    const order = await Order.findById(orderId)
+    /* ================= CHARGE SUCCEEDED ================= */
+    if (event.type === "charge.succeeded") {
+      const charge = event.data.object
 
-    if (!order) {
-      console.warn("⚠️ Order not found:", orderId)
-      return res.sendStatus(200)
-    }
+      const order = await Order.findOne({
+        stripePaymentIntentId: charge.payment_intent
+      })
 
-    /* 🔥 MARK AS PAID (SECURE) */
-    order.status = "paid"
-    order.timeline.push({
-      status: "paid",
-      date: new Date()
-    })
+      if (!order) return res.sendStatus(200)
 
-    await order.save()
-
-    console.log("💰 WEBHOOK PAYMENT CONFIRMED:", orderId)
-
-    /* 🔥 SEND EMAIL */
-    if (order.email) {
-      await sendOrderStatusEmail(
-        order.email,
-        "paid",
-        order._id,
-        order
+      const balanceTx = await stripe.balanceTransactions.retrieve(
+        charge.balance_transaction
       )
-    }
-  }
 
-  res.sendStatus(200)
+      order.stripeChargeId = charge.id
+      order.stripeFee = balanceTx.fee
+      order.netAmount = balanceTx.net
+
+      await order.save()
+    }
+
+    res.sendStatus(200)
+
+  } catch (err) {
+    console.error("❌ WEBHOOK PROCESS ERROR:", err)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 export default router

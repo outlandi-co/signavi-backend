@@ -15,17 +15,13 @@ const orderSchema = new mongoose.Schema({
   price: { type: Number, default: 0 },
   finalPrice: { type: Number, default: 0 },
 
-  /* 🔥 INVOICE ITEMS */
-  items: {
-    type: [
-      {
-        name: { type: String, default: "" },
-        quantity: { type: Number, default: 1 },
-        price: { type: Number, default: 0 }
-      }
-    ],
-    default: []
-  },
+  items: [
+    {
+      name: { type: String, default: "" },
+      quantity: { type: Number, default: 1 },
+      price: { type: Number, default: 0 }
+    }
+  ],
 
   /* ================= SOURCE ================= */
   source: {
@@ -36,38 +32,57 @@ const orderSchema = new mongoose.Schema({
 
   /* ================= STATUS ================= */
   status: {
-  type: String,
-  enum: [
-    "pending",
-    "payment_required",
-    "paid",
-    "printing",
-    "ready",
-    "shipping",
-    "shipped",
-    "delivered", // 🔥 NEW
-    "archive",
-    "denied"
-  ],
-  default: "pending"
-},
+    type: String,
+    enum: [
+      "pending",
+      "payment_required",
+      "paid",
+      "printing",
+      "ready",
+      "shipping",
+      "shipped",
+      "delivered",
+      "archive",
+      "denied"
+    ],
+    default: "pending"
+  },
 
   /* ================= SHIPPING ================= */
   trackingNumber: { type: String, default: "" },
   trackingLink: { type: String, default: "" },
-  shippingLabel: { type: String, default: "" }, // 🔥 NEW
+  shippingLabel: { type: String, default: "" },
+
+  /* 🔥 NEW SHIPPING ENGINE */
+  weight: { type: Number, default: 1 },
+  length: { type: Number, default: 10 },
+  width: { type: Number, default: 8 },
+  height: { type: Number, default: 2 },
+
+  carrier: { type: String, default: "USPS" },
+  serviceLevel: { type: String, default: "Ground Advantage" },
 
   /* ================= TIMELINE ================= */
-  timeline: {
-    type: [
-      {
-        status: String,
-        date: { type: Date, default: Date.now },
-        note: String
-      }
-    ],
-    default: []
-  }
+  timeline: [
+    {
+      status: String,
+      date: { type: Date, default: Date.now },
+      note: String
+    }
+  ],
+
+  /* ================= STRIPE ================= */
+  stripePaymentIntentId: { type: String, default: "" },
+  stripeSessionId: { type: String, default: "" },
+  stripeChargeId: { type: String, default: "" },
+
+  /* ================= FINANCE ================= */
+  currency: { type: String, default: "usd" },
+  amountReceived: { type: Number, default: 0 },
+  amountRefunded: { type: Number, default: 0 },
+  stripeFee: { type: Number, default: 0 },
+  netAmount: { type: Number, default: 0 },
+  cogs: { type: Number, default: 0 }
 
 }, { timestamps: true })
 

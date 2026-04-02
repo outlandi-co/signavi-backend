@@ -12,10 +12,6 @@ import { fileURLToPath } from "url"
 /* ================= SERVICES ================= */
 import { checkAbandonedCarts } from "./services/abandonedCartService.js"
 
-/* ================= FIX __dirname ================= */
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
 /* ================= ROUTES ================= */
 import productRoutes from "./routes/products.js"
 import checkoutRoutes from "./routes/checkoutRoutes.js"
@@ -24,7 +20,6 @@ import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
 import stripeRoutes from "./routes/stripe.js"
 import cartRoutes from "./routes/cart.js"
-import analyticsRoutes from "./routes/analytics.js"
 import productionRoutes from "./routes/production.js"
 import exportOrdersRoutes from "./routes/exportOrders.js"
 import exportTaxesRoutes from "./routes/exportTaxes.js"
@@ -33,8 +28,13 @@ import quoteRoutes from "./routes/quotes.js"
 import shippingRoutes from "./routes/shipping.js"
 import aiPricingRoutes from "./routes/aiPricing.js"
 import abandonedRoutes from "./routes/abandoned.js"
+import expenseRoutes from "./routes/expenses.js"
 
 dotenv.config()
+
+/* ================= FIX __dirname ================= */
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 const app = express()
 
@@ -62,10 +62,10 @@ app.use(cors({
   credentials: true
 }))
 
-/* ================= STRIPE WEBHOOK ================= */
+/* ================= STRIPE WEBHOOK (RAW BODY FIRST) ================= */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }))
 
-/* ================= MIDDLEWARE ================= */
+/* ================= NORMAL MIDDLEWARE ================= */
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
@@ -85,9 +85,14 @@ app.use("/api/products", productRoutes)
 app.use("/api/checkout", checkoutRoutes)
 app.use("/api/orders", orderRoutes)
 app.use("/api/cart", cartRoutes)
+
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
-app.use("/api/analytics", analyticsRoutes)
+
+/* 🔥 EXPENSE SYSTEM */
+app.use("/api/expenses", expenseRoutes)
+
+/* 🔥 OTHER SYSTEMS */
 app.use("/api/production", productionRoutes)
 app.use("/api/quotes", quoteRoutes)
 app.use("/api/export-orders", exportOrdersRoutes)
@@ -105,7 +110,6 @@ app.get("/", (req, res) => {
 /* ================= SOCKET ================= */
 const server = http.createServer(app)
 
-/* 🔥 FIXED SOCKET CONFIG (NO transport restriction) */
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
@@ -113,12 +117,14 @@ const io = new Server(server, {
   }
 })
 
-/* 🔥 MAKE IO AVAILABLE TO ROUTES */
 app.set("io", io)
 
-/* 🔥 CONNECTION DEBUG */
 io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
+
+  socket.on("disconnect", () => {
+    console.log("🔴 Socket disconnected:", socket.id)
+  })
 })
 
 /* ================= START ================= */
@@ -143,7 +149,7 @@ async function startServer() {
     server.on("error", (err) => {
       if (err.code === "EADDRINUSE") {
         console.error(`❌ Port ${PORT} is already in use`)
-        console.log("👉 Run: kill -9 $(lsof -ti :" + PORT + ")")
+        console.log(`👉 Run: kill -9 $(lsof -ti :${PORT})`)
       } else {
         console.error("❌ Server error:", err)
       }
