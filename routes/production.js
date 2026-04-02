@@ -6,7 +6,6 @@ const router = express.Router()
 
 router.get("/", async (req, res) => {
   try {
-
     console.log("🔥 PRODUCTION ROUTE HIT")
 
     const orders = await Order.find().lean().sort({ createdAt: -1 })
@@ -17,126 +16,95 @@ router.get("/", async (req, res) => {
 
     const all = []
 
-    /* ================= SAFE BUILD ================= */
-
+    /* ================= BUILD ================= */
     for (const o of orders) {
-      try {
-        if (!o) continue
+      if (!o) continue
 
-        all.push({
-          _id: o._id,
-          customerName: o.customerName || "Unknown",
-          email: o.email || "",
-          quantity: o.quantity || 0,
-          printType: o.printType || "",
-          artwork: o.artwork || null,
-          price: o.price || 0,
-          finalPrice: o.finalPrice || 0,
-          status: o.status || "pending",
-          source: o.source || "store",
-          createdAt: o.createdAt,
-          type: "order"
-        })
-
-      } catch (err) {
-        console.error("❌ ORDER ERROR:", o?._id, err)
-      }
+      all.push({
+        _id: o._id,
+        customerName: o.customerName || "Unknown",
+        email: o.email || "",
+        quantity: o.quantity || 0,
+        printType: o.printType || "",
+        artwork: o.artwork || null,
+        price: o.price || 0,
+        finalPrice: o.finalPrice || 0,
+        status: o.status || "pending",
+        source: o.source || "store",
+        createdAt: o.createdAt,
+        type: "order"
+      })
     }
 
     for (const q of quotes) {
-      try {
-        if (!q) continue
+      if (!q) continue
 
-        all.push({
-          _id: q._id,
-          customerName: q.customerName || "Unknown",
-          email: q.email || "",
-          quantity: q.quantity || 0,
-          printType: q.printType || "",
-          artwork: q.artwork || null,
-          price: q.price || 0,
-          finalPrice: q.price || 0,
-          status: q.status || "pending",
-          source: "quote",
-          createdAt: q.createdAt,
-          type: "quote"
-        })
-
-      } catch (err) {
-        console.error("❌ QUOTE ERROR:", q?._id, err)
-      }
+      all.push({
+        _id: q._id,
+        customerName: q.customerName || "Unknown",
+        email: q.email || "",
+        quantity: q.quantity || 0,
+        printType: q.printType || "",
+        artwork: q.artwork || null,
+        price: q.price || 0,
+        finalPrice: q.price || 0,
+        status: q.status || "pending",
+        source: "quote",
+        createdAt: q.createdAt,
+        type: "quote"
+      })
     }
 
     /* ================= GROUP ================= */
-
     const grouped = {
-      quotes: [],
-      store: [],
+      pending: [],
+      artwork_sent: [],
       payment_required: [],
       production: [],
       shipped: [],
-      denied: []
+      denied: [],
+      archive: [],
+      quotes: []
     }
 
     for (const job of all) {
-      try {
-        if (!job) continue
+      if (!job) continue
 
-        console.log("🧪 ALL JOBS:", all)
-        const status = job.status || "pending"
-        const source = job.source || "store"
-
-        /* 📝 QUOTES */
-        if (job.type === "quote") {
-          grouped.quotes.push(job)
-          continue
-        }
-
-        /* 🛒 STORE ORDERS */
-        if (source === "store" && status === "pending") {
-          grouped.store.push(job)
-          continue
-        }
-
-        /* 💳 PAYMENT REQUIRED */
-        if (status === "payment_required") {
-          grouped.payment_required.push(job)
-          continue
-        }
-
-        /* 🏭 PRODUCTION */
-        if (["paid", "printing", "ready"].includes(status)) {
-          grouped.production.push(job)
-          continue
-        }
-
-        /* 🚚 SHIPPED */
-        if (status === "shipped") {
-          grouped.shipped.push(job)
-          continue
-        }
-
-        /* ❌ DENIED */
-        if (status === "denied") {
-          grouped.denied.push(job)
-          continue
-        }
-
-        /* fallback */
-        grouped.production.push(job)
-
-      } catch (err) {
-        console.error("⚠️ GROUP ERROR:", job?._id, err)
+      /* 📝 QUOTES */
+      if (job.type === "quote") {
+        grouped.quotes.push(job)
+        continue
       }
+
+      let status = job.status || "pending"
+
+      /* 🔥 FIXED STATUS MAPPING */
+      if (status === "paid") {
+        status = "production"
+      }
+
+      if (status === "shipping") {
+        status = "shipped" // 🔥 CRITICAL FIX
+      }
+
+      /* 🔥 SAFETY */
+      if (!grouped[status]) {
+        console.log("⚠️ Unknown status:", status)
+        status = "pending"
+      }
+
+      grouped[status].push(job)
     }
 
-    console.log("📊 GROUPED:", {
-      quotes: grouped.quotes.length,
-      store: grouped.store.length,
+    console.log("📊 GROUPED COUNTS:", {
+      pending: grouped.pending.length,
+      artwork_sent: grouped.artwork_sent.length,
       payment_required: grouped.payment_required.length,
       production: grouped.production.length,
       shipped: grouped.shipped.length,
-      denied: grouped.denied.length
+      denied: grouped.denied.length,
+      archive: grouped.archive.length,
+      quotes: grouped.quotes.length
     })
 
     res.json(grouped)

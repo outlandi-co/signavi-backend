@@ -65,12 +65,12 @@ app.use(cors({
 /* ================= STRIPE WEBHOOK ================= */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }))
 
-/* ================= NORMAL MIDDLEWARE ================= */
+/* ================= MIDDLEWARE ================= */
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
-/* ================= STATIC FILES ================= */
+/* ================= STATIC ================= */
 const uploadsPath = path.join(__dirname, "uploads")
 
 if (!fs.existsSync(uploadsPath)) {
@@ -94,11 +94,7 @@ app.use("/api/export-orders", exportOrdersRoutes)
 app.use("/api/export-taxes", exportTaxesRoutes)
 app.use("/api/production-sheet", productionSheetRoutes)
 app.use("/api/shipping", shippingRoutes)
-
-/* 🔥 AI PRICING ROUTE */
 app.use("/api/ai-pricing", aiPricingRoutes)
-console.log("🤖 AI Pricing ACTIVE")
-
 app.use("/api/abandoned", abandonedRoutes)
 
 /* ================= HEALTH ================= */
@@ -109,15 +105,20 @@ app.get("/", (req, res) => {
 /* ================= SOCKET ================= */
 const server = http.createServer(app)
 
+/* 🔥 FIXED SOCKET CONFIG (NO transport restriction) */
 const io = new Server(server, {
-  cors: { origin: allowedOrigins, credentials: true },
-  transports: ["websocket"]
+  cors: {
+    origin: allowedOrigins,
+    credentials: true
+  }
 })
 
+/* 🔥 MAKE IO AVAILABLE TO ROUTES */
 app.set("io", io)
 
+/* 🔥 CONNECTION DEBUG */
 io.on("connection", (socket) => {
-  console.log("🟢 Socket:", socket.id)
+  console.log("🟢 Socket connected:", socket.id)
 })
 
 /* ================= START ================= */
@@ -135,32 +136,19 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5050
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Running on ${PORT}`)
-})
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`)
+    })
 
-server.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    console.error(`❌ Port ${PORT} is already in use`)
-    process.exit(1)
-  } else {
-    throw err
-  }
-})
-
-    server
-      .listen(PORT, "0.0.0.0", () => {
-        console.log(`🚀 Server running on port ${PORT}`)
-      })
-      .on("error", (err) => {
-        if (err.code === "EADDRINUSE") {
-          console.error(`❌ Port ${PORT} is already in use`)
-          console.log("👉 Run: kill -9 $(lsof -ti :" + PORT + ")")
-        } else {
-          console.error("❌ Server error:", err)
-        }
-        process.exit(1)
-      })
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.error(`❌ Port ${PORT} is already in use`)
+        console.log("👉 Run: kill -9 $(lsof -ti :" + PORT + ")")
+      } else {
+        console.error("❌ Server error:", err)
+      }
+      process.exit(1)
+    })
 
     /* 🔁 BACKGROUND JOB */
     setInterval(() => {
@@ -180,5 +168,3 @@ mongoose.connection.on("error", (err) => {
 })
 
 startServer()
-
-export { io }

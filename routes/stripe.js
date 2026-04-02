@@ -21,7 +21,6 @@ router.post("/create-checkout-session/:id", async (req, res) => {
   try {
     const { id } = req.params
 
-    /* 🔥 ONLY ORDERS (NO QUOTES ANYMORE) */
     const order = await Order.findById(id)
 
     if (!order) {
@@ -29,8 +28,11 @@ router.post("/create-checkout-session/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔥 ENFORCE PAYMENT STAGE */
-    if (order.status !== "payment_required") {
+    /* 🔥 DEBUG LOG */
+    console.log("🧾 ORDER STATUS:", order.status)
+
+    /* 🔥 ALLOW MULTIPLE VALID STATES */
+    if (!["payment_required", "approved"].includes(order.status)) {
       return res.status(400).json({
         message: "❌ Order is not ready for payment"
       })
@@ -39,7 +41,7 @@ router.post("/create-checkout-session/:id", async (req, res) => {
     /* ================= SAFE AMOUNT ================= */
     const baseAmount = Number(order.finalPrice || order.price || 0)
 
-    console.log("💵 ORDER PRICE:", {
+    console.log("💵 FINAL CHECK:", {
       price: order.price,
       finalPrice: order.finalPrice,
       parsed: baseAmount
@@ -78,7 +80,7 @@ router.post("/create-checkout-session/:id", async (req, res) => {
       cancel_url: `${FRONTEND_URL}/cancel`
     })
 
-    console.log("✅ STRIPE SESSION:", session.url)
+    console.log("✅ STRIPE SESSION CREATED:", session.url)
 
     res.json({ url: session.url })
 
@@ -162,7 +164,7 @@ router.post("/webhook", async (req, res) => {
       }
 
       /* 🔥 LIVE UPDATE */
-      req.app.get("io")?.emit("jobUpdated")
+      req.app.get("io")?.emit("jobUpdated", order)
     }
 
     res.sendStatus(200)
