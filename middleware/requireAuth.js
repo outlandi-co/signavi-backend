@@ -1,38 +1,37 @@
 import jwt from "jsonwebtoken"
 
 export const requireAuth = (req, res, next) => {
-
-  let token
-
-  /* ================= GET TOKEN ================= */
-
-  // 1. Try Authorization header (PRIMARY)
-  const authHeader = req.headers.authorization
-
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    token = authHeader.split(" ")[1]
-  }
-
-  // 2. Fallback to cookies (optional support)
-  if (!token && req.cookies?.token) {
-    token = req.cookies.token
-  }
-
-  if (!token) {
-    return res.status(401).json({ error: "Unauthorized: No token" })
-  }
-
-  /* ================= VERIFY TOKEN ================= */
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET)
+    const authHeader = req.headers.authorization
+
+    if (!authHeader) {
+      return res.status(401).json({ error: "No token" })
+    }
+
+    const token = authHeader.split(" ")[1]
+
+    let decoded
+
+    /* 🔥 TRY JWT FIRST (ADMIN) */
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET)
+    } catch {
+      /* 🔥 FALLBACK: CUSTOMER BASE64 */
+      try {
+        decoded = JSON.parse(Buffer.from(token, "base64").toString())
+      } catch {
+        return res.status(401).json({ error: "Invalid token" })
+      }
+    }
 
     req.user = decoded
+
+    console.log("👤 AUTH USER:", decoded)
 
     next()
 
   } catch (err) {
-    console.error("AUTH ERROR:", err)
-    res.status(401).json({ error: "Invalid token" })
+    console.error("❌ AUTH ERROR:", err.message)
+    res.status(401).json({ error: "Unauthorized" })
   }
 }

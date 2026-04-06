@@ -25,6 +25,7 @@
     "nodemailer": "^8.0.3",
     "openai": "^6.32.0",
     "pdfkit": "^0.18.0",
+    "qrcode": "^1.5.4",
     "shippo": "^2.18.0",
     "socket.io": "^4.8.3",
     "stripe": "^20.4.1"

@@ -21,7 +21,7 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
       process.env.STRIPE_WEBHOOK_SECRET
     )
   } catch (err) {
-    console.error("❌ WEBHOOK ERROR:", err.message)
+    console.error("❌ WEBHOOK SIGNATURE ERROR:", err.message)
     return res.status(400).send(`Webhook Error: ${err.message}`)
   }
 
@@ -32,23 +32,54 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
       const session = event.data.object
       const orderId = session.metadata?.orderId
 
+      console.log("💰 PAYMENT COMPLETE:", session.id)
+
+      if (!orderId) {
+        console.log("⚠️ Missing orderId")
+        return res.sendStatus(200)
+      }
+
       const order = await Order.findById(orderId)
-      if (!order) return res.sendStatus(200)
+
+      if (!order) {
+        console.log("❌ Order not found:", orderId)
+        return res.sendStatus(200)
+      }
+
+      if (order.status === "paid") {
+        console.log("⚠️ Already processed")
+        return res.sendStatus(200)
+      }
+
+      if (!order.timeline) order.timeline = []
 
       order.status = "paid"
+      order.productionStatus = "queued"
+
       order.stripeSessionId = session.id
       order.stripePaymentIntentId = session.payment_intent
       order.amountReceived = session.amount_total
 
       order.timeline.push({
         status: "paid",
-        date: new Date()
+        date: new Date(),
+        note: "Payment received via Stripe"
       })
 
       await order.save()
 
+      console.log("✅ ORDER MARKED PAID:", orderId)
+
+      /* 🔥 REAL-TIME UPDATE */
+      req.app.get("io")?.emit("jobUpdated", order)
+
+      /* 🔥 EMAIL */
       if (order.email) {
-        await sendOrderStatusEmail(order.email, "paid", order._id, order)
+        try {
+          await sendOrderStatusEmail(order.email, "paid", order._id, order)
+        } catch (err) {
+          console.error("⚠️ Email failed:", err.message)
+        }
       }
     }
 
@@ -62,6 +93,8 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
 
       if (!order) return res.sendStatus(200)
 
+      if (order.stripeChargeId) return res.sendStatus(200)
+
       const balanceTx = await stripe.balanceTransactions.retrieve(
         charge.balance_transaction
       )
@@ -71,6 +104,8 @@ router.post("/", express.raw({ type: "application/json" }), async (req, res) => 
       order.netAmount = balanceTx.net
 
       await order.save()
+
+      console.log("💵 FEES STORED:", order._id)
     }
 
     res.sendStatus(200)

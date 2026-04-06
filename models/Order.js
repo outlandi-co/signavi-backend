@@ -37,8 +37,7 @@ const orderSchema = new mongoose.Schema({
       "pending",
       "payment_required",
       "paid",
-      "printing",
-      "ready",
+      "production",
       "shipping",
       "shipped",
       "delivered",
@@ -53,7 +52,6 @@ const orderSchema = new mongoose.Schema({
   trackingLink: { type: String, default: "" },
   shippingLabel: { type: String, default: "" },
 
-  /* 🔥 NEW SHIPPING ENGINE */
   weight: { type: Number, default: 1 },
   length: { type: Number, default: 10 },
   width: { type: Number, default: 8 },

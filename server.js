@@ -21,18 +21,16 @@ import logoutRoutes from "./routes/logout.js"
 import stripeRoutes from "./routes/stripe.js"
 import cartRoutes from "./routes/cart.js"
 import productionRoutes from "./routes/production.js"
-import exportOrdersRoutes from "./routes/exportOrders.js"
-import exportTaxesRoutes from "./routes/exportTaxes.js"
-import productionSheetRoutes from "./routes/productionSheet.js"
 import quoteRoutes from "./routes/quotes.js"
-import shippingRoutes from "./routes/shipping.js"
-import aiPricingRoutes from "./routes/aiPricing.js"
-import abandonedRoutes from "./routes/abandoned.js"
 import expenseRoutes from "./routes/expenses.js"
+import pricingRoutes from "./routes/pricing.js"
+
+/* 🔥 NEW */
+import customerRoutes from "./routes/customers.js"
 
 dotenv.config()
 
-/* ================= FIX __dirname ================= */
+/* ================= PATH FIX ================= */
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
@@ -45,75 +43,56 @@ app.use((req, res, next) => {
 })
 
 /* ================= CORS ================= */
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174"
-]
-
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true)
-    } else {
-      console.error("❌ CORS BLOCKED:", origin)
-      callback(new Error("CORS not allowed"))
-    }
-  },
+  origin: ["http://localhost:5173"],
   credentials: true
 }))
 
-/* ================= STRIPE WEBHOOK (RAW BODY FIRST) ================= */
+/* ================= STRIPE ================= */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }))
 
-/* ================= NORMAL MIDDLEWARE ================= */
-app.use(express.json({ limit: "10mb" }))
+/* ================= MIDDLEWARE ================= */
+app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
 /* ================= STATIC ================= */
 const uploadsPath = path.join(__dirname, "uploads")
+const labelsPath = path.join(__dirname, "labels")
 
 if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true })
 }
 
+if (!fs.existsSync(labelsPath)) {
+  fs.mkdirSync(labelsPath, { recursive: true })
+}
+
 app.use("/uploads", express.static(uploadsPath))
+app.use("/api/download", express.static(labelsPath))
 
 /* ================= ROUTES ================= */
-app.use("/api/stripe", stripeRoutes)
+app.use("/api/orders", orderRoutes)
 app.use("/api/products", productRoutes)
 app.use("/api/checkout", checkoutRoutes)
-app.use("/api/orders", orderRoutes)
-app.use("/api/cart", cartRoutes)
-
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
-
-/* 🔥 EXPENSE SYSTEM */
-app.use("/api/expenses", expenseRoutes)
-
-/* 🔥 OTHER SYSTEMS */
+app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
 app.use("/api/quotes", quoteRoutes)
-app.use("/api/export-orders", exportOrdersRoutes)
-app.use("/api/export-taxes", exportTaxesRoutes)
-app.use("/api/production-sheet", productionSheetRoutes)
-app.use("/api/shipping", shippingRoutes)
-app.use("/api/ai-pricing", aiPricingRoutes)
-app.use("/api/abandoned", abandonedRoutes)
+app.use("/api/expenses", expenseRoutes)
+app.use("/api/pricing", pricingRoutes)
+app.use("/api/stripe", stripeRoutes)
 
-/* ================= HEALTH ================= */
-app.get("/", (req, res) => {
-  res.send("🚀 Signavi API running")
-})
+/* 🔥 NEW CUSTOMERS ROUTE */
+app.use("/api/customers", customerRoutes)
 
-/* ================= SOCKET ================= */
+/* ================= SERVER ================= */
 const server = http.createServer(app)
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    credentials: true
+    origin: ["http://localhost:5173"]
   }
 })
 
@@ -130,10 +109,6 @@ io.on("connection", (socket) => {
 /* ================= START ================= */
 async function startServer() {
   try {
-    if (!process.env.MONGO_URI) {
-      throw new Error("❌ MONGO_URI missing in .env")
-    }
-
     await mongoose.connect(process.env.MONGO_URI, {
       dbName: "signavi_studio"
     })
@@ -142,35 +117,20 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5050
 
-    server.listen(PORT, "0.0.0.0", () => {
+    server.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`)
     })
 
-    server.on("error", (err) => {
-      if (err.code === "EADDRINUSE") {
-        console.error(`❌ Port ${PORT} is already in use`)
-        console.log(`👉 Run: kill -9 $(lsof -ti :${PORT})`)
-      } else {
-        console.error("❌ Server error:", err)
-      }
-      process.exit(1)
-    })
-
-    /* 🔁 BACKGROUND JOB */
+    /* 🔥 BACKGROUND JOB */
     setInterval(() => {
       console.log("🔄 Checking abandoned carts...")
       checkAbandonedCarts()
     }, 1000 * 60 * 10)
 
   } catch (error) {
-    console.error("❌ SERVER START ERROR:", error)
+    console.error("❌ SERVER ERROR:", error)
     process.exit(1)
   }
 }
-
-/* ================= DB ERROR ================= */
-mongoose.connection.on("error", (err) => {
-  console.error("❌ Mongo runtime error:", err)
-})
 
 startServer()

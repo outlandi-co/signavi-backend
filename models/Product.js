@@ -12,7 +12,7 @@ const productSchema = new mongoose.Schema({
 
   price: Number,
 
-  /* 🔥 NEW: COST FOR PROFIT + TAXES */
+  // 💰 cost tracking
   cost: {
     type: Number,
     default: 0
@@ -20,7 +20,11 @@ const productSchema = new mongoose.Schema({
 
   category: String,
 
-  quantity: Number,
+  // 🔥 STOCK (REPLACED quantity)
+  stock: {
+    type: Number,
+    default: 0
+  },
 
   image: String
 
