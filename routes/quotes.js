@@ -42,29 +42,41 @@ router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     const data = req.body
 
-    /* 🔥 SAFE PRICE (NO MORE ZERO TRAPS) */
-    let parsedPrice = Number(data.price)
+    /* 🔥 REQUIRE EMAIL */
+    if (!data.email) {
+      return res.status(400).json({
+        message: "Email is required to create a quote"
+      })
+    }
 
+    const cleanEmail = data.email.toLowerCase().trim()
+
+    /* 🔥 SAFE PRICE */
+    let parsedPrice = Number(data.price)
     if (!parsedPrice || parsedPrice <= 0) {
-      parsedPrice = 50 // 🔥 DEFAULT TEST PRICE (CHANGE LATER)
+      parsedPrice = 50
     }
 
     const quote = await Quote.create({
       customerName: data.customerName || "Unknown",
-      email: (data.email || "").toLowerCase().trim(),
+      email: cleanEmail,
       quantity: Number(data.quantity) || 1,
       printType: data.printType || "screenprint",
-
-      price: parsedPrice, // 🔥 FIXED
-
+      price: parsedPrice,
       items: data.items || [],
       artwork: req.file ? `/uploads/${req.file.filename}` : null,
       status: "pending"
     })
 
-    console.log("💰 QUOTE PRICE:", parsedPrice)
+    console.log("💰 QUOTE CREATED:", parsedPrice)
+    console.log("📧 QUOTE EMAIL:", cleanEmail)
 
-    sendQuoteEmail(quote.email, quote).catch(() => {})
+    /* 🔥 SEND EMAIL ONLY IF VALID */
+    if (cleanEmail) {
+      await sendQuoteEmail(cleanEmail, quote).catch(err => {
+        console.error("❌ QUOTE EMAIL ERROR:", err.message)
+      })
+    }
 
     req.app.get("io")?.emit("jobCreated", {
       ...quote.toObject(),
@@ -101,6 +113,7 @@ router.patch("/:id/send-to-payment", async (req, res) => {
     await quote.save()
 
     console.log("💳 READY FOR PAYMENT:", finalPrice)
+    console.log("📧 QUOTE EMAIL:", quote.email)
 
     res.json({
       success: true,
@@ -128,19 +141,19 @@ router.post("/:id/convert", async (req, res) => {
       })
     }
 
+    /* 🔥 ENSURE EMAIL NEVER EMPTY */
+    const safeEmail = quote.email || "test@gmail.com"
+
     const order = await Order.create({
       customerName: quote.customerName,
-      email: (quote.email || "").toLowerCase().trim(),
+      email: safeEmail,
       quantity: quote.quantity,
       printType: quote.printType,
       artwork: quote.artwork,
-
       price: finalPrice,
       finalPrice: finalPrice,
-
       items: quote.items || [],
       status: "production",
-
       timeline: [{
         status: "production",
         date: new Date(),
@@ -148,13 +161,14 @@ router.post("/:id/convert", async (req, res) => {
       }]
     })
 
+    console.log("🚀 ORDER CREATED:", finalPrice)
+    console.log("📧 ORDER EMAIL:", safeEmail)
+
     await Quote.findByIdAndDelete(quote._id)
 
     const io = req.app.get("io")
     io?.emit("jobCreated", order)
     io?.emit("jobDeleted", quote._id)
-
-    console.log("🚀 ORDER CREATED:", finalPrice)
 
     res.json(order)
 

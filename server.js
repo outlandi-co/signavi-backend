@@ -24,16 +24,18 @@ import productionRoutes from "./routes/production.js"
 import quoteRoutes from "./routes/quotes.js"
 import expenseRoutes from "./routes/expenses.js"
 import pricingRoutes from "./routes/pricing.js"
+import customerRoutes from "./routes/customers.js"
 
 /* 🔥 NEW */
-import customerRoutes from "./routes/customers.js"
+import aiPricingRoutes from "./routes/aiPricing.js"
 
 dotenv.config()
 
-/* ================= PATH FIX ================= */
+/* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+/* ================= APP ================= */
 const app = express()
 
 /* ================= DEBUG ================= */
@@ -43,15 +45,25 @@ app.use((req, res, next) => {
 })
 
 /* ================= CORS ================= */
+const allowedOrigins = ["http://localhost:5173"]
+
 app.use(cors({
-  origin: ["http://localhost:5173"],
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      console.warn("🚫 Blocked by CORS:", origin)
+      callback(new Error("CORS blocked"))
+    }
+  },
   credentials: true
 }))
 
-/* ================= STRIPE ================= */
+/* ================= STRIPE WEBHOOK ================= */
+/* ⚠️ MUST be BEFORE express.json() */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }))
 
-/* ================= MIDDLEWARE ================= */
+/* ================= BODY PARSER ================= */
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
@@ -83,16 +95,41 @@ app.use("/api/quotes", quoteRoutes)
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/stripe", stripeRoutes)
-
-/* 🔥 NEW CUSTOMERS ROUTE */
 app.use("/api/customers", customerRoutes)
+
+/* 🔥 FIXED (THIS WAS YOUR ERROR) */
+app.use("/api/ai-pricing", aiPricingRoutes)
+
+/* ================= HEALTH ================= */
+app.get("/", (req, res) => {
+  res.send("✅ Signavi API running")
+})
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    uptime: process.uptime(),
+    time: new Date()
+  })
+})
+
+/* ================= ERROR HANDLER ================= */
+app.use((err, req, res, next) => {
+  console.error("❌ GLOBAL ERROR:", err)
+
+  res.status(err.status || 500).json({
+    message: err.message || "Server error"
+  })
+})
 
 /* ================= SERVER ================= */
 const server = http.createServer(app)
 
+/* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173"]
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PATCH"]
   }
 })
 
@@ -109,6 +146,18 @@ io.on("connection", (socket) => {
 /* ================= START ================= */
 async function startServer() {
   try {
+    if (!process.env.MONGO_URI) {
+      throw new Error("MONGO_URI missing in .env")
+    }
+
+    if (!process.env.STRIPE_SECRET_KEY) {
+      console.warn("⚠️ STRIPE_SECRET_KEY missing")
+    }
+
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      console.warn("⚠️ STRIPE_WEBHOOK_SECRET missing")
+    }
+
     await mongoose.connect(process.env.MONGO_URI, {
       dbName: "signavi_studio"
     })
@@ -121,14 +170,14 @@ async function startServer() {
       console.log(`🚀 Server running on port ${PORT}`)
     })
 
-    /* 🔥 BACKGROUND JOB */
+    /* ================= BACKGROUND JOB ================= */
     setInterval(() => {
       console.log("🔄 Checking abandoned carts...")
       checkAbandonedCarts()
     }, 1000 * 60 * 10)
 
   } catch (error) {
-    console.error("❌ SERVER ERROR:", error)
+    console.error("❌ SERVER START ERROR:", error)
     process.exit(1)
   }
 }

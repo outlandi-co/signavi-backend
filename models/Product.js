@@ -3,24 +3,20 @@ import mongoose from "mongoose"
 const productSchema = new mongoose.Schema({
 
   name: String,
-
-  vendor: String,
-
-  sku: String,
-
   description: String,
+
+  category: {
+    type: String,
+    default: "general"
+  },
 
   price: Number,
 
-  // 💰 cost tracking
   cost: {
     type: Number,
     default: 0
   },
 
-  category: String,
-
-  // 🔥 STOCK (REPLACED quantity)
   stock: {
     type: Number,
     default: 0

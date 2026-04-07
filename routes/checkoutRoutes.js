@@ -1,57 +1,79 @@
 import express from "express"
 import Stripe from "stripe"
 import dotenv from "dotenv"
+import Order from "../models/Order.js"
 
 dotenv.config()
 
 const router = express.Router()
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-router.post("/create-checkout-session", async (req, res) => {
+/* ================= STRIPE INIT ================= */
+let stripe = null
+
+if (process.env.STRIPE_SECRET_KEY) {
+  stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+    apiVersion: "2023-10-16"
+  })
+  console.log("💳 Stripe initialized (checkout)")
+} else {
+  console.warn("⚠️ STRIPE_SECRET_KEY missing — Stripe disabled")
+}
+
+/* ================= CREATE CHECKOUT ================= */
+router.post("/create-checkout/:id", async (req, res) => {
   try {
-    const { items, customer = {} } = req.body
 
-    if (!items || items.length === 0) {
-      return res.status(400).json({ error: "Cart is empty" })
+    if (!stripe) {
+      return res.status(500).json({ message: "Stripe not configured" })
     }
 
-    console.log("🟢 Checkout items received:", items)
-    console.log("🟢 Customer:", customer)
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const amount = Math.round((order.finalPrice || order.price || 0) * 100)
+
+    /* 🚨 VALIDATION */
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        message: "Order must have a price before payment"
+      })
+    }
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
       mode: "payment",
+      payment_method_types: ["card"],
 
-      line_items: items.map(item => ({
-        price_data: {
-          currency: "usd",
-          product_data: {
-            name: item.name || "Product"
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: {
+              name: `Order ${order._id}`
+            },
+            unit_amount: amount
           },
-          unit_amount: Math.round((item.price || 0) * 100)
-        },
-        quantity: item.quantity || 1
-      })),
+          quantity: 1
+        }
+      ],
 
-      /* ✅ FIX: use undefined instead of "" */
-      customer_email: customer.email || undefined,
+      success_url: `http://localhost:5173/success/${order._id}`,
+      cancel_url: `http://localhost:5173/admin/orders`,
 
       metadata: {
-        items: JSON.stringify(items).slice(0, 5000),
-        customerName: customer.name || "Store Order"
-      },
-
-      success_url: "http://localhost:5173/success",
-      cancel_url: "http://localhost:5173/cart"
+        orderId: order._id.toString()
+      }
     })
 
-    console.log("✅ Stripe session created:", session.id)
+    console.log("💳 Stripe session created:", session.id)
 
     res.json({ url: session.url })
 
-  } catch (error) {
-    console.error("❌ Stripe checkout error:", error.message)
-    res.status(500).json({ error: error.message })
+  } catch (err) {
+    console.error("❌ STRIPE CHECKOUT ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 

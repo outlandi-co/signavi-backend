@@ -1,38 +1,56 @@
 import Cart from "../models/Cart.js"
-import { sendAbandonedCartEmail } from "../utils/sendAbandonedCartEmail.js"
-import { generateDiscount } from "./aiDiscount.js"
+import { calculateDiscount } from "./discountEngine.js"
+import { sendNotificationEmail } from "../utils/sendEmail.js"
 
 export const checkAbandonedCarts = async () => {
   try {
-    const ONE_HOUR = 1000 * 60 * 60
-
-    const cutoff = new Date(Date.now() - ONE_HOUR)
+    const now = new Date()
 
     const carts = await Cart.find({
-      updatedAt: { $lt: cutoff },
+      recovered: false,
       abandonedEmailSent: false,
-      recovered: false
+      updatedAt: { $lt: new Date(now - 1000 * 60 * 30) } // 30 min
     })
 
     for (const cart of carts) {
 
-      /* 🤖 AI DISCOUNT */
-      const { discount, code } = generateDiscount(cart)
+      /* 🔥 CALCULATE DISCOUNT */
+      const discount = calculateDiscount(cart, cart.attempts || 0)
 
-      cart.discountPercent = discount
-      cart.discountCode = code
-
-      await sendAbandonedCartEmail(cart)
-
+      cart.discountCode = discount.discountCode
+      cart.discountPercent = discount.discountPercent
       cart.abandonedEmailSent = true
-      await cart.save()
-    }
 
-    if (carts.length > 0) {
-      console.log(`🔥 ${carts.length} carts recovered with AI discounts`)
+      await cart.save()
+
+      const total = cart.items.reduce(
+        (sum, i) => sum + i.price * i.quantity,
+        0
+      )
+
+      const discounted = total * (1 - discount.discountPercent / 100)
+
+      /* 🔥 EMAIL */
+      await sendNotificationEmail(
+        cart.email,
+        "🛒 You left items in your cart",
+        `
+        You left items in your cart.
+
+        💰 Original: $${total.toFixed(2)}  
+        🎉 Discount: ${discount.discountPercent}%  
+        ✅ New Total: $${discounted.toFixed(2)}
+
+        Use code: <strong>${discount.discountCode}</strong>
+
+        👉 Come back and complete your order!
+        `
+      )
+
+      console.log("📧 Abandoned cart email sent:", cart.email)
     }
 
   } catch (err) {
-    console.error("❌ Abandoned cart error:", err)
+    console.error("❌ Abandoned cart error:", err.message)
   }
 }

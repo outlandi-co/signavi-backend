@@ -3,23 +3,18 @@ import express from "express"
 const router = express.Router()
 
 router.post("/", (req, res) => {
-  try {
-    const { quantity = 1, printType = "screenprint" } = req.body
+  const { quantity = 1, printType } = req.body
 
-    let base = 5
-    let printCost = 0
+  let base = 10
 
-    if (printType === "screenprint") printCost = 1.25
-    if (printType === "dtf") printCost = 4
+  if (printType === "screenprint") base = 12
+  if (printType === "dtf") base = 15
 
-    const cost = (base + printCost) * quantity
-    const suggestedPrice = Math.round(cost * 2.2)
+  const total = base * quantity
 
-    res.json({ cost, suggestedPrice })
-
-  } catch (err) {
-    res.status(500).json({ message: err.message })
-  }
+  res.json({
+    suggestedPrice: total
+  })
 })
 
 export default router
