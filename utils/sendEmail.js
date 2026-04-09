@@ -70,7 +70,7 @@ export const sendOrderStatusEmail = async (
     const FRONTEND_URL =
       process.env.FRONTEND_URL || "http://localhost:5173"
 
-    const trackingPage = `${FRONTEND_URL}/order/${orderId}`
+    const trackingPage = `${FRONTEND_URL}/track/${orderId}`
     const qrCode = await QRCode.toDataURL(trackingPage)
 
     const wrap = (content) => `

@@ -6,9 +6,59 @@ const router = express.Router()
 
 router.get("/", async (req, res) => {
   try {
+
+    console.log("🔥 PRODUCTION ROUTE HIT")
+
     const orders = await Order.find().lean().sort({ createdAt: -1 })
     const quotes = await Quote.find().lean().sort({ createdAt: -1 })
 
+    const all = []
+
+    /* ================= NORMALIZE ORDERS ================= */
+    for (const o of orders) {
+      if (!o) continue
+
+      const status = normalizeStatus(o.status)
+
+      all.push({
+        _id: o._id,
+        customerName: o.customerName || "Unknown",
+        email: o.email || "",
+        quantity: o.quantity || 0,
+        printType: o.printType || "",
+        artwork: o.artwork || null,
+        price: o.price || 0,
+        finalPrice: o.finalPrice || 0,
+        status,                // 🔥 workflow status
+        group: status,         // 🔥 UI grouping
+        source: "order",
+        type: "order",
+        createdAt: o.createdAt
+      })
+    }
+
+    /* ================= NORMALIZE QUOTES ================= */
+    for (const q of quotes) {
+      if (!q) continue
+
+      all.push({
+        _id: q._id,
+        customerName: q.customerName || "Unknown",
+        email: q.email || "",
+        quantity: q.quantity || 0,
+        printType: q.printType || "",
+        artwork: q.artwork || null,
+        price: q.price || 0,
+        finalPrice: q.price || 0,
+        status: "draft",       // 🔥 FIXED (NOT "quotes")
+        group: "quotes",       // 🔥 UI bucket
+        source: "quote",
+        type: "quote",
+        createdAt: q.createdAt
+      })
+    }
+
+    /* ================= GROUP ================= */
     const grouped = {
       quotes: [],
       pending: [],
@@ -21,26 +71,17 @@ router.get("/", async (req, res) => {
       archive: []
     }
 
-    /* ================= ORDERS ================= */
-    for (const o of orders) {
-      if (!o) continue
+    for (const job of all) {
+      if (!job) continue
 
-      let status = o.status || "pending"
+      const group = job.group || "pending"
 
-      /* 🔥 AUTO FLOW */
-      if (status === "paid") status = "production"
+      if (!grouped[group]) {
+        grouped.pending.push(job)
+        continue
+      }
 
-      if (!grouped[status]) status = "pending"
-
-      grouped[status].push(o)
-    }
-
-    /* ================= QUOTES ================= */
-    for (const q of quotes) {
-      grouped.quotes.push({
-        ...q,
-        status: "quotes"
-      })
+      grouped[group].push(job)
     }
 
     res.json(grouped)
@@ -50,5 +91,16 @@ router.get("/", async (req, res) => {
     res.status(500).json({ message: err.message })
   }
 })
+
+/* ================= STATUS NORMALIZER ================= */
+function normalizeStatus(status) {
+  if (!status) return "pending"
+
+  if (["paid", "printing", "ready"].includes(status)) {
+    return "production"
+  }
+
+  return status
+}
 
 export default router

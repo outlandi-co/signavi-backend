@@ -25,9 +25,9 @@ import quoteRoutes from "./routes/quotes.js"
 import expenseRoutes from "./routes/expenses.js"
 import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
-
-/* 🔥 NEW */
 import aiPricingRoutes from "./routes/aiPricing.js"
+import jobRoutes from "./routes/job.js"
+import taxRoutes from "./routes/tax.js"
 
 dotenv.config()
 
@@ -38,9 +38,12 @@ const __dirname = path.dirname(__filename)
 /* ================= APP ================= */
 const app = express()
 
-/* ================= DEBUG ================= */
+/* ================= DEBUG (CLEANED 🔥) ================= */
 app.use((req, res, next) => {
-  console.log(`🔥 ${req.method} ${req.originalUrl}`)
+  // ✅ only log API calls (no image spam)
+  if (req.originalUrl.startsWith("/api")) {
+    console.log(`🔥 ${req.method} ${req.originalUrl}`)
+  }
   next()
 })
 
@@ -48,22 +51,17 @@ app.use((req, res, next) => {
 const allowedOrigins = ["http://localhost:5173"]
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true)
-    } else {
-      console.warn("🚫 Blocked by CORS:", origin)
-      callback(new Error("CORS blocked"))
-    }
-  },
+  origin: [
+    "http://localhost:5173",
+    "https://signavistudio.store"
+  ],
   credentials: true
 }))
 
-/* ================= STRIPE WEBHOOK ================= */
-/* ⚠️ MUST be BEFORE express.json() */
+/* ================= STRIPE WEBHOOK (MUST BE BEFORE JSON) ================= */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }))
 
-/* ================= BODY PARSER ================= */
+/* ================= BODY ================= */
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
@@ -96,9 +94,11 @@ app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/stripe", stripeRoutes)
 app.use("/api/customers", customerRoutes)
-
-/* 🔥 FIXED (THIS WAS YOUR ERROR) */
+app.use("/api/job", jobRoutes)
 app.use("/api/ai-pricing", aiPricingRoutes)
+
+/* 🔥 TAX ROUTE (IMPORTANT) */
+app.use("/api/tax", taxRoutes)
 
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
@@ -113,9 +113,9 @@ app.get("/api/health", (req, res) => {
   })
 })
 
-/* ================= ERROR HANDLER ================= */
+/* ================= ERROR ================= */
 app.use((err, req, res, next) => {
-  console.error("❌ GLOBAL ERROR:", err)
+  console.error("❌ GLOBAL ERROR:", err.message)
 
   res.status(err.status || 500).json({
     message: err.message || "Server error"
@@ -146,16 +146,9 @@ io.on("connection", (socket) => {
 /* ================= START ================= */
 async function startServer() {
   try {
+
     if (!process.env.MONGO_URI) {
       throw new Error("MONGO_URI missing in .env")
-    }
-
-    if (!process.env.STRIPE_SECRET_KEY) {
-      console.warn("⚠️ STRIPE_SECRET_KEY missing")
-    }
-
-    if (!process.env.STRIPE_WEBHOOK_SECRET) {
-      console.warn("⚠️ STRIPE_WEBHOOK_SECRET missing")
     }
 
     await mongoose.connect(process.env.MONGO_URI, {

@@ -25,14 +25,18 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage })
 
-/* ================= GET ================= */
+/* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
 
     res.json(quote)
+
   } catch (err) {
+    console.error("❌ GET QUOTE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -42,16 +46,14 @@ router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     const data = req.body
 
-    /* 🔥 REQUIRE EMAIL */
     if (!data.email) {
       return res.status(400).json({
-        message: "Email is required to create a quote"
+        message: "Email is required"
       })
     }
 
     const cleanEmail = data.email.toLowerCase().trim()
 
-    /* 🔥 SAFE PRICE */
     let parsedPrice = Number(data.price)
     if (!parsedPrice || parsedPrice <= 0) {
       parsedPrice = 50
@@ -69,24 +71,23 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     })
 
     console.log("💰 QUOTE CREATED:", parsedPrice)
-    console.log("📧 QUOTE EMAIL:", cleanEmail)
+    console.log("📧 EMAIL:", cleanEmail)
 
-    /* 🔥 SEND EMAIL ONLY IF VALID */
-    if (cleanEmail) {
-      await sendQuoteEmail(cleanEmail, quote).catch(err => {
-        console.error("❌ QUOTE EMAIL ERROR:", err.message)
-      })
-    }
+    await sendQuoteEmail(cleanEmail, quote).catch(err => {
+      console.error("❌ EMAIL ERROR:", err.message)
+    })
 
     req.app.get("io")?.emit("jobCreated", {
       ...quote.toObject(),
-      status: "quotes"
+      group: "quotes",
+      source: "quote",
+      type: "quote"
     })
 
     res.status(201).json(quote)
 
   } catch (err) {
-    console.error("❌ CREATE QUOTE ERROR:", err)
+    console.error("❌ CREATE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -97,13 +98,15 @@ router.patch("/:id/send-to-payment", async (req, res) => {
     const { price } = req.body
 
     const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
 
     const finalPrice = Number(price || quote.price)
 
     if (!finalPrice || finalPrice <= 0) {
       return res.status(400).json({
-        message: "Price must be set before sending to payment"
+        message: "Price must be valid"
       })
     }
 
@@ -111,9 +114,6 @@ router.patch("/:id/send-to-payment", async (req, res) => {
     quote.status = "payment_required"
 
     await quote.save()
-
-    console.log("💳 READY FOR PAYMENT:", finalPrice)
-    console.log("📧 QUOTE EMAIL:", quote.email)
 
     res.json({
       success: true,
@@ -127,21 +127,23 @@ router.patch("/:id/send-to-payment", async (req, res) => {
   }
 })
 
-/* ================= CONVERT ================= */
+/* ================= CONVERT TO ORDER ================= */
 router.post("/:id/convert", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
 
     const finalPrice = Number(quote.price)
 
     if (!finalPrice || finalPrice <= 0) {
       return res.status(400).json({
-        message: "Cannot convert quote with $0 price"
+        message: "Invalid price"
       })
     }
 
-    /* 🔥 ENSURE EMAIL NEVER EMPTY */
     const safeEmail = quote.email || "test@gmail.com"
 
     const order = await Order.create({
@@ -161,13 +163,16 @@ router.post("/:id/convert", async (req, res) => {
       }]
     })
 
-    console.log("🚀 ORDER CREATED:", finalPrice)
-    console.log("📧 ORDER EMAIL:", safeEmail)
-
     await Quote.findByIdAndDelete(quote._id)
 
     const io = req.app.get("io")
-    io?.emit("jobCreated", order)
+
+    io?.emit("jobCreated", {
+      ...order.toObject(),
+      source: "order",
+      type: "order"
+    })
+
     io?.emit("jobDeleted", quote._id)
 
     res.json(order)
@@ -182,7 +187,10 @@ router.post("/:id/convert", async (req, res) => {
 router.patch("/:id/deny", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
 
     await Quote.findByIdAndDelete(quote._id)
 
@@ -194,6 +202,34 @@ router.patch("/:id/deny", async (req, res) => {
 
   } catch (err) {
     console.error("❌ DENY ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= DELETE (🔥 FINAL FIX) ================= */
+router.delete("/:id", async (req, res) => {
+  try {
+    console.log("🧪 DELETE QUOTE:", req.params.id)
+
+    const quote = await Quote.findByIdAndDelete(req.params.id)
+
+    console.log("🧪 DELETE RESULT:", quote)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    console.log("🗑️ QUOTE DELETED:", req.params.id)
+
+    req.app.get("io")?.emit("jobDeleted", req.params.id)
+
+    res.json({
+      success: true,
+      id: req.params.id
+    })
+
+  } catch (err) {
+    console.error("❌ DELETE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })

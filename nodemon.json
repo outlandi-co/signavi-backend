@@ -1,3 +1,10 @@
 {
-  "ignore": ["uploads/*", "invoices/*", "*.pdf", "*.png", "*.jpg"]
+  "watch": ["server.js", "routes", "models"],
+  "ignore": [
+    "uploads/**",
+    "uploads/**/*",
+    "*.log",
+    "*.tmp",
+    "node_modules/**"
+  ]
 }

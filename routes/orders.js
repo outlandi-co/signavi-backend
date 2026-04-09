@@ -1,41 +1,83 @@
 import express from "express"
+import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
+/* ================= HELPERS ================= */
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
+
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 })
-    res.json(orders)
+    res.json({ success: true, data: orders })
   } catch (err) {
-    res.status(500).json({ message: err.message })
+    console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ success: false, message: err.message })
   }
 })
 
 /* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   try {
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
     const order = await Order.findById(req.params.id)
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    res.json(order)
+    res.json({ success: true, data: order })
 
   } catch (err) {
+    console.error("❌ GET ORDER ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= UPDATE ORDER (CATCH-ALL) ================= */
+/* ================= CREATE ================= */
+router.post("/", async (req, res) => {
+  try {
+    const order = await Order.create({
+      ...req.body,
+      timeline: [
+        {
+          status: "created",
+          date: new Date(),
+          note: "Order created"
+        }
+      ]
+    })
+
+    console.log("🆕 ORDER CREATED:", order._id)
+
+    req.app.get("io")?.emit("jobCreated", order)
+
+    res.status(201).json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ CREATE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= UPDATE ORDER ================= */
 router.put("/:id", async (req, res) => {
   try {
-    console.log("🚨 GENERAL UPDATE ROUTE HIT")
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
 
     const updates = req.body
+
+    if (!updates || Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: "No updates provided" })
+    }
 
     const order = await Order.findById(req.params.id)
 
@@ -43,32 +85,52 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔥 SAVE EMAIL */
     if (updates.email) {
       order.email = updates.email.toLowerCase().trim()
-      console.log("📧 EMAIL SAVED:", order.email)
     }
 
-    /* 🔥 SAVE PRICE */
-    if (updates.price) {
+    if (updates.price !== undefined) {
       order.price = Number(updates.price)
     }
 
-    if (updates.finalPrice) {
+    if (updates.finalPrice !== undefined) {
       order.finalPrice = Number(updates.finalPrice)
     }
 
     const prevStatus = order.status
 
-    Object.assign(order, updates)
+    const allowedFields = [
+      "customerName",
+      "status",
+      "quantity",
+      "notes",
+      "shippingAddress"
+    ]
+
+    allowedFields.forEach(field => {
+      if (updates[field] !== undefined) {
+        order[field] = updates[field]
+      }
+    })
+
+    /* 🔥 TIMELINE TRACKING */
+    if (updates.status && updates.status !== prevStatus) {
+      order.timeline = order.timeline || []
+
+      order.timeline.push({
+        status: updates.status,
+        date: new Date(),
+        note: "Status updated"
+      })
+    }
+
     await order.save()
 
-    console.log("🔥 STATUS:", prevStatus, "→", order.status)
+    console.log(`🔥 STATUS: ${prevStatus} → ${order.status}`)
 
-    /* 🔥 SEND EMAIL */
-    if (updates.status) {
-      console.log("📧 SENDING EMAIL FROM PUT ROUTE...")
+    req.app.get("io")?.emit("jobUpdated", order)
 
+    if (updates.status && updates.status !== prevStatus) {
       await sendOrderStatusEmail(
         order.email || process.env.EMAIL_USER,
         order.status,
@@ -77,10 +139,10 @@ router.put("/:id", async (req, res) => {
       )
     }
 
-    res.json(order)
+    res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ UPDATE ERROR:", err.message)
+    console.error("❌ UPDATE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -88,9 +150,15 @@ router.put("/:id", async (req, res) => {
 /* ================= UPDATE STATUS ================= */
 const updateStatusHandler = async (req, res) => {
   try {
-    console.log("🚨 STATUS ROUTE HIT")
+    if (!isValidId(req.params.id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
 
     const { status, email, price, finalPrice } = req.body
+
+    if (!status) {
+      return res.status(400).json({ message: "Status is required" })
+    }
 
     const order = await Order.findById(req.params.id)
 
@@ -98,43 +166,48 @@ const updateStatusHandler = async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔥 SAVE EMAIL */
     if (email) {
       order.email = email.toLowerCase().trim()
-      console.log("📧 EMAIL SAVED TO ORDER:", order.email)
     }
 
-    /* 🔥 SAVE PRICE (CRITICAL FIX) */
-    if (price) {
+    if (price !== undefined) {
       order.price = Number(price)
     }
 
-    if (finalPrice) {
+    if (finalPrice !== undefined) {
       order.finalPrice = Number(finalPrice)
     }
 
     const prevStatus = order.status
-
     order.status = status
+
+    /* 🔥 TIMELINE TRACKING */
+    order.timeline = order.timeline || []
+
+    if (status !== prevStatus) {
+      order.timeline.push({
+        status,
+        date: new Date(),
+        note: "Moved via board"
+      })
+    }
+
     await order.save()
 
-    console.log("🔥 STATUS UPDATED:", prevStatus, "→", status)
-    console.log("💰 FINAL PRICE:", order.finalPrice || order.price)
-    console.log("📧 ORDER EMAIL FIELD:", order.email)
+    console.log(`🔥 STATUS UPDATED: ${prevStatus} → ${status}`)
 
-    /* 🔥 SEND EMAIL */
-    console.log("📧 CALLING EMAIL FUNCTION...")
+    req.app.get("io")?.emit("jobUpdated", order)
 
-    await sendOrderStatusEmail(
-      order.email || process.env.EMAIL_USER,
-      status,
-      order._id,
-      order
-    )
+    if (status !== prevStatus) {
+      await sendOrderStatusEmail(
+        order.email || process.env.EMAIL_USER,
+        status,
+        order._id,
+        order
+      )
+    }
 
-    console.log("✅ EMAIL FUNCTION FINISHED")
-
-    res.json(order)
+    res.json({ success: true, data: order })
 
   } catch (err) {
     console.error("❌ STATUS UPDATE ERROR:", err)
@@ -149,15 +222,27 @@ router.patch("/:id/status", updateStatusHandler)
 /* ================= DELETE ================= */
 router.delete("/:id", async (req, res) => {
   try {
+    console.log("🧪 BEFORE DELETE:", req.params.id)
+
     const order = await Order.findByIdAndDelete(req.params.id)
+
+    console.log("🧪 AFTER DELETE:", order)
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    res.json({ message: "Order deleted" })
+    console.log("🗑️ ORDER DELETED:", req.params.id)
+
+    req.app.get("io")?.emit("jobDeleted", req.params.id)
+
+    res.json({
+      message: "Order deleted",
+      id: req.params.id
+    })
 
   } catch (err) {
+    console.error("❌ DELETE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
