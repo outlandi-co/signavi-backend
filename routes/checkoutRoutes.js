@@ -59,8 +59,8 @@ router.post("/create-checkout/:id", async (req, res) => {
         }
       ],
 
-      success_url: `http://localhost:5173/success/${order._id}`,
-      cancel_url: `http://localhost:5173/admin/orders`,
+      success_url: `${process.env.CLIENT_URL}/success/${order._id}`,
+cancel_url: `${process.env.CLIENT_URL}/admin/orders`,
 
       metadata: {
         orderId: order._id.toString()
