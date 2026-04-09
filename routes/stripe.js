@@ -9,9 +9,14 @@ dotenv.config()
 
 const router = express.Router()
 
+/* ================= ENV SAFETY ================= */
 if (!process.env.STRIPE_SECRET_KEY) {
   throw new Error("❌ STRIPE_SECRET_KEY missing in .env")
 }
+
+/* 🔥 CLIENT URL (PRODUCTION + LOCAL SAFE) */
+const CLIENT_URL =
+  process.env.CLIENT_URL || "http://localhost:5173"
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2023-10-16"
@@ -48,10 +53,8 @@ router.post("/create-cart-session", async (req, res) => {
       payment_method_types: ["card"],
       line_items,
 
-      /* 🔥 FORCE TAX ON SESSION */
       automatic_tax: { enabled: true },
 
-      /* 🔥 EXTRA SAFETY (helps avoid product_exempt) */
       tax_id_collection: {
         enabled: false
       },
@@ -64,7 +67,6 @@ router.post("/create-cart-session", async (req, res) => {
 
       customer_creation: "always",
 
-      /* 🔥 SHIPPING (EXPLICITLY TAXABLE) */
       shipping_options: [
         {
           shipping_rate_data: {
@@ -92,17 +94,14 @@ router.post("/create-cart-session", async (req, res) => {
 
       phone_number_collection: { enabled: true },
 
-      /* 🔥 STRIPE TAX FALLBACK */
       metadata: {
         type: "cart",
         tax_code: "txcd_20030000"
       },
 
-      success_url:
-        "http://localhost:5173/success?session_id={CHECKOUT_SESSION_ID}",
-
-      cancel_url:
-        "http://localhost:5173/cart"
+      /* 🔥 FIXED URLS */
+      success_url: `${CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${CLIENT_URL}/cart`
     })
 
     res.json({ url: session.url })
@@ -155,16 +154,14 @@ router.post("/create-order-session/:id", async (req, res) => {
 
       customer_creation: "always",
 
-      /* 🔥 FALLBACK TAX METADATA */
       metadata: {
         orderId: order._id.toString(),
         tax_code: "txcd_20030000"
       },
 
-      success_url: `${process.env.CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-
-cancel_url: `${process.env.CLIENT_URL}/cart`,
-
+      /* 🔥 FIXED URLS */
+      success_url: `${CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${CLIENT_URL}/cart`
     })
 
     res.json({ url: session.url })
