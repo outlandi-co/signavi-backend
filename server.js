@@ -38,9 +38,8 @@ const __dirname = path.dirname(__filename)
 /* ================= APP ================= */
 const app = express()
 
-/* ================= DEBUG (CLEANED 🔥) ================= */
+/* ================= DEBUG ================= */
 app.use((req, res, next) => {
-  // ✅ only log API calls (no image spam)
   if (req.originalUrl.startsWith("/api")) {
     console.log(`🔥 ${req.method} ${req.originalUrl}`)
   }
@@ -48,17 +47,24 @@ app.use((req, res, next) => {
 })
 
 /* ================= CORS ================= */
-const allowedOrigins = ["http://localhost:5173"]
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://signavistudio.store"
+]
 
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://signavistudio.store"
-  ],
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      console.log("❌ BLOCKED ORIGIN:", origin)
+      callback(new Error("Not allowed by CORS"))
+    }
+  },
   credentials: true
 }))
 
-/* ================= STRIPE WEBHOOK (MUST BE BEFORE JSON) ================= */
+/* ================= STRIPE WEBHOOK ================= */
 app.use("/api/stripe/webhook", express.raw({ type: "application/json" }))
 
 /* ================= BODY ================= */
@@ -97,7 +103,7 @@ app.use("/api/customers", customerRoutes)
 app.use("/api/job", jobRoutes)
 app.use("/api/ai-pricing", aiPricingRoutes)
 
-/* 🔥 TAX ROUTE (IMPORTANT) */
+/* 🔥 TAX ROUTE */
 app.use("/api/tax", taxRoutes)
 
 /* ================= HEALTH ================= */
@@ -116,7 +122,6 @@ app.get("/api/health", (req, res) => {
 /* ================= ERROR ================= */
 app.use((err, req, res, next) => {
   console.error("❌ GLOBAL ERROR:", err.message)
-
   res.status(err.status || 500).json({
     message: err.message || "Server error"
   })
@@ -128,8 +133,16 @@ const server = http.createServer(app)
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "PATCH"]
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true)
+      } else {
+        console.log("❌ SOCKET BLOCKED:", origin)
+        callback(new Error("Not allowed by Socket CORS"))
+      }
+    },
+    methods: ["GET", "POST", "PATCH"],
+    credentials: true
   }
 })
 
@@ -146,7 +159,6 @@ io.on("connection", (socket) => {
 /* ================= START ================= */
 async function startServer() {
   try {
-
     if (!process.env.MONGO_URI) {
       throw new Error("MONGO_URI missing in .env")
     }
