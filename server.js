@@ -49,16 +49,19 @@ app.use((req, res, next) => {
 /* ================= CORS ================= */
 const allowedOrigins = [
   "http://localhost:5173",
+  "https://signavistudiostore.netlify.app",
   "https://signavistudio.store"
 ]
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+  origin: function (origin, callback) {
+    // allow requests with no origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true)
+
+    if (allowedOrigins.includes(origin)) {
       callback(null, true)
     } else {
-      console.log("❌ BLOCKED ORIGIN:", origin)
-      callback(new Error("Not allowed by CORS"))
+      callback(new Error("CORS not allowed: " + origin))
     }
   },
   credentials: true
@@ -133,14 +136,11 @@ const server = http.createServer(app)
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true)
-      } else {
-        console.log("❌ SOCKET BLOCKED:", origin)
-        callback(new Error("Not allowed by Socket CORS"))
-      }
-    },
+    origin: [
+      "http://localhost:5173",
+      "https://signavistudiostore.netlify.app",
+      "https://signavistudio.store"
+    ],
     methods: ["GET", "POST", "PATCH"],
     credentials: true
   }
