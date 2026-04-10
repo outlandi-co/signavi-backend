@@ -1,5 +1,3 @@
-// routes/stripe.js
-
 import express from "express"
 import Stripe from "stripe"
 import dotenv from "dotenv"
@@ -9,40 +7,25 @@ dotenv.config()
 
 const router = express.Router()
 
-/* ================= ENV SAFETY ================= */
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error("❌ STRIPE_SECRET_KEY missing in .env")
-}
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
-/* 🔥 CLIENT URL (PRODUCTION + LOCAL SAFE) */
+/* 🔥 FORCE PRODUCTION URL */
 const CLIENT_URL =
-  process.env.CLIENT_URL || "http://localhost:5173"
+  process.env.CLIENT_URL || "https://signavistudio.store"
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2023-10-16"
-})
-
-/* =========================================================
-   🛒 CREATE CART CHECKOUT SESSION
-========================================================= */
+/* ================= CART ================= */
 router.post("/create-cart-session", async (req, res) => {
   try {
     const { items } = req.body
-
-    if (!items || items.length === 0) {
-      return res.status(400).json({ message: "Cart is empty" })
-    }
 
     const line_items = items.map(item => ({
       price_data: {
         currency: "usd",
         tax_behavior: "exclusive",
-
         product_data: {
-          name: item.name || "Item",
+          name: item.name,
           tax_code: "txcd_20030000"
         },
-
         unit_amount: Math.round(Number(item.price || 0) * 100)
       },
       quantity: Number(item.quantity || 1)
@@ -50,14 +33,9 @@ router.post("/create-cart-session", async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      payment_method_types: ["card"],
       line_items,
 
       automatic_tax: { enabled: true },
-
-      tax_id_collection: {
-        enabled: false
-      },
 
       billing_address_collection: "required",
 
@@ -65,83 +43,47 @@ router.post("/create-cart-session", async (req, res) => {
         allowed_countries: ["US"]
       },
 
-      customer_creation: "always",
-
       shipping_options: [
         {
           shipping_rate_data: {
             type: "fixed_amount",
-            tax_behavior: "exclusive",
-            fixed_amount: {
-              amount: 599,
-              currency: "usd"
-            },
-            display_name: "Standard Shipping (3–5 days)"
-          }
-        },
-        {
-          shipping_rate_data: {
-            type: "fixed_amount",
-            tax_behavior: "exclusive",
-            fixed_amount: {
-              amount: 1299,
-              currency: "usd"
-            },
-            display_name: "Express Shipping (1–2 days)"
+            fixed_amount: { amount: 599, currency: "usd" },
+            display_name: "Standard Shipping"
           }
         }
       ],
 
-      phone_number_collection: { enabled: true },
-
-      metadata: {
-        type: "cart",
-        tax_code: "txcd_20030000"
-      },
-
-      /* 🔥 FIXED URLS */
-      success_url: `${CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${CLIENT_URL}/success`,
       cancel_url: `${CLIENT_URL}/cart`
     })
 
     res.json({ url: session.url })
 
   } catch (err) {
-    console.error("❌ STRIPE CART ERROR:", err)
+    console.error(err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* =========================================================
-   📦 CREATE ORDER CHECKOUT SESSION
-========================================================= */
+/* ================= ORDER ================= */
 router.post("/create-order-session/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
 
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    if (!order.items || order.items.length === 0) {
-      return res.status(400).json({ message: "Order has no items" })
-    }
-
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      payment_method_types: ["card"],
 
       line_items: order.items.map(item => ({
         price_data: {
           currency: "usd",
           tax_behavior: "exclusive",
           product_data: {
-            name: item.name || "Item",
+            name: item.name,
             tax_code: "txcd_20030000"
           },
           unit_amount: Math.round(Number(item.price || 0) * 100)
         },
-        quantity: Number(item.quantity || 1)
+        quantity: item.quantity
       })),
 
       automatic_tax: { enabled: true },
@@ -152,22 +94,14 @@ router.post("/create-order-session/:id", async (req, res) => {
         allowed_countries: ["US"]
       },
 
-      customer_creation: "always",
-
-      metadata: {
-        orderId: order._id.toString(),
-        tax_code: "txcd_20030000"
-      },
-
-      /* 🔥 FIXED URLS */
-      success_url: `${CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
+      success_url: `${CLIENT_URL}/success`,
       cancel_url: `${CLIENT_URL}/cart`
     })
 
     res.json({ url: session.url })
 
   } catch (err) {
-    console.error("❌ ORDER SESSION ERROR:", err)
+    console.error(err)
     res.status(500).json({ message: err.message })
   }
 })
