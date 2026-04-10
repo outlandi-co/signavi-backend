@@ -7,7 +7,7 @@ import path from "path"
 export const generateBulkLabels = async (orders) => {
 
   const FRONTEND_URL =
-    process.env.FRONTEND_URL || "http://localhost:5173"
+  process.env.CLIENT_URL || "https://signavistudio.store"
 
   const fileName = `labels-${Date.now()}.pdf`
   const filePath = path.join("labels", fileName)

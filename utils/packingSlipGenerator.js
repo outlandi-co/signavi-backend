@@ -6,7 +6,7 @@ import path from "path"
 export const generatePackingSlip = async (order) => {
 
   const FRONTEND_URL =
-    process.env.FRONTEND_URL || "http://localhost:5173"
+  process.env.CLIENT_URL || "https://signavistudio.store"
 
   const fileName = `packing-slip-${order._id}.pdf`
   const filePath = path.join("labels", fileName)

@@ -68,7 +68,7 @@ export const sendOrderStatusEmail = async (
     console.log("📧 ORDER EMAIL TARGET:", target)
 
     const FRONTEND_URL =
-      process.env.FRONTEND_URL || "http://localhost:5173"
+      process.env.CLIENT_URL || "https://signavistudio.store"
 
     const trackingPage = `${FRONTEND_URL}/track/${orderId}`
     const qrCode = await QRCode.toDataURL(trackingPage)
@@ -198,7 +198,7 @@ export const sendQuoteEmail = async (to, quote) => {
     console.log("📧 QUOTE EMAIL TARGET:", target)
 
     const FRONTEND_URL =
-      process.env.FRONTEND_URL || "http://localhost:5173"
+      process.env.CLIENT_URL || "https://signavistudio.store"
 
     const info = await transporter.sendMail({
       from: `"Signavi Studio" <${process.env.EMAIL_USER}>`,
@@ -246,7 +246,7 @@ export const sendAbandonedCartEmail = async (to, cartDoc) => {
     if (!cartDoc?.items?.length) return
 
     const FRONTEND_URL =
-      process.env.FRONTEND_URL || "http://localhost:5173"
+      process.env.CLIENT_URL || "https://signavistudio.store"
 
     const itemsHtml = cartDoc.items.map(item => `
       <li>

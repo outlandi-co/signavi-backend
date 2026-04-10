@@ -47,10 +47,12 @@ app.use((req, res, next) => {
 })
 
 /* ================= CORS ================= */
+const CLIENT_URL = process.env.CLIENT_URL || "https://signavistudio.store"
+
 const allowedOrigins = [
   "http://localhost:5173",
   "https://signavistudiostore.netlify.app",
-  "https://signavistudio.store"
+  CLIENT_URL
 ]
 
 app.use(cors({
@@ -136,11 +138,7 @@ const server = http.createServer(app)
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://signavistudiostore.netlify.app",
-      "https://signavistudio.store"
-    ],
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PATCH"],
     credentials: true
   }
