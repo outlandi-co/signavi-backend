@@ -23,10 +23,13 @@ export const sendAbandonedCartEmail = async (cart) => {
       : ""
 
     /* 🔥 PASS DISCOUNT INTO LINK */
-    const link = cart.discountCode
-      ? `http://localhost:5173/store?code=${cart.discountCode}&discount=${cart.discountPercent}`
-      : `http://localhost:5173/store`
+    const CLIENT_URL =
+  process.env.CLIENT_URL || "http://localhost:5173"
 
+const link = cart.discountCode
+  ? `${CLIENT_URL}/store?code=${cart.discountCode}&discount=${cart.discountPercent}`
+  : `${CLIENT_URL}/store`
+  
     await transporter.sendMail({
       from: `"Signavi Store" <${process.env.EMAIL_USER}>`,
       to: cart.email,
