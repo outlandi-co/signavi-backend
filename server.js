@@ -57,7 +57,6 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // allow requests with no origin (mobile apps, curl, etc)
     if (!origin) return callback(null, true)
 
     if (allowedOrigins.includes(origin)) {
@@ -107,8 +106,6 @@ app.use("/api/stripe", stripeRoutes)
 app.use("/api/customers", customerRoutes)
 app.use("/api/job", jobRoutes)
 app.use("/api/ai-pricing", aiPricingRoutes)
-
-/* 🔥 TAX ROUTE */
 app.use("/api/tax", taxRoutes)
 
 /* ================= HEALTH ================= */
@@ -143,7 +140,7 @@ const io = new Server(server, {
     credentials: true
   }
 })
-c
+
 app.set("io", io)
 
 io.on("connection", (socket) => {
