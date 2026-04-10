@@ -7,23 +7,32 @@ dotenv.config()
 
 const router = express.Router()
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+/* ================= STRIPE ================= */
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: "2023-10-16"
+})
 
 /* 🔥 FORCE PRODUCTION URL */
-  const CLIENT_URL =
+const CLIENT_URL =
   process.env.CLIENT_URL || "https://signavistudio.store"
-  
-/* ================= CART ================= */
+
+/* =========================================================
+   🛒 CREATE CART CHECKOUT SESSION
+========================================================= */
 router.post("/create-cart-session", async (req, res) => {
   try {
     const { items } = req.body
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ message: "Cart is empty" })
+    }
 
     const line_items = items.map(item => ({
       price_data: {
         currency: "usd",
         tax_behavior: "exclusive",
         product_data: {
-          name: item.name,
+          name: item.name || "Item",
           tax_code: "txcd_20030000"
         },
         unit_amount: Math.round(Number(item.price || 0) * 100)
@@ -33,6 +42,7 @@ router.post("/create-cart-session", async (req, res) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      payment_method_types: ["card"],
       line_items,
 
       automatic_tax: { enabled: true },
@@ -47,43 +57,58 @@ router.post("/create-cart-session", async (req, res) => {
         {
           shipping_rate_data: {
             type: "fixed_amount",
-            fixed_amount: { amount: 599, currency: "usd" },
+            fixed_amount: {
+              amount: 599,
+              currency: "usd"
+            },
             display_name: "Standard Shipping"
           }
         }
       ],
 
-      success_url: `${CLIENT_URL}/success`,
+      /* 🔥 FIXED SUCCESS URL */
+      success_url: `${CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${CLIENT_URL}/cart`
     })
 
     res.json({ url: session.url })
 
   } catch (err) {
-    console.error(err)
+    console.error("❌ STRIPE CART ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= ORDER ================= */
+/* =========================================================
+   📦 CREATE ORDER CHECKOUT SESSION
+========================================================= */
 router.post("/create-order-session/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
 
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    if (!order.items || order.items.length === 0) {
+      return res.status(400).json({ message: "Order has no items" })
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      payment_method_types: ["card"],
 
       line_items: order.items.map(item => ({
         price_data: {
           currency: "usd",
           tax_behavior: "exclusive",
           product_data: {
-            name: item.name,
+            name: item.name || "Item",
             tax_code: "txcd_20030000"
           },
           unit_amount: Math.round(Number(item.price || 0) * 100)
         },
-        quantity: item.quantity
+        quantity: Number(item.quantity || 1)
       })),
 
       automatic_tax: { enabled: true },
@@ -94,14 +119,15 @@ router.post("/create-order-session/:id", async (req, res) => {
         allowed_countries: ["US"]
       },
 
-      success_url: `${CLIENT_URL}/success`,
+      /* 🔥 FIXED HERE TOO */
+      success_url: `${CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${CLIENT_URL}/cart`
     })
 
     res.json({ url: session.url })
 
   } catch (err) {
-    console.error(err)
+    console.error("❌ ORDER SESSION ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
