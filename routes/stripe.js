@@ -10,9 +10,9 @@ const router = express.Router()
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
 /* 🔥 FORCE PRODUCTION URL */
-const CLIENT_URL =
+  const CLIENT_URL =
   process.env.CLIENT_URL || "https://signavistudio.store"
-
+  
 /* ================= CART ================= */
 router.post("/create-cart-session", async (req, res) => {
   try {
