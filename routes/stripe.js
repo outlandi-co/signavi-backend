@@ -66,9 +66,8 @@ router.post("/create-cart-session", async (req, res) => {
         }
       ],
 
-      /* 🔥 FIXED SUCCESS URL */
-      success_url: `${CLIENT_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${CLIENT_URL}/cart`
+    success_url: `${CLIENT_URL}/store?success=true&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${CLIENT_URL}/store?canceled=true`,
     })
 
     res.json({ url: session.url })
