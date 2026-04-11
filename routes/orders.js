@@ -54,8 +54,6 @@ router.post("/", async (req, res) => {
       ]
     })
 
-    console.log("🆕 ORDER CREATED:", order._id)
-
     req.app.get("io")?.emit("jobCreated", order)
 
     res.status(201).json({ success: true, data: order })
@@ -66,98 +64,17 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= UPDATE ORDER ================= */
-router.put("/:id", async (req, res) => {
-  try {
-    if (!isValidId(req.params.id)) {
-      return res.status(400).json({ message: "Invalid ID" })
-    }
-
-    const updates = req.body
-
-    if (!updates || Object.keys(updates).length === 0) {
-      return res.status(400).json({ message: "No updates provided" })
-    }
-
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    if (updates.email) {
-      order.email = updates.email.toLowerCase().trim()
-    }
-
-    if (updates.price !== undefined) {
-      order.price = Number(updates.price)
-    }
-
-    if (updates.finalPrice !== undefined) {
-      order.finalPrice = Number(updates.finalPrice)
-    }
-
-    const prevStatus = order.status
-
-    const allowedFields = [
-      "customerName",
-      "status",
-      "quantity",
-      "notes",
-      "shippingAddress"
-    ]
-
-    allowedFields.forEach(field => {
-      if (updates[field] !== undefined) {
-        order[field] = updates[field]
-      }
-    })
-
-    /* 🔥 TIMELINE TRACKING */
-    if (updates.status && updates.status !== prevStatus) {
-      order.timeline = order.timeline || []
-
-      order.timeline.push({
-        status: updates.status,
-        date: new Date(),
-        note: "Status updated"
-      })
-    }
-
-    await order.save()
-
-    console.log(`🔥 STATUS: ${prevStatus} → ${order.status}`)
-
-    req.app.get("io")?.emit("jobUpdated", order)
-
-    if (updates.status && updates.status !== prevStatus) {
-      await sendOrderStatusEmail(
-        order.email || process.env.EMAIL_USER,
-        order.status,
-        order._id,
-        order
-      )
-    }
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ UPDATE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= UPDATE STATUS ================= */
+/* ================= UPDATE STATUS HANDLER ================= */
 const updateStatusHandler = async (req, res) => {
   try {
     if (!isValidId(req.params.id)) {
       return res.status(400).json({ message: "Invalid ID" })
     }
 
-    const { status, email, price, finalPrice } = req.body
+    const { status } = req.body
 
     if (!status) {
-      return res.status(400).json({ message: "Status is required" })
+      return res.status(400).json({ message: "Status required" })
     }
 
     const order = await Order.findById(req.params.id)
@@ -166,22 +83,9 @@ const updateStatusHandler = async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    if (email) {
-      order.email = email.toLowerCase().trim()
-    }
-
-    if (price !== undefined) {
-      order.price = Number(price)
-    }
-
-    if (finalPrice !== undefined) {
-      order.finalPrice = Number(finalPrice)
-    }
-
     const prevStatus = order.status
     order.status = status
 
-    /* 🔥 TIMELINE TRACKING */
     order.timeline = order.timeline || []
 
     if (status !== prevStatus) {
@@ -196,8 +100,10 @@ const updateStatusHandler = async (req, res) => {
 
     console.log(`🔥 STATUS UPDATED: ${prevStatus} → ${status}`)
 
+    /* 🔥 REALTIME */
     req.app.get("io")?.emit("jobUpdated", order)
 
+    /* 🔥 EMAIL */
     if (status !== prevStatus) {
       await sendOrderStatusEmail(
         order.email || process.env.EMAIL_USER,
@@ -210,41 +116,13 @@ const updateStatusHandler = async (req, res) => {
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ STATUS UPDATE ERROR:", err)
+    console.error("❌ STATUS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 }
 
-/* ✅ SUPPORT BOTH */
-router.put("/:id/status", updateStatusHandler)
+/* ✅ SUPPORT BOTH METHODS */
 router.patch("/:id/status", updateStatusHandler)
-
-/* ================= DELETE ================= */
-router.delete("/:id", async (req, res) => {
-  try {
-    console.log("🧪 BEFORE DELETE:", req.params.id)
-
-    const order = await Order.findByIdAndDelete(req.params.id)
-
-    console.log("🧪 AFTER DELETE:", order)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    console.log("🗑️ ORDER DELETED:", req.params.id)
-
-    req.app.get("io")?.emit("jobDeleted", req.params.id)
-
-    res.json({
-      message: "Order deleted",
-      id: req.params.id
-    })
-
-  } catch (err) {
-    console.error("❌ DELETE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
+router.put("/:id/status", updateStatusHandler)
 
 export default router

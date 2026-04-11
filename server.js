@@ -9,6 +9,9 @@ import path from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
 
+/* 🔥 FIX: ADD THIS IMPORT */
+import { checkAbandonedCarts } from "./services/abandonedCartService.js"
+
 /* ================= LOAD ENV ================= */
 dotenv.config()
 
@@ -182,15 +185,18 @@ async function startServer() {
       console.log(`🚀 Server running on port ${PORT}`)
     })
 
-    /* ================= BACKGROUND JOB ================= */
+    /* 🔥 SAFE BACKGROUND JOB */
     setInterval(() => {
-      console.log("🔄 Checking abandoned carts...")
-      checkAbandonedCarts()
+      try {
+        console.log("🔄 Checking abandoned carts...")
+        checkAbandonedCarts()
+      } catch (err) {
+        console.error("❌ Cart job error:", err)
+      }
     }, 1000 * 60 * 10)
 
   } catch (error) {
     console.error("💥 SERVER START ERROR:", error)
-    // ❌ DO NOT EXIT IN PRODUCTION
   }
 }
 
