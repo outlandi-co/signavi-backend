@@ -9,27 +9,17 @@ import path from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
 
-/* ================= SERVICES ================= */
-import { checkAbandonedCarts } from "./services/abandonedCartService.js"
-
-/* ================= ROUTES ================= */
-import productRoutes from "./routes/products.js"
-import checkoutRoutes from "./routes/checkoutRoutes.js"
-import orderRoutes from "./routes/orders.js"
-import authRoutes from "./routes/authRoutes.js"
-import logoutRoutes from "./routes/logout.js"
-import stripeRoutes from "./routes/stripe.js"
-import cartRoutes from "./routes/cart.js"
-import productionRoutes from "./routes/production.js"
-import quoteRoutes from "./routes/quotes.js"
-import expenseRoutes from "./routes/expenses.js"
-import pricingRoutes from "./routes/pricing.js"
-import customerRoutes from "./routes/customers.js"
-import aiPricingRoutes from "./routes/aiPricing.js"
-import jobRoutes from "./routes/job.js"
-import taxRoutes from "./routes/tax.js"
-
+/* ================= LOAD ENV ================= */
 dotenv.config()
+
+/* ================= CRASH LOGGING ================= */
+process.on("uncaughtException", err => {
+  console.error("💥 UNCAUGHT EXCEPTION:", err)
+})
+
+process.on("unhandledRejection", err => {
+  console.error("💥 UNHANDLED REJECTION:", err)
+})
 
 /* ================= PATH ================= */
 const __filename = fileURLToPath(import.meta.url)
@@ -37,6 +27,7 @@ const __dirname = path.dirname(__filename)
 
 /* ================= APP ================= */
 const app = express()
+const server = http.createServer(app)
 
 /* ================= DEBUG ================= */
 app.use((req, res, next) => {
@@ -46,20 +37,33 @@ app.use((req, res, next) => {
   next()
 })
 
+/* ================= ENV DEBUG ================= */
+console.log("🌐 ENV CHECK")
+console.log("MONGO:", !!process.env.MONGO_URI)
+console.log("STRIPE:", !!process.env.STRIPE_SECRET_KEY)
+console.log("EMAIL:", !!process.env.EMAIL_USER)
+console.log("CLIENT:", process.env.CLIENT_URL)
+
 /* ================= CORS ================= */
-const CLIENT_URL = process.env.CLIENT_URL || "https://signavistudio.store"
+const CLIENT_URL =
+  process.env.CLIENT_URL || "https://signavistudio.store"
 
 const allowedOrigins = [
   "http://localhost:5173",
+  "https://signavi-studio.netlify.app",
   "https://signavistudiostore.netlify.app",
   CLIENT_URL
 ]
 
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://signavi-studio.netlify.app"
-  ],
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      console.log("❌ Blocked CORS:", origin)
+      callback(null, false)
+    }
+  },
   credentials: true
 }))
 
@@ -87,6 +91,22 @@ app.use("/uploads", express.static(uploadsPath))
 app.use("/api/download", express.static(labelsPath))
 
 /* ================= ROUTES ================= */
+import productRoutes from "./routes/products.js"
+import checkoutRoutes from "./routes/checkoutRoutes.js"
+import orderRoutes from "./routes/orders.js"
+import authRoutes from "./routes/authRoutes.js"
+import logoutRoutes from "./routes/logout.js"
+import stripeRoutes from "./routes/stripe.js"
+import cartRoutes from "./routes/cart.js"
+import productionRoutes from "./routes/production.js"
+import quoteRoutes from "./routes/quotes.js"
+import expenseRoutes from "./routes/expenses.js"
+import pricingRoutes from "./routes/pricing.js"
+import customerRoutes from "./routes/customers.js"
+import aiPricingRoutes from "./routes/aiPricing.js"
+import jobRoutes from "./routes/job.js"
+import taxRoutes from "./routes/tax.js"
+
 app.use("/api/orders", orderRoutes)
 app.use("/api/products", productRoutes)
 app.use("/api/checkout", checkoutRoutes)
@@ -105,7 +125,7 @@ app.use("/api/tax", taxRoutes)
 
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
-  res.send("✅ Signavi API running")
+  res.send("🚀 Signavi API running")
 })
 
 app.get("/api/health", (req, res) => {
@@ -118,22 +138,16 @@ app.get("/api/health", (req, res) => {
 
 /* ================= ERROR ================= */
 app.use((err, req, res, next) => {
-  console.error("❌ GLOBAL ERROR:", err.message)
+  console.error("❌ GLOBAL ERROR:", err)
   res.status(err.status || 500).json({
     message: err.message || "Server error"
   })
 })
 
-/* ================= SERVER ================= */
-const server = http.createServer(app)
-
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "https://signavi-studio.netlify.app"
-    ],
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -141,7 +155,7 @@ const io = new Server(server, {
 
 app.set("io", io)
 
-io.on("connection", (socket) => {
+io.on("connection", socket => {
   console.log("🟢 Socket connected:", socket.id)
 
   socket.on("disconnect", () => {
@@ -153,7 +167,7 @@ io.on("connection", (socket) => {
 async function startServer() {
   try {
     if (!process.env.MONGO_URI) {
-      throw new Error("MONGO_URI missing in .env")
+      throw new Error("MONGO_URI missing in ENV")
     }
 
     await mongoose.connect(process.env.MONGO_URI, {
@@ -175,8 +189,8 @@ async function startServer() {
     }, 1000 * 60 * 10)
 
   } catch (error) {
-    console.error("❌ SERVER START ERROR:", error)
-    process.exit(1)
+    console.error("💥 SERVER START ERROR:", error)
+    // ❌ DO NOT EXIT IN PRODUCTION
   }
 }
 
