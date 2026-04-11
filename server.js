@@ -9,7 +9,7 @@ import path from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
 
-/* 🔥 FIX: ADD THIS IMPORT */
+/* 🔥 REQUIRED FIX */
 import { checkAbandonedCarts } from "./services/abandonedCartService.js"
 
 /* ================= LOAD ENV ================= */
@@ -129,6 +129,13 @@ app.use("/api/tax", taxRoutes)
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
   res.send("🚀 Signavi API running")
+})
+
+app.get("/api", (req, res) => {
+  res.json({
+    message: "API root",
+    status: "ok"
+  })
 })
 
 app.get("/api/health", (req, res) => {
