@@ -8,6 +8,12 @@ const router = express.Router()
 /* ================= HELPERS ================= */
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
+/* ================= 🔥 PROOF ROUTE ================= */
+/* Use this to verify Render is using latest code */
+router.get("/__status__", (req, res) => {
+  res.json({ message: "STATUS ROUTE LIVE ✅" })
+})
+
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
@@ -54,6 +60,8 @@ router.post("/", async (req, res) => {
       ]
     })
 
+    console.log("🆕 ORDER CREATED:", order._id)
+
     req.app.get("io")?.emit("jobCreated", order)
 
     res.status(201).json({ success: true, data: order })
@@ -67,6 +75,8 @@ router.post("/", async (req, res) => {
 /* ================= UPDATE STATUS HANDLER ================= */
 const updateStatusHandler = async (req, res) => {
   try {
+    console.log("🔥 HIT STATUS ROUTE:", req.params.id)
+
     if (!isValidId(req.params.id)) {
       return res.status(400).json({ message: "Invalid ID" })
     }
@@ -86,6 +96,7 @@ const updateStatusHandler = async (req, res) => {
     const prevStatus = order.status
     order.status = status
 
+    /* 🔥 TIMELINE */
     order.timeline = order.timeline || []
 
     if (status !== prevStatus) {
@@ -121,7 +132,7 @@ const updateStatusHandler = async (req, res) => {
   }
 }
 
-/* ✅ SUPPORT BOTH METHODS */
+/* ================= STATUS ROUTES ================= */
 router.patch("/:id/status", updateStatusHandler)
 router.put("/:id/status", updateStatusHandler)
 
