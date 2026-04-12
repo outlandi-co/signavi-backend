@@ -17,7 +17,6 @@ import checkoutRoutes from "./routes/checkoutRoutes.js"
 import orderRoutes from "./routes/orders.js"
 import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
-import stripeRoutes from "./routes/stripe.js"
 import cartRoutes from "./routes/cart.js"
 import productionRoutes from "./routes/production.js"
 import quoteRoutes from "./routes/quotes.js"
@@ -96,8 +95,6 @@ app.use("/api/job", jobRoutes)
 app.use("/api/ai-pricing", aiPricingRoutes)
 app.use("/api/tax", taxRoutes)
 
-/* OPTIONAL */
-app.use("/api/stripe", stripeRoutes)
 
 /* 🔥 CRITICAL FIX */
 app.use("/api/square", squareRoutes)

@@ -27,18 +27,19 @@ router.post("/", async (req, res) => {
       email,
       items,
       quantity,
-      printType,
-      source
+      printType
     } = req.body
 
-    /* 🔥 SANITIZE ITEMS */
-    const safeItems = (items || []).map(item => ({
-      name: item.name || "Item",
-      quantity: Number(item.quantity) || 1,
-      price: Number(item.price) || 0
-    }))
+    /* ================= SAFE ITEMS ================= */
+    const safeItems = Array.isArray(items)
+      ? items.map(item => ({
+          name: item?.name || "Item",
+          quantity: Number(item?.quantity) || 1,
+          price: Number(item?.price) || 0
+        }))
+      : []
 
-    /* 🔥 CALCULATIONS */
+    /* ================= CALCULATE ================= */
     const totalQuantity = safeItems.reduce(
       (acc, item) => acc + item.quantity,
       0
@@ -52,15 +53,16 @@ router.post("/", async (req, res) => {
     const order = await Order.create({
       customerName: customerName || "Guest",
       email: email || "",
+
       items: safeItems,
 
       quantity: totalQuantity || Number(quantity) || 1,
       printType: printType || "custom",
-      source: source || "store",
 
       price: totalPrice,
       finalPrice: totalPrice,
 
+      source: "store",
       status: "payment_required",
 
       timeline: [
@@ -74,18 +76,11 @@ router.post("/", async (req, res) => {
 
     console.log("✅ ORDER CREATED:", order._id)
 
-    res.json({
-      success: true,
-      data: order
-    })
+    res.json({ success: true, data: order })
 
   } catch (err) {
     console.error("❌ ORDER CREATE ERROR:", err)
-
-    res.status(500).json({
-      message: err.message,
-      stack: err.stack
-    })
+    res.status(500).json({ message: err.message })
   }
 })
 
