@@ -2,7 +2,7 @@ import express from "express"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
 
-import { SquareClient } from "square"
+import { SquareClient, SquareEnvironment } from "square"
 
 dotenv.config()
 
@@ -10,8 +10,8 @@ const router = express.Router()
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
-  environment: "sandbox"
+  accessToken: process.env.SQUARE_ACCESS_TOKEN, // ✅ FIXED KEY
+  environment: SquareEnvironment.Sandbox // ✅ FIXED ENV
 })
 
 /* ================= HELPER ================= */
@@ -50,7 +50,7 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-          amount, // ✅ FIXED (BigInt)
+          amount,
           currency: "USD"
         },
         locationId: process.env.SQUARE_LOCATION_ID
@@ -71,7 +71,16 @@ router.post("/create-payment/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ SQUARE ERROR:", err)
-    res.status(500).json({ message: err.message })
+
+    // 🔥 Better debugging for Render logs
+    if (err.response?.body) {
+      console.error("🔎 Square API Response:", err.response.body)
+    }
+
+    res.status(500).json({
+      message: err.message,
+      details: err.response?.body || null
+    })
   }
 })
 
