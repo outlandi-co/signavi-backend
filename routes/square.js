@@ -14,6 +14,11 @@ const client = new SquareClient({
   environment: "sandbox"
 })
 
+/* ================= HELPER ================= */
+const toCents = (amount) => {
+  return BigInt(Math.round(Number(amount || 0) * 100))
+}
+
 /* ================= TEST ================= */
 router.get("/__test", (req, res) => {
   res.json({ message: "SQUARE ROUTE LIVE ✅" })
@@ -30,13 +35,14 @@ router.post("/create-payment/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    const amount = Math.round(
-      Number(order.finalPrice || order.price || 0) * 100
-    )
+    const rawAmount = order.finalPrice || order.price || 0
+    const amount = toCents(rawAmount)
 
-    if (!amount || amount <= 0) {
+    if (!amount || amount <= 0n) {
       return res.status(400).json({ message: "Invalid amount" })
     }
+
+    console.log("💰 Amount (cents):", amount.toString())
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
@@ -44,7 +50,7 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-          amount,
+          amount, // ✅ FIXED (BigInt)
           currency: "USD"
         },
         locationId: process.env.SQUARE_LOCATION_ID
@@ -93,6 +99,8 @@ router.post("/confirm/:id", async (req, res) => {
 
       const io = req.app.get("io")
       if (io) io.emit("jobUpdated", order)
+
+      console.log("✅ ORDER MARKED PAID:", order._id)
     }
 
     res.json({ success: true })
