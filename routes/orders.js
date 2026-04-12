@@ -5,18 +5,15 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* ================= VALIDATION ================= */
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
-/* =========================================================
-   🔥 TEST ROUTE (VERIFY DEPLOYMENT FIRST)
-========================================================= */
+/* ================= TEST ================= */
 router.get("/__test", (req, res) => {
   res.json({ message: "ORDERS ROUTE LIVE ✅" })
 })
 
 /* =========================================================
-   🔥 UPDATE STATUS (MUST BE ABOVE /:id)
+   🔥 PATCH MUST COME BEFORE /:id
 ========================================================= */
 router.patch("/:id/status", async (req, res) => {
   try {
@@ -37,7 +34,6 @@ router.patch("/:id/status", async (req, res) => {
     const prevStatus = order.status
     order.status = status
 
-    /* ================= TIMELINE ================= */
     if (!order.timeline) order.timeline = []
 
     order.timeline.push({
@@ -48,13 +44,8 @@ router.patch("/:id/status", async (req, res) => {
 
     await order.save()
 
-    /* ================= SOCKET ================= */
-    const io = req.app.get("io")
-    if (io) {
-      io.emit("jobUpdated", order)
-    }
+    req.app.get("io")?.emit("jobUpdated", order)
 
-    /* ================= EMAIL ================= */
     try {
       await sendOrderStatusEmail(
         order.email || process.env.EMAIL_USER,
@@ -74,20 +65,14 @@ router.patch("/:id/status", async (req, res) => {
   }
 })
 
-/* =========================================================
-   📦 GET ALL ORDERS
-========================================================= */
+/* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ createdAt: -1 })
-    res.json({ success: true, data: orders })
-  } catch (err) {
-    res.status(500).json({ message: err.message })
-  }
+  const orders = await Order.find().sort({ createdAt: -1 })
+  res.json({ success: true, data: orders })
 })
 
 /* =========================================================
-   📦 GET SINGLE ORDER (KEEP LAST)
+   🔥 THIS MUST BE LAST
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
