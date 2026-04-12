@@ -16,6 +16,51 @@ router.get("/__test", (req, res) => {
 })
 
 /* =========================================================
+   🛒 CREATE ORDER (🔥 REQUIRED FOR CART CHECKOUT)
+========================================================= */
+router.post("/", async (req, res) => {
+  try {
+    const {
+      customerName,
+      email,
+      items,
+      quantity,
+      printType,
+      source
+    } = req.body
+
+    const order = await Order.create({
+      customerName: customerName || "Guest",
+      email: email || "",
+      items: items || [],
+      quantity: quantity || 1,
+      printType: printType || "custom",
+      source: source || "store",
+      status: "payment_required",
+
+      timeline: [
+        {
+          status: "created",
+          date: new Date(),
+          note: "Order created from cart"
+        }
+      ]
+    })
+
+    console.log("✅ ORDER CREATED:", order._id)
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ ORDER CREATE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
    🔥 SHARED STATUS HANDLER (ONE SOURCE OF TRUTH)
 ========================================================= */
 const updateStatusHandler = async (req, res) => {
@@ -85,7 +130,7 @@ const updateStatusHandler = async (req, res) => {
 }
 
 /* =========================================================
-   🔥 SUPPORT ALL FRONTEND ROUTES (KEY FIX)
+   🔥 SUPPORT ALL FRONTEND ROUTES
 ========================================================= */
 router.patch("/update-status/:id", updateStatusHandler)
 router.patch("/:id/status", updateStatusHandler)
@@ -104,7 +149,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   📦 GET ONE ORDER (ALWAYS LAST)
+   📦 GET ONE ORDER
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
