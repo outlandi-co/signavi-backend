@@ -9,11 +9,13 @@ const router = express.Router()
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 /* =========================================================
-   🔥 UPDATE STATUS (THIS FIXES YOUR 404)
+   🔥 UPDATE STATUS (FIXES 404 + DRAG)
 ========================================================= */
 router.patch("/:id/status", async (req, res) => {
   try {
     const { status } = req.body
+
+    console.log("🔥 PATCH STATUS HIT:", req.params.id, status)
 
     if (!isValidId(req.params.id)) {
       return res.status(400).json({ message: "Invalid ID" })
@@ -25,22 +27,27 @@ router.patch("/:id/status", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
+    const prevStatus = order.status
     order.status = status
 
-    // timeline safety
+    /* ================= TIMELINE ================= */
     if (!order.timeline) order.timeline = []
 
     order.timeline.push({
       status,
-      date: new Date()
+      date: new Date(),
+      note: `Moved from ${prevStatus} → ${status}`
     })
 
     await order.save()
 
-    // 🔥 SOCKET UPDATE (important for live UI)
-    req.app.get("io")?.emit("jobUpdated", order)
+    /* ================= SOCKET ================= */
+    const io = req.app.get("io")
+    if (io) {
+      io.emit("jobUpdated", order)
+    }
 
-    // 🔥 EMAIL (safe fallback)
+    /* ================= EMAIL ================= */
     try {
       await sendOrderStatusEmail(
         order.email || process.env.EMAIL_USER,
@@ -48,8 +55,8 @@ router.patch("/:id/status", async (req, res) => {
         order._id,
         order
       )
-    } catch (emailErr) {
-      console.warn("⚠️ Email failed:", emailErr.message)
+    } catch (err) {
+      console.warn("⚠️ Email failed:", err.message)
     }
 
     res.json({ success: true, data: order })
@@ -73,7 +80,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   📦 GET SINGLE ORDER
+   📦 GET ONE ORDER
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
