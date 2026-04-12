@@ -19,11 +19,7 @@ router.patch("/status/:id", async (req, res) => {
   try {
     const { status } = req.body
 
-    console.log("🔥 PATCH HIT:", req.params.id, status)
-
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: "Invalid ID" })
-    }
+    console.log("🔥 STATUS ROUTE HIT:", req.params.id, status)
 
     const order = await Order.findById(req.params.id)
 
@@ -31,25 +27,21 @@ router.patch("/status/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    const prevStatus = order.status
     order.status = status
 
-    if (!order.timeline) order.timeline = []
-
+    order.timeline = order.timeline || []
     order.timeline.push({
       status,
       date: new Date(),
-      note: `Moved from ${prevStatus} → ${status}`
+      note: "Moved via board"
     })
 
     await order.save()
 
-    req.app.get("io")?.emit("jobUpdated", order)
-
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ STATUS ERROR:", err)
+    console.error(err)
     res.status(500).json({ message: err.message })
   }
 })
