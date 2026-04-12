@@ -1,12 +1,6 @@
 import express from "express"
-import Stripe from "stripe"
-import dotenv from "dotenv"
-
-dotenv.config()
 
 const router = express.Router()
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
 
 /* ================= CALCULATE TAX ================= */
 router.post("/calculate", async (req, res) => {
@@ -19,32 +13,15 @@ router.post("/calculate", async (req, res) => {
       return res.json({ tax: 0 })
     }
 
-    const calculation = await stripe.tax.calculations.create({
-      currency: "usd",
+    /* ================= SIMPLE CA TAX ================= */
+    // 🔥 Default California sales tax (~8.25%)
+    const TAX_RATE = 0.0825
 
-      customer_details: {
-        address: {
-          country: "US",
-          state: "CA",            // 🔥 THIS FIXES EVERYTHING
-          postal_code: zip
-        },
-        address_source: "shipping"
-      },
+    const tax = Math.round(Number(subtotal) * TAX_RATE * 100) / 100
 
-      line_items: [
-        {
-          amount: Math.round(Number(subtotal) * 100),
-          reference: "cart",
-          tax_behavior: "exclusive"
-        }
-      ]
-    })
+    console.log("✅ TAX CALCULATED:", tax)
 
-    console.log("✅ STRIPE TAX CALC:", calculation)
-
-    res.json({
-      tax: calculation.tax_amount_exclusive || 0
-    })
+    res.json({ tax })
 
   } catch (err) {
     console.error("❌ TAX ERROR:", err)
