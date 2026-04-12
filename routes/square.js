@@ -21,9 +21,9 @@ if (!process.env.SQUARE_LOCATION_ID) {
 }
 
 /* ================= CLIENT ================= */
-/* 🔥 FIX: use `token` NOT `accessToken` */
+/* 🔥 FIX: EAA token → use accessToken */
 const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN
+  accessToken: process.env.SQUARE_ACCESS_TOKEN
 })
 
 /* ================= HELPER ================= */
