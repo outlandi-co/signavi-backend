@@ -1,149 +1,51 @@
-import { useEffect, useState } from "react"
-import api from "../../services/api"
+import express from "express"
+import Order from "../models/Order.js"
+import Cart from "../models/Cart.js"
 
-export default function AdminRevenue() {
+const router = express.Router()
 
-  const [orders, setOrders] = useState([])
-  const [loading, setLoading] = useState(true)
+/* ================= REVENUE DASHBOARD ================= */
+router.get("/", async (req, res) => {
+  try {
+    const orders = await Order.find()
+    const carts = await Cart.find()
 
-  /* ================= LOAD ================= */
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await api.get("/orders")
+    const totalRevenue = orders.reduce((sum, o) => {
+      return sum + (o.finalPrice || o.total || 0)
+    }, 0)
 
-        console.log("🔥 RAW ORDERS:", res.data)
+    const totalOrders = orders.length
 
-        // ✅ FORCE SAFE ARRAY
-        let safeOrders = []
+    const abandoned = carts.filter(c => !c.recovered)
+    const recovered = carts.filter(c => c.recovered)
 
-        if (Array.isArray(res.data)) {
-          safeOrders = res.data
-        } else if (Array.isArray(res.data?.data)) {
-          safeOrders = res.data.data
-        }
+    const abandonedValue = abandoned.reduce((sum, c) => {
+      return sum + c.items.reduce((s, i) => s + (i.price * i.quantity), 0)
+    }, 0)
 
-        console.log("✅ SAFE ORDERS:", safeOrders)
+    const recoveredValue = recovered.reduce((sum, c) => {
+      return sum + c.items.reduce((s, i) => s + (i.price * i.quantity), 0)
+    }, 0)
 
-        setOrders(safeOrders)
+    const conversionRate =
+      carts.length > 0
+        ? ((recovered.length / carts.length) * 100).toFixed(1)
+        : 0
 
-      } catch (err) {
-        console.error("❌ REVENUE LOAD ERROR:", err)
-        setOrders([])
-      } finally {
-        setLoading(false)
-      }
-    }
+    res.json({
+      totalRevenue,
+      totalOrders,
+      abandonedCarts: abandoned.length,
+      recoveredCarts: recovered.length,
+      abandonedValue,
+      recoveredValue,
+      conversionRate
+    })
 
-    load()
-  }, [])
-
-  /* ================= LOADING ================= */
-  if (loading) {
-    return (
-      <div style={center}>
-        <h2 style={{ color: "white" }}>⏳ Loading revenue...</h2>
-      </div>
-    )
+  } catch (err) {
+    console.error("REVENUE ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
+})
 
-  /* ================= SAFE DATA ================= */
-  const safeOrders = Array.isArray(orders) ? orders : []
-
-  /* ================= CALCULATIONS ================= */
-  const totalRevenue = safeOrders.reduce(
-    (sum, o) => sum + Number(o.finalPrice || o.price || 0),
-    0
-  )
-
-  const lowProfit = safeOrders.filter(
-    o => Number(o.profit || 0) < 5
-  )
-
-  const topJobs = [...safeOrders]
-    .sort((a, b) => Number(b.profit || 0) - Number(a.profit || 0))
-    .slice(0, 5)
-
-  /* ================= UI ================= */
-  return (
-    <div style={container}>
-      <h1 style={title}>💰 Revenue Dashboard</h1>
-
-      {/* SUMMARY */}
-      <div style={summary}>
-        <div style={card}>
-          <p>Total Revenue</p>
-          <strong>${totalRevenue.toFixed(2)}</strong>
-        </div>
-      </div>
-
-      {/* ALERTS */}
-      <div style={card}>
-        <h2>🚨 Alerts</h2>
-        <p style={{ color: "#f87171" }}>
-          {lowProfit.length} low-profit job(s)
-        </p>
-      </div>
-
-      {/* TOP JOBS */}
-      <div style={card}>
-        <h2>🏆 Top Profit Jobs</h2>
-
-        {topJobs.length === 0 ? (
-          <p>No jobs yet</p>
-        ) : (
-          topJobs.map((job, i) => (
-            <div key={job._id} style={row}>
-              <p>{i + 1}. {job.customerName || "Unknown"}</p>
-              <p style={{ color: "#22c55e" }}>
-                ${Number(job.profit || 0)}
-              </p>
-            </div>
-          ))
-        )}
-      </div>
-
-    </div>
-  )
-}
-
-/* ================= STYLES ================= */
-
-const container = {
-  padding: 20,
-  background: "#020617",
-  minHeight: "100vh",
-  color: "white"
-}
-
-const title = {
-  marginBottom: 20
-}
-
-const summary = {
-  display: "flex",
-  gap: 20,
-  marginBottom: 20
-}
-
-const card = {
-  background: "#1e293b",
-  padding: 15,
-  borderRadius: 8,
-  marginBottom: 20
-}
-
-const row = {
-  display: "flex",
-  justifyContent: "space-between",
-  padding: "8px 0",
-  borderBottom: "1px solid #334155"
-}
-
-const center = {
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  height: "100vh",
-  background: "#020617"
-}
+export default router
