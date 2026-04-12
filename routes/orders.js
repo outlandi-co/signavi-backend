@@ -5,55 +5,91 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
+/* ================= VALIDATION ================= */
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
-/* ================= TEST ================= */
+/* =========================================================
+   🔥 TEST ROUTE (VERIFY DEPLOY)
+========================================================= */
 router.get("/__test", (req, res) => {
   res.json({ message: "ORDERS ROUTE LIVE ✅" })
 })
 
 /* =========================================================
-   🔥 PATCH MUST COME BEFORE /:id
+   🔥 STATUS UPDATE (FINAL FIX)
+   NO MORE 404 EVER
 ========================================================= */
-router.patch("/status/:id", async (req, res) => {
-  try {
-    const { status } = req.body
+router.route("/status/:id")
+  .patch(async (req, res) => {
+    try {
+      const { status } = req.body
 
-    console.log("🔥 STATUS ROUTE HIT:", req.params.id, status)
+      console.log("🔥 PATCH STATUS HIT:", req.params.id, status)
 
-    const order = await Order.findById(req.params.id)
+      if (!isValidId(req.params.id)) {
+        return res.status(400).json({ message: "Invalid ID" })
+      }
 
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
+      const order = await Order.findById(req.params.id)
+
+      if (!order) {
+        return res.status(404).json({ message: "Order not found" })
+      }
+
+      const prevStatus = order.status
+      order.status = status
+
+      /* ================= TIMELINE ================= */
+      if (!order.timeline) order.timeline = []
+
+      order.timeline.push({
+        status,
+        date: new Date(),
+        note: `Moved from ${prevStatus} → ${status}`
+      })
+
+      await order.save()
+
+      /* ================= SOCKET ================= */
+      const io = req.app.get("io")
+      if (io) {
+        io.emit("jobUpdated", order)
+      }
+
+      /* ================= EMAIL ================= */
+      try {
+        await sendOrderStatusEmail(
+          order.email || process.env.EMAIL_USER,
+          status,
+          order._id,
+          order
+        )
+      } catch (err) {
+        console.warn("⚠️ Email failed:", err.message)
+      }
+
+      res.json({ success: true, data: order })
+
+    } catch (err) {
+      console.error("❌ STATUS ERROR:", err)
+      res.status(500).json({ message: err.message })
     }
+  })
 
-    order.status = status
-
-    order.timeline = order.timeline || []
-    order.timeline.push({
-      status,
-      date: new Date(),
-      note: "Moved via board"
-    })
-
-    await order.save()
-
-    res.json({ success: true, data: order })
-
+/* =========================================================
+   📦 GET ALL ORDERS
+========================================================= */
+router.get("/", async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 })
+    res.json({ success: true, data: orders })
   } catch (err) {
-    console.error(err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= GET ALL ================= */
-router.get("/", async (req, res) => {
-  const orders = await Order.find().sort({ createdAt: -1 })
-  res.json({ success: true, data: orders })
-})
-
 /* =========================================================
-   🔥 THIS MUST BE LAST
+   📦 GET SINGLE ORDER (KEEP LAST)
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
