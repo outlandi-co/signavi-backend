@@ -1,29 +1,31 @@
 import express from "express"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
-import { SquareClient } from "square"
+import { SquareClient, SquareEnvironment } from "square"
 
 dotenv.config()
 
 const router = express.Router()
 
-/* ================= DEBUG ENV ================= */
-console.log("🔥 SQUARE TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
-console.log("🔥 LOCATION ID EXISTS:", !!process.env.SQUARE_LOCATION_ID)
+/* ================= DEBUG ================= */
+console.log("🔥 NEW SQUARE CLIENT LOADED")
+console.log("🔥 TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
+console.log("🔥 LOCATION EXISTS:", !!process.env.SQUARE_LOCATION_ID)
 
-/* 🚨 HARD FAIL if missing */
+/* 🚨 HARD FAIL */
 if (!process.env.SQUARE_ACCESS_TOKEN) {
-  throw new Error("❌ SQUARE_ACCESS_TOKEN is missing in environment")
+  throw new Error("❌ Missing SQUARE_ACCESS_TOKEN")
 }
 
 if (!process.env.SQUARE_LOCATION_ID) {
-  throw new Error("❌ SQUARE_LOCATION_ID is missing in environment")
+  throw new Error("❌ Missing SQUARE_LOCATION_ID")
 }
 
 /* ================= CLIENT ================= */
-/* 🔥 FIX: EAA token → use accessToken */
+/* ✅ CORRECT for square@44 + EAA token */
 const client = new SquareClient({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Sandbox
 })
 
 /* ================= HELPER ================= */
@@ -73,9 +75,11 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url = response.paymentLink?.url
+    const url = response?.paymentLink?.url
 
-    if (!url) throw new Error("No payment link returned")
+    if (!url) {
+      throw new Error("No payment link returned")
+    }
 
     console.log("🚀 Square URL:", url)
 
