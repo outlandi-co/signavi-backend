@@ -62,6 +62,9 @@ import authRoutes from "./routes/authRoutes.js"
 import productionRoutes from "./routes/production.js"
 import quoteRoutes from "./routes/quotes.js"
 
+/* 🔥 ADD THIS LINE */
+import squareRoutes from "./routes/square.js"
+
 /* 🔥 DEBUG ROUTE LOAD */
 console.log("📦 Loading routes...")
 
@@ -71,11 +74,18 @@ app.use("/api/auth", authRoutes)
 app.use("/api/production", productionRoutes)
 app.use("/api/quotes", quoteRoutes)
 
+/* 🔥 ADD THIS LINE */
+app.use("/api/square", squareRoutes)
+
 console.log("✅ Routes loaded")
 
 /* ================= TEST ================= */
 app.get("/api/orders/__test", (req, res) => {
   res.json({ message: "ORDERS ROUTE LIVE ✅" })
+})
+
+app.get("/api/square/__test", (req, res) => {
+  res.json({ message: "SQUARE ROUTE LIVE ✅" })
 })
 
 /* ================= SOCKET ================= */
