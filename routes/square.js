@@ -1,17 +1,24 @@
 import express from "express"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
-
 import { SquareClient, SquareEnvironment } from "square"
 
 dotenv.config()
 
 const router = express.Router()
 
+/* ================= DEBUG ENV ================= */
+console.log("🔥 SQUARE TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
+
+/* 🚨 HARD FAIL if missing (prevents silent bugs) */
+if (!process.env.SQUARE_ACCESS_TOKEN) {
+  throw new Error("❌ SQUARE_ACCESS_TOKEN is missing in environment")
+}
+
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN, // ✅ FIXED KEY
-  environment: SquareEnvironment.Sandbox // ✅ FIXED ENV
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Sandbox
 })
 
 /* ================= HELPER ================= */
@@ -72,7 +79,6 @@ router.post("/create-payment/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ SQUARE ERROR:", err)
 
-    // 🔥 Better debugging for Render logs
     if (err.response?.body) {
       console.error("🔎 Square API Response:", err.response.body)
     }
