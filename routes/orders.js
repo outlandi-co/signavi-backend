@@ -9,28 +9,28 @@ const router = express.Router()
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 /* =========================================================
-   🔥 TEST ROUTE (VERY IMPORTANT FOR DEBUG)
+   🔥 TEST ROUTE (DEBUG)
 ========================================================= */
 router.get("/__test", (req, res) => {
   res.json({ message: "ORDERS ROUTE LIVE ✅" })
 })
 
 /* =========================================================
-   🔥 UPDATE STATUS (PRIMARY FIX)
+   🔥 SHARED STATUS HANDLER (ONE SOURCE OF TRUTH)
 ========================================================= */
-router.patch("/update-status/:id", async (req, res) => {
+const updateStatusHandler = async (req, res) => {
   try {
     const { status, trackingNumber, trackingLink, price, finalPrice, email } = req.body
+    const id = req.params.id
 
-    console.log("🔥 PATCH /update-status HIT:", req.params.id, status)
+    console.log("🔥 STATUS UPDATE HIT:", id, status)
 
-    /* VALIDATE ID */
-    if (!isValidId(req.params.id)) {
+    /* VALIDATE */
+    if (!isValidId(id)) {
       return res.status(400).json({ message: "Invalid ID" })
     }
 
-    /* FIND ORDER */
-    const order = await Order.findById(req.params.id)
+    const order = await Order.findById(id)
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
@@ -61,9 +61,7 @@ router.patch("/update-status/:id", async (req, res) => {
 
     /* ================= SOCKET ================= */
     const io = req.app.get("io")
-    if (io) {
-      io.emit("jobUpdated", order)
-    }
+    if (io) io.emit("jobUpdated", order)
 
     /* ================= EMAIL ================= */
     try {
@@ -84,7 +82,14 @@ router.patch("/update-status/:id", async (req, res) => {
     console.error("❌ STATUS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
-})
+}
+
+/* =========================================================
+   🔥 SUPPORT ALL FRONTEND ROUTES (KEY FIX)
+========================================================= */
+router.patch("/update-status/:id", updateStatusHandler)
+router.patch("/:id/status", updateStatusHandler)
+router.patch("/status/:id", updateStatusHandler)
 
 /* =========================================================
    📦 GET ALL ORDERS
@@ -99,7 +104,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   📦 GET ONE ORDER (KEEP LAST ALWAYS)
+   📦 GET ONE ORDER (ALWAYS LAST)
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
