@@ -49,12 +49,12 @@ console.log("CLIENT:", process.env.CLIENT_URL)
 
 /* ================= CORS ================= */
 const CLIENT_URL =
-  process.env.CLIENT_URL || "https://signavistudio.store"
+  process.env.CLIENT_URL || "https://signavi-studio.netlify.app"
 
 const allowedOrigins = [
   "http://localhost:5173",
   "https://signavi-studio.netlify.app",
-  "https://signavistudiostore.netlify.app",
+  "https://signavi-studio.netlify.app",
   CLIENT_URL
 ]
 

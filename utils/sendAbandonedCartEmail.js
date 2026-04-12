@@ -24,7 +24,7 @@ export const sendAbandonedCartEmail = async (cart) => {
 
     /* 🔥 PASS DISCOUNT INTO LINK */
     const CLIENT_URL =
-  process.env.CLIENT_URL || "https://signavistudio.store"
+  process.env.CLIENT_URL || "https://signavi-studio.netlify.app"
 
 const link = cart.discountCode
   ? `${CLIENT_URL}/store?code=${cart.discountCode}&discount=${cart.discountPercent}`
