@@ -15,13 +15,13 @@ router.get("/__test", (req, res) => {
 /* =========================================================
    🔥 PATCH MUST COME BEFORE /:id
 ========================================================= */
-router.patch("/:id/status", async (req, res) => {
+router.patch("/status/:id", async (req, res) => {
   try {
     const { status } = req.body
 
     console.log("🔥 PATCH HIT:", req.params.id, status)
 
-    if (!isValidId(req.params.id)) {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ message: "Invalid ID" })
     }
 
@@ -45,17 +45,6 @@ router.patch("/:id/status", async (req, res) => {
     await order.save()
 
     req.app.get("io")?.emit("jobUpdated", order)
-
-    try {
-      await sendOrderStatusEmail(
-        order.email || process.env.EMAIL_USER,
-        status,
-        order._id,
-        order
-      )
-    } catch (err) {
-      console.warn("⚠️ Email failed:", err.message)
-    }
 
     res.json({ success: true, data: order })
 
