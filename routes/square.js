@@ -16,8 +16,9 @@ if (!process.env.SQUARE_ACCESS_TOKEN) {
 }
 
 /* ================= CLIENT ================= */
+
 const client = new SquareClient({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  accessToken: "EAAAl9E7vifmWYikLPTalkh59joINxXHZtUYq4wWpTOgQB_l_9bMpO24Tl0BG6lw",
   environment: SquareEnvironment.Sandbox
 })
 
