@@ -9,17 +9,19 @@ const router = express.Router()
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 /* =========================================================
-   🔥 TEST ROUTE (DEBUG)
+   🔥 TEST ROUTE
 ========================================================= */
 router.get("/__test", (req, res) => {
   res.json({ message: "ORDERS ROUTE LIVE ✅" })
 })
 
 /* =========================================================
-   🛒 CREATE ORDER (🔥 REQUIRED FOR CART CHECKOUT)
+   🛒 CREATE ORDER (FIXED + SAFE)
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
+    console.log("🔥 CREATE ORDER BODY:", req.body)
+
     const {
       customerName,
       email,
@@ -29,13 +31,36 @@ router.post("/", async (req, res) => {
       source
     } = req.body
 
+    /* 🔥 SANITIZE ITEMS */
+    const safeItems = (items || []).map(item => ({
+      name: item.name || "Item",
+      quantity: Number(item.quantity) || 1,
+      price: Number(item.price) || 0
+    }))
+
+    /* 🔥 CALCULATIONS */
+    const totalQuantity = safeItems.reduce(
+      (acc, item) => acc + item.quantity,
+      0
+    )
+
+    const totalPrice = safeItems.reduce(
+      (acc, item) => acc + item.price * item.quantity,
+      0
+    )
+
     const order = await Order.create({
       customerName: customerName || "Guest",
       email: email || "",
-      items: items || [],
-      quantity: quantity || 1,
+      items: safeItems,
+
+      quantity: totalQuantity || Number(quantity) || 1,
       printType: printType || "custom",
       source: source || "store",
+
+      price: totalPrice,
+      finalPrice: totalPrice,
+
       status: "payment_required",
 
       timeline: [
@@ -56,21 +81,24 @@ router.post("/", async (req, res) => {
 
   } catch (err) {
     console.error("❌ ORDER CREATE ERROR:", err)
-    res.status(500).json({ message: err.message })
+
+    res.status(500).json({
+      message: err.message,
+      stack: err.stack
+    })
   }
 })
 
 /* =========================================================
-   🔥 SHARED STATUS HANDLER (ONE SOURCE OF TRUTH)
+   🔥 STATUS UPDATE HANDLER
 ========================================================= */
 const updateStatusHandler = async (req, res) => {
   try {
     const { status, trackingNumber, trackingLink, price, finalPrice, email } = req.body
     const id = req.params.id
 
-    console.log("🔥 STATUS UPDATE HIT:", id, status)
+    console.log("🔥 STATUS UPDATE:", id, status)
 
-    /* VALIDATE */
     if (!isValidId(id)) {
       return res.status(400).json({ message: "Invalid ID" })
     }
@@ -83,7 +111,7 @@ const updateStatusHandler = async (req, res) => {
 
     const prevStatus = order.status
 
-    /* ================= UPDATE FIELDS ================= */
+    /* UPDATE FIELDS */
     if (status) order.status = status
     if (trackingNumber !== undefined) order.trackingNumber = trackingNumber
     if (trackingLink !== undefined) order.trackingLink = trackingLink
@@ -91,7 +119,7 @@ const updateStatusHandler = async (req, res) => {
     if (finalPrice !== undefined) order.finalPrice = Number(finalPrice)
     if (email !== undefined) order.email = email
 
-    /* ================= TIMELINE ================= */
+    /* TIMELINE */
     if (!order.timeline) order.timeline = []
 
     if (status && status !== prevStatus) {
@@ -104,11 +132,11 @@ const updateStatusHandler = async (req, res) => {
 
     await order.save()
 
-    /* ================= SOCKET ================= */
+    /* SOCKET */
     const io = req.app.get("io")
     if (io) io.emit("jobUpdated", order)
 
-    /* ================= EMAIL ================= */
+    /* EMAIL */
     try {
       if (email) {
         await sendOrderStatusEmail(email, status, order._id, order)
@@ -117,7 +145,6 @@ const updateStatusHandler = async (req, res) => {
       console.warn("⚠️ Email failed:", err.message)
     }
 
-    /* ================= RESPONSE ================= */
     res.json({
       success: true,
       data: order
@@ -137,7 +164,7 @@ router.patch("/:id/status", updateStatusHandler)
 router.patch("/status/:id", updateStatusHandler)
 
 /* =========================================================
-   📦 GET ALL ORDERS
+   📦 GET ALL
 ========================================================= */
 router.get("/", async (req, res) => {
   try {
@@ -149,7 +176,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   📦 GET ONE ORDER
+   📦 GET ONE
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
