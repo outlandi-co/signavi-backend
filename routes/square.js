@@ -1,7 +1,7 @@
 import express from "express"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
-import { SquareClient, SquareEnvironment } from "square"
+import { SquareClient } from "square"
 
 dotenv.config()
 
@@ -9,17 +9,21 @@ const router = express.Router()
 
 /* ================= DEBUG ENV ================= */
 console.log("🔥 SQUARE TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
+console.log("🔥 LOCATION ID EXISTS:", !!process.env.SQUARE_LOCATION_ID)
 
-/* 🚨 HARD FAIL if missing (prevents silent bugs) */
+/* 🚨 HARD FAIL if missing */
 if (!process.env.SQUARE_ACCESS_TOKEN) {
   throw new Error("❌ SQUARE_ACCESS_TOKEN is missing in environment")
 }
 
-/* ================= CLIENT ================= */
+if (!process.env.SQUARE_LOCATION_ID) {
+  throw new Error("❌ SQUARE_LOCATION_ID is missing in environment")
+}
 
+/* ================= CLIENT ================= */
+/* 🔥 FIX: use `token` NOT `accessToken` */
 const client = new SquareClient({
-  accessToken: "EAAAl9E7vifmWYikLPTalkh59joINxXHZtUYq4wWpTOgQB_l_9bMpO24Tl0BG6lw",
-  environment: SquareEnvironment.Sandbox
+  token: process.env.SQUARE_ACCESS_TOKEN
 })
 
 /* ================= HELPER ================= */
