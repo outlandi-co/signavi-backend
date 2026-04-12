@@ -56,6 +56,7 @@ const CLIENT_URL =
 
 const allowedOrigins = [
   "http://localhost:5173",
+  "http://192.168.4.21:5173",
   "https://signavi-studio.netlify.app",
   CLIENT_URL
 ]

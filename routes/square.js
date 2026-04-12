@@ -1,24 +1,29 @@
 import express from "express"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
-import { Client, Environment } from "square"
+
+import { SquareClient } from "square"
 
 dotenv.config()
 
 const router = express.Router()
 
-const client = new Client({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
-  environment: Environment.Sandbox // 🔁 change to Production later
+/* ================= CLIENT ================= */
+const client = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: "sandbox"
 })
 
-const { checkoutApi } = client
+/* ================= TEST ================= */
+router.get("/__test", (req, res) => {
+  res.json({ message: "SQUARE ROUTE LIVE ✅" })
+})
 
-/* =========================================================
-   💳 CREATE PAYMENT LINK
-========================================================= */
+/* ================= CREATE PAYMENT ================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
+    console.log("💳 CREATE PAYMENT:", req.params.id)
+
     const order = await Order.findById(req.params.id)
 
     if (!order) {
@@ -33,11 +38,11 @@ router.post("/create-payment/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid amount" })
     }
 
-    const response = await checkoutApi.createPaymentLink({
+    const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
 
       quickPay: {
-        name: `Order #${order._id.slice(-6)}`,
+        name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
           amount,
           currency: "USD"
@@ -50,11 +55,11 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url = response.result.paymentLink?.url
+    const url = response.paymentLink?.url
 
     if (!url) throw new Error("No payment link returned")
 
-    console.log("💳 Square link:", url)
+    console.log("🚀 Square URL:", url)
 
     res.json({ url })
 
@@ -64,9 +69,7 @@ router.post("/create-payment/:id", async (req, res) => {
   }
 })
 
-/* =========================================================
-   ✅ MARK ORDER AS PAID (after redirect)
-========================================================= */
+/* ================= CONFIRM ================= */
 router.post("/confirm/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -77,6 +80,8 @@ router.post("/confirm/:id", async (req, res) => {
 
     if (order.status !== "paid") {
       order.status = "paid"
+
+      if (!order.timeline) order.timeline = []
 
       order.timeline.push({
         status: "paid",
@@ -96,11 +101,6 @@ router.post("/confirm/:id", async (req, res) => {
     console.error("❌ CONFIRM ERROR:", err)
     res.status(500).json({ message: err.message })
   }
-})
-
-/* DEBUG */
-router.get("/__test", (req, res) => {
-  res.json({ message: "SQUARE ROUTE LIVE ✅" })
 })
 
 export default router
