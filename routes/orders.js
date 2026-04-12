@@ -9,13 +9,20 @@ const router = express.Router()
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 /* =========================================================
-   🔥 UPDATE STATUS (FIXES 404 + DRAG)
+   🔥 TEST ROUTE (VERIFY DEPLOYMENT FIRST)
+========================================================= */
+router.get("/__test", (req, res) => {
+  res.json({ message: "ORDERS ROUTE LIVE ✅" })
+})
+
+/* =========================================================
+   🔥 UPDATE STATUS (MUST BE ABOVE /:id)
 ========================================================= */
 router.patch("/:id/status", async (req, res) => {
   try {
     const { status } = req.body
 
-    console.log("🔥 PATCH STATUS HIT:", req.params.id, status)
+    console.log("🔥 PATCH HIT:", req.params.id, status)
 
     if (!isValidId(req.params.id)) {
       return res.status(400).json({ message: "Invalid ID" })
@@ -80,7 +87,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   📦 GET ONE ORDER
+   📦 GET SINGLE ORDER (KEEP LAST)
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
