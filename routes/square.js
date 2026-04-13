@@ -14,7 +14,7 @@ console.log("🔥 TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
 console.log("🔥 LOCATION EXISTS:", !!process.env.SQUARE_LOCATION_ID)
 console.log("🌐 CLIENT_URL:", process.env.CLIENT_URL)
 console.log(
-  "🔑 TOKEN VALUE:",
+  "🔑 TOKEN:",
   process.env.SQUARE_ACCESS_TOKEN
     ? process.env.SQUARE_ACCESS_TOKEN.slice(0, 8) + "..."
     : "MISSING"
@@ -30,13 +30,14 @@ if (!process.env.SQUARE_LOCATION_ID) {
 }
 
 /* ================= CLIENT ================= */
+/* ✅ SANDBOX MODE (matches EAAA token) */
 const client = new SquareClient({
   token: process.env.SQUARE_ACCESS_TOKEN,
   environment: SquareEnvironment.Sandbox
 })
 
 /* ================= HELPER ================= */
-/* ✅ USE NUMBER (NOT BigInt) */
+/* ✅ NUMBER (NOT BigInt) */
 const toCents = (amount) => {
   return Math.round(Number(amount || 0) * 100)
 }
@@ -91,7 +92,7 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-          amount: Number(amount), // 🔥 KEY FIX
+          amount: Number(amount), // ✅ MUST be number
           currency: "USD"
         },
         locationId: process.env.SQUARE_LOCATION_ID
