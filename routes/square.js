@@ -13,7 +13,12 @@ console.log("🔥 NEW SQUARE CLIENT LOADED")
 console.log("🔥 TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
 console.log("🔥 LOCATION EXISTS:", !!process.env.SQUARE_LOCATION_ID)
 console.log("🌐 CLIENT_URL:", process.env.CLIENT_URL)
-console.log("🔑 TOKEN VALUE:", process.env.SQUARE_ACCESS_TOKEN?.slice(0, 10) + "...")
+console.log(
+  "🔑 TOKEN VALUE:",
+  process.env.SQUARE_ACCESS_TOKEN
+    ? process.env.SQUARE_ACCESS_TOKEN.slice(0, 8) + "..."
+    : "MISSING"
+)
 
 /* 🚨 HARD FAIL */
 if (!process.env.SQUARE_ACCESS_TOKEN) {
@@ -25,16 +30,15 @@ if (!process.env.SQUARE_LOCATION_ID) {
 }
 
 /* ================= CLIENT ================= */
-/* ✅ FIXED: use token (NOT accessToken) */
 const client = new SquareClient({
   token: process.env.SQUARE_ACCESS_TOKEN,
   environment: SquareEnvironment.Sandbox
 })
 
 /* ================= HELPER ================= */
-/* ✅ FIXED: no BigInt */
+/* ✅ USE NUMBER (NOT BigInt) */
 const toCents = (amount) => {
-  return BigInt(Math.round(Number(amount || 0) * 100))
+  return Math.round(Number(amount || 0) * 100)
 }
 
 /* ================= TEST ================= */
@@ -52,6 +56,7 @@ router.post("/create-payment/:id", async (req, res) => {
     const order = await Order.findById(req.params.id)
 
     if (!order) {
+      console.error("❌ Order not found")
       return res.status(404).json({ message: "Order not found" })
     }
 
@@ -61,18 +66,24 @@ router.post("/create-payment/:id", async (req, res) => {
     const amount = toCents(rawAmount)
 
     console.log("💰 RAW:", rawAmount)
-    console.log("💰 CENTS:", amount.toString())
-    console.log("🔎 TYPE:", typeof amount)
+    console.log("💰 CENTS:", amount, typeof amount)
 
-    if (!amount || amount <= 0n) {
+    if (!amount || amount <= 0) {
       return res.status(400).json({ message: "Invalid amount" })
     }
 
     if (!process.env.CLIENT_URL) {
+      console.error("❌ CLIENT_URL missing")
       return res.status(500).json({
         message: "CLIENT_URL missing in environment"
       })
     }
+
+    console.log("📍 LOCATION:", process.env.SQUARE_LOCATION_ID)
+    console.log(
+      "🌐 REDIRECT:",
+      `${process.env.CLIENT_URL}/success/${order._id}`
+    )
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
@@ -80,7 +91,7 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-          amount, // ✅ NUMBER
+          amount: Number(amount), // 🔥 KEY FIX
           currency: "USD"
         },
         locationId: process.env.SQUARE_LOCATION_ID
@@ -94,7 +105,7 @@ router.post("/create-payment/:id", async (req, res) => {
     const url = response?.paymentLink?.url
 
     if (!url) {
-      throw new Error("No payment link returned")
+      throw new Error("No payment link returned from Square")
     }
 
     console.log("🚀 Square URL:", url)
