@@ -38,9 +38,7 @@ const client = new SquareClient({
 
 /* ================= HELPER ================= */
 /* ✅ NUMBER (NOT BigInt) */
-const toCents = (amount) => {
-  return Math.round(Number(amount || 0) * 100)
-}
+
 
 /* ================= TEST ================= */
 router.get("/__test", (req, res) => {
@@ -64,7 +62,7 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("🧾 ORDER:", order)
 
     const rawAmount = order.finalPrice || order.price || 0
-    const amount = toCents(rawAmount)
+    const amount = Math.round(Number(rawAmount || 0) * 100)
 
     console.log("💰 RAW:", rawAmount)
     console.log("💰 CENTS:", amount, typeof amount)
@@ -92,9 +90,9 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-          amount: Number(amount), // ✅ MUST be number
-          currency: "USD"
-        },
+        amount: BigInt(Math.round(Number(rawAmount || 0) * 100)), // 🔥 FIX
+        currency: "USD"
+},
         locationId: process.env.SQUARE_LOCATION_ID
       },
 
