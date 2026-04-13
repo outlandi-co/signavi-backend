@@ -13,6 +13,7 @@ console.log("🔥 NEW SQUARE CLIENT LOADED")
 console.log("🔥 TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
 console.log("🔥 LOCATION EXISTS:", !!process.env.SQUARE_LOCATION_ID)
 console.log("🌐 CLIENT_URL:", process.env.CLIENT_URL)
+console.log("🔑 TOKEN VALUE:", process.env.SQUARE_ACCESS_TOKEN?.slice(0, 10) + "...")
 
 /* 🚨 HARD FAIL */
 if (!process.env.SQUARE_ACCESS_TOKEN) {
@@ -24,13 +25,14 @@ if (!process.env.SQUARE_LOCATION_ID) {
 }
 
 /* ================= CLIENT ================= */
+/* ✅ FIXED: use token (NOT accessToken) */
 const client = new SquareClient({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  token: process.env.SQUARE_ACCESS_TOKEN,
   environment: SquareEnvironment.Sandbox
 })
 
 /* ================= HELPER ================= */
-/* ✅ FIXED: NO BigInt */
+/* ✅ FIXED: no BigInt */
 const toCents = (amount) => {
   return Math.round(Number(amount || 0) * 100)
 }
@@ -55,15 +57,11 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("🧾 ORDER:", order)
 
-    if (order.status !== "payment_required") {
-      console.warn("⚠️ Order already processed:", order.status)
-    }
-
     const rawAmount = order.finalPrice || order.price || 0
     const amount = toCents(rawAmount)
 
-    console.log("💰 RAW AMOUNT:", rawAmount)
-    console.log("💰 FINAL (cents):", amount)
+    console.log("💰 RAW:", rawAmount)
+    console.log("💰 CENTS:", amount)
     console.log("🔎 TYPE:", typeof amount)
 
     if (!amount || amount <= 0) {
@@ -71,8 +69,9 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     if (!process.env.CLIENT_URL) {
-      console.error("❌ CLIENT_URL missing")
-      return res.status(500).json({ message: "Server config error: CLIENT_URL missing" })
+      return res.status(500).json({
+        message: "CLIENT_URL missing in environment"
+      })
     }
 
     const response = await client.checkout.paymentLinks.create({
@@ -81,7 +80,7 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-          amount, // ✅ NUMBER (not BigInt)
+          amount, // ✅ NUMBER
           currency: "USD"
         },
         locationId: process.env.SQUARE_LOCATION_ID
@@ -127,12 +126,10 @@ router.post("/confirm/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔒 prevent duplicate */
     if (order.status === "paid") {
       return res.json({ success: true, message: "Already paid" })
     }
 
-    /* ================= UPDATE ================= */
     order.status = "paid"
 
     if (!order.timeline) order.timeline = []
@@ -145,13 +142,11 @@ router.post("/confirm/:id", async (req, res) => {
 
     await order.save()
 
-    /* ================= SOCKET ================= */
+    /* 🔥 SOCKET */
     const io = req.app.get("io")
-    if (io) {
-      io.emit("jobUpdated", order)
-    }
+    if (io) io.emit("jobUpdated", order)
 
-    /* ================= EMAIL ================= */
+    /* 📧 EMAIL */
     try {
       if (order.email) {
         await sendOrderStatusEmail(
