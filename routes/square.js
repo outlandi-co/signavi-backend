@@ -34,7 +34,7 @@ const client = new SquareClient({
 /* ================= HELPER ================= */
 /* ✅ FIXED: no BigInt */
 const toCents = (amount) => {
-  return Math.round(Number(amount || 0) * 100)
+  return BigInt(Math.round(Number(amount || 0) * 100))
 }
 
 /* ================= TEST ================= */
@@ -61,10 +61,10 @@ router.post("/create-payment/:id", async (req, res) => {
     const amount = toCents(rawAmount)
 
     console.log("💰 RAW:", rawAmount)
-    console.log("💰 CENTS:", amount)
+    console.log("💰 CENTS:", amount.toString())
     console.log("🔎 TYPE:", typeof amount)
 
-    if (!amount || amount <= 0) {
+    if (!amount || amount <= 0n) {
       return res.status(400).json({ message: "Invalid amount" })
     }
 

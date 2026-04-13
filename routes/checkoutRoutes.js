@@ -36,7 +36,7 @@ router.post("/create-checkout/:id", async (req, res) => {
     const amount = Math.round((order.finalPrice || order.price || 0) * 100)
 
     /* 🚨 VALIDATION */
-    if (!amount || amount <= 0) {
+    if (!amount || amount <= 0n) {
       return res.status(400).json({
         message: "Order must have a price before payment"
       })
