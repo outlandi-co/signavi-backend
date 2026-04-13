@@ -30,15 +30,10 @@ if (!process.env.SQUARE_LOCATION_ID) {
 }
 
 /* ================= CLIENT ================= */
-/* ✅ SANDBOX MODE (matches EAAA token) */
 const client = new SquareClient({
   token: process.env.SQUARE_ACCESS_TOKEN,
-  environment: SquareEnvironment.Sandbox
+  environment: SquareEnvironment.Production
 })
-
-/* ================= HELPER ================= */
-/* ✅ NUMBER (NOT BigInt) */
-
 
 /* ================= TEST ================= */
 router.get("/__test", (req, res) => {
@@ -65,14 +60,13 @@ router.post("/create-payment/:id", async (req, res) => {
     const amount = Math.round(Number(rawAmount || 0) * 100)
 
     console.log("💰 RAW:", rawAmount)
-    console.log("💰 CENTS:", amount, typeof amount)
+    console.log("💰 CENTS:", amount)
 
     if (!amount || amount <= 0) {
       return res.status(400).json({ message: "Invalid amount" })
     }
 
     if (!process.env.CLIENT_URL) {
-      console.error("❌ CLIENT_URL missing")
       return res.status(500).json({
         message: "CLIENT_URL missing in environment"
       })
@@ -90,9 +84,9 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-        amount: BigInt(Math.round(Number(rawAmount || 0) * 100)), // 🔥 FIX
-        currency: "USD"
-},
+          amount: BigInt(amount), // ✅ REQUIRED for quickPay
+          currency: "USD"
+        },
         locationId: process.env.SQUARE_LOCATION_ID
       },
 
@@ -101,9 +95,13 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url = response?.paymentLink?.url
+    /* 🔥 FIX: handle BOTH response formats */
+    const url =
+      response?.paymentLink?.url ||
+      response?.url
 
     if (!url) {
+      console.error("❌ FULL SQUARE RESPONSE:", response)
       throw new Error("No payment link returned from Square")
     }
 
@@ -152,11 +150,9 @@ router.post("/confirm/:id", async (req, res) => {
 
     await order.save()
 
-    /* 🔥 SOCKET */
     const io = req.app.get("io")
     if (io) io.emit("jobUpdated", order)
 
-    /* 📧 EMAIL */
     try {
       if (order.email) {
         await sendOrderStatusEmail(
