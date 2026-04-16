@@ -26,22 +26,30 @@ export default function CustomerRegister() {
     setLoading(true)
 
     try {
-      const res = await api.post("/auth/register", {
-        ...form,
+      /* 🔥 STEP 1: REGISTER USER */
+      await api.post("/auth/register", {
+        name: form.name,
+        email: form.email,
+        password: form.password,
         role: "customer"
       })
 
-      /* 🔥 AUTO LOGIN */
-      localStorage.setItem("token", res.data.token)
-      localStorage.setItem("user", JSON.stringify(res.data.user))
-      localStorage.setItem("userEmail", res.data.user.email)
+      /* 🔥 STEP 2: LOGIN USER */
+      const res = await api.post("/auth/login", {
+        email: form.email,
+        password: form.password
+      })
+
+      /* 🔥 STORE CUSTOMER AUTH */
+      localStorage.setItem("customerToken", res.data.token)
+      localStorage.setItem("customerUser", JSON.stringify(res.data.user))
 
       alert("Welcome! You're now logged in.")
 
       navigate("/store")
 
     } catch (err) {
-      console.error(err)
+      console.error("❌ REGISTER ERROR:", err)
       alert("Registration failed")
     } finally {
       setLoading(false)
