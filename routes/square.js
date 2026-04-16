@@ -31,7 +31,7 @@ if (!process.env.SQUARE_LOCATION_ID) {
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
+  accessToken: process.env.SQUARE_ACCESS_TOKEN, // ✅ FIXED
   environment: SquareEnvironment.Production
 })
 
@@ -72,11 +72,7 @@ router.post("/create-payment/:id", async (req, res) => {
       })
     }
 
-    console.log("📍 LOCATION:", process.env.SQUARE_LOCATION_ID)
-    console.log(
-      "🌐 REDIRECT:",
-      `${process.env.CLIENT_URL}/success/${order._id}`
-    )
+    console.log("📍 LOCATION USED:", process.env.SQUARE_LOCATION_ID)
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
@@ -84,10 +80,10 @@ router.post("/create-payment/:id", async (req, res) => {
       quickPay: {
         name: `Order #${order._id.toString().slice(-6)}`,
         priceMoney: {
-          amount: BigInt(amount), // ✅ REQUIRED for quickPay
+          amount: BigInt(amount),
           currency: "USD"
         },
-        locationId: process.env.SQUARE_LOCATION_ID
+        locationId: process.env.SQUARE_LOCATION_ID // ✅ CRITICAL
       },
 
       checkoutOptions: {
@@ -95,7 +91,6 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    /* 🔥 FIX: handle BOTH response formats */
     const url =
       response?.paymentLink?.url ||
       response?.url
