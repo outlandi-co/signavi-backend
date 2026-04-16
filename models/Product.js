@@ -13,16 +13,47 @@ const colorSchema = new mongoose.Schema({
   }
 }, { _id: false })
 
+/* ================= VARIANT SCHEMA ================= */
+const variantSchema = new mongoose.Schema({
+  color: {
+    type: String,
+    required: true
+  },
+  size: {
+    type: String,
+    required: true,
+    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"]
+  },
+  stock: {
+    type: Number,
+    default: 0
+  },
+  price: {
+    type: Number,
+    default: 0
+  }
+}, { _id: false })
+
 /* ================= PRODUCT ================= */
 const productSchema = new mongoose.Schema({
 
   /* 🔥 CORE */
-  name: String,
-  description: String,
+  name: {
+    type: String,
+    required: true,
+    trim: true
+  },
+
+  description: {
+    type: String,
+    default: ""
+  },
 
   category: {
     type: String,
-    default: "general"
+    default: "general",
+    lowercase: true,
+    trim: true
   },
 
   brand: {
@@ -30,26 +61,38 @@ const productSchema = new mongoose.Schema({
     default: "Bella Canvas"
   },
 
-  styleCode: String,
+  styleCode: {
+    type: String,
+    default: ""
+  },
 
-  /* 💰 PRICING */
-  price: Number,
+  /* 🔥 VARIANTS (MAIN SYSTEM) */
+  variants: {
+    type: [variantSchema],
+    default: []
+  },
+
+  /* 💰 BASE PRICING (fallback) */
+  price: {
+    type: Number,
+    default: 0
+  },
 
   cost: {
     type: Number,
     default: 0
   },
 
-  /* 📦 INVENTORY */
+  /* 📦 TOTAL STOCK (fallback) */
   stock: {
     type: Number,
     default: 0
   },
 
-  /* 🔥 SIZES (STRICT VALIDATION UP TO 3XL) */
+  /* 📏 SIZES (UI SUPPORT) */
   sizes: {
     type: [String],
-    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL"],
+    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"], // ✅ FIXED
     default: []
   },
 
@@ -60,7 +103,10 @@ const productSchema = new mongoose.Schema({
   },
 
   /* 🖼️ IMAGE */
-  image: String,
+  image: {
+    type: String,
+    default: ""
+  },
 
   /* ⚙️ CONTROL */
   active: {

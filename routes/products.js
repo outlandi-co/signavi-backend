@@ -46,7 +46,6 @@ router.get("/", async (req, res) => {
 /* ================= CREATE ================= */
 router.post("/", upload.single("image"), async (req, res) => {
   try {
-
     const sizes = safeParse(req.body.sizes)
 
     const colors = safeParse(req.body.colors).map(c =>
@@ -56,6 +55,39 @@ router.post("/", upload.single("image"), async (req, res) => {
     /* 🔥 FIXED NUMBER HANDLING */
     const parsedPrice = parseFloat(req.body.price)
     const parsedCost = parseFloat(req.body.cost)
+    const parsedStock = parseInt(req.body.stock)
+
+    const basePrice = !isNaN(parsedPrice)
+      ? parsedPrice
+      : !isNaN(parsedCost)
+      ? parsedCost
+      : 0
+
+    const baseStock = !isNaN(parsedStock) ? parsedStock : 0
+
+    /* 🔥 BUILD VARIANTS */
+    let variants = []
+
+    colors.forEach(c => {
+      sizes.forEach(size => {
+
+        const colorName = c.name || c
+
+        let price = basePrice
+
+        /* 🔥 SIZE PRICE LOGIC */
+        if (["2XL", "3XL", "4XL"].includes(size)) {
+          price = basePrice + 4
+        }
+
+        variants.push({
+          color: colorName,
+          size,
+          stock: baseStock,
+          price
+        })
+      })
+    })
 
     const product = await Product.create({
       name: req.body.name?.trim(),
@@ -69,16 +101,12 @@ router.post("/", upload.single("image"), async (req, res) => {
       styleCode: req.body.styleCode || "",
 
       cost: !isNaN(parsedCost) ? parsedCost : 0,
-      price: !isNaN(parsedPrice)
-        ? parsedPrice
-        : !isNaN(parsedCost)
-        ? parsedCost
-        : 0,
-
-      stock: Number(req.body.stock) || 0,
+      price: basePrice,
+      stock: baseStock,
 
       sizes,
       colors,
+      variants, // 🔥 NEW SYSTEM
 
       image: req.file
         ? `/uploads/${req.file.filename}`
@@ -86,6 +114,9 @@ router.post("/", upload.single("image"), async (req, res) => {
 
       active: req.body.active !== "false"
     })
+
+    console.log("✅ PRODUCT CREATED:", product.name)
+    console.log("📦 VARIANTS:", variants.length)
 
     res.status(201).json(product)
 
@@ -98,16 +129,46 @@ router.post("/", upload.single("image"), async (req, res) => {
 /* ================= UPDATE ================= */
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
-
     const sizes = safeParse(req.body.sizes)
 
     const colors = safeParse(req.body.colors).map(c =>
       typeof c === "string" ? { name: c } : c
     )
 
-    /* 🔥 FIXED NUMBER HANDLING */
     const parsedPrice = parseFloat(req.body.price)
     const parsedCost = parseFloat(req.body.cost)
+    const parsedStock = parseInt(req.body.stock)
+
+    const basePrice = !isNaN(parsedPrice)
+      ? parsedPrice
+      : !isNaN(parsedCost)
+      ? parsedCost
+      : 0
+
+    const baseStock = !isNaN(parsedStock) ? parsedStock : 0
+
+    /* 🔥 REBUILD VARIANTS */
+    let variants = []
+
+    colors.forEach(c => {
+      sizes.forEach(size => {
+
+        const colorName = c.name || c
+
+        let price = basePrice
+
+        if (["2XL", "3XL", "4XL"].includes(size)) {
+          price = basePrice + 4
+        }
+
+        variants.push({
+          color: colorName,
+          size,
+          stock: baseStock,
+          price
+        })
+      })
+    })
 
     const updateData = {
       name: req.body.name?.trim(),
@@ -121,16 +182,12 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       styleCode: req.body.styleCode || "",
 
       cost: !isNaN(parsedCost) ? parsedCost : 0,
-      price: !isNaN(parsedPrice)
-        ? parsedPrice
-        : !isNaN(parsedCost)
-        ? parsedCost
-        : 0,
-
-      stock: Number(req.body.stock) || 0,
+      price: basePrice,
+      stock: baseStock,
 
       sizes,
       colors,
+      variants,
 
       active: req.body.active !== "false"
     }
@@ -144,6 +201,9 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       updateData,
       { new: true }
     )
+
+    console.log("🔄 PRODUCT UPDATED:", updated.name)
+    console.log("📦 VARIANTS:", variants.length)
 
     res.json(updated)
 
