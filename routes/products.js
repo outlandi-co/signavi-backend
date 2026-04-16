@@ -23,8 +23,8 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage })
 
-/* ================= SAFE PARSER ================= */
-const safeParse = (val, fallback = []) => {
+/* ================= HELPER ================= */
+const parseJSON = (val, fallback) => {
   try {
     return val ? JSON.parse(val) : fallback
   } catch {
@@ -33,26 +33,34 @@ const safeParse = (val, fallback = []) => {
 }
 
 /* ================= GET ================= */
-router.get("/", async (req, res) => {
-  try {
-    const products = await Product.find().sort({ createdAt: -1 })
-    res.json(products)
-  } catch (err) {
-    console.error("❌ GET PRODUCTS ERROR:", err)
-    res.status(500).json({ error: err.message })
-  }
-})
-
-/* ================= CREATE ================= */
 router.post("/", upload.single("image"), async (req, res) => {
   try {
 
-    const sizes = safeParse(req.body.sizes)
+    /* ================= SAFE PARSE ================= */
+    let sizes = []
+    let colors = []
 
-    const colors = safeParse(req.body.colors).map(c =>
-      typeof c === "string" ? { name: c } : c
-    )
+    try {
+      sizes = req.body.sizes ? JSON.parse(req.body.sizes) : []
+    } catch {
+      sizes = []
+    }
 
+    try {
+      const raw = req.body.colors ? JSON.parse(req.body.colors) : []
+
+      colors = raw.map(c => {
+        if (typeof c === "string") {
+          return { name: c } // 🔥 convert string → object
+        }
+        return c
+      })
+
+    } catch {
+      colors = []
+    }
+
+    /* ================= CREATE ================= */
     const product = await Product.create({
       name: req.body.name,
       description: req.body.description || "",
@@ -63,6 +71,7 @@ router.post("/", upload.single("image"), async (req, res) => {
 
       cost: Number(req.body.cost) || 0,
       price: Number(req.body.price) || Number(req.body.cost) || 0,
+
       stock: Number(req.body.stock) || 0,
 
       sizes,
@@ -78,7 +87,7 @@ router.post("/", upload.single("image"), async (req, res) => {
     res.status(201).json(product)
 
   } catch (err) {
-    console.error("💥 CREATE PRODUCT ERROR:", err)
+    console.error("❌ CREATE PRODUCT ERROR:", err)
     res.status(500).json({ error: err.message })
   }
 })
@@ -87,9 +96,13 @@ router.post("/", upload.single("image"), async (req, res) => {
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
 
-    const sizes = safeParse(req.body.sizes)
+    const sizes = req.body.sizes ? JSON.parse(req.body.sizes) : []
 
-    const colors = safeParse(req.body.colors).map(c =>
+    let colorsRaw = req.body.colors
+      ? JSON.parse(req.body.colors)
+      : []
+
+    const colors = colorsRaw.map(c =>
       typeof c === "string" ? { name: c } : c
     )
 
@@ -119,11 +132,10 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     res.json(updated)
 
   } catch (err) {
-    console.error("💥 UPDATE ERROR:", err)
+    console.error("❌ UPDATE ERROR:", err)
     res.status(500).json({ error: err.message })
   }
 })
-
 /* ================= DELETE ================= */
 router.delete("/:id", async (req, res) => {
   try {
@@ -131,6 +143,60 @@ router.delete("/:id", async (req, res) => {
     res.json({ message: "Deleted" })
   } catch (err) {
     console.error("❌ DELETE ERROR:", err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+router.put("/:id", upload.single("image"), async (req, res) => {
+  try {
+
+    let sizes = []
+    let colors = []
+
+    try {
+      sizes = req.body.sizes ? JSON.parse(req.body.sizes) : []
+    } catch {
+      sizes = []
+    }
+
+    try {
+      const raw = req.body.colors ? JSON.parse(req.body.colors) : []
+
+      colors = raw.map(c =>
+        typeof c === "string" ? { name: c } : c
+      )
+
+    } catch {
+      colors = []
+    }
+
+    const updateData = {
+      ...req.body,
+
+      price: Number(req.body.price) || 0,
+      cost: Number(req.body.cost) || 0,
+      stock: Number(req.body.stock) || 0,
+
+      sizes,
+      colors,
+
+      active: req.body.active !== "false"
+    }
+
+    if (req.file) {
+      updateData.image = `/uploads/${req.file.filename}`
+    }
+
+    const updated = await Product.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    )
+
+    res.json(updated)
+
+  } catch (err) {
+    console.error("❌ UPDATE ERROR:", err)
     res.status(500).json({ error: err.message })
   }
 })
