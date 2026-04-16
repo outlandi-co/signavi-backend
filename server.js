@@ -8,6 +8,7 @@ import { Server } from "socket.io"
 import path from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
+import { SquareClient, SquareEnvironment } from "square"
 
 import { checkAbandonedCarts } from "./services/abandonedCartService.js"
 
@@ -49,7 +50,7 @@ console.log("🚀 SERVER STARTING...")
 
 /* ================= CORS ================= */
 const allowedOrigins = [
-  "https://signavistudio.store", // 🔥 YOUR REAL DOMAIN
+  "https://signavistudio.store",
   "https://signavi-studio-git-main-signavistudio-9574s-projects.vercel.app",
   "http://localhost:5173"
 ]
@@ -60,7 +61,6 @@ app.use(cors({
 
     if (!origin) return callback(null, true)
 
-    // ✅ allow all vercel previews
     if (origin.includes("vercel.app")) {
       return callback(null, true)
     }
@@ -74,6 +74,7 @@ app.use(cors({
   },
   credentials: true
 }))
+
 /* ================= BODY ================= */
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
@@ -106,6 +107,28 @@ app.use("/api/tax", taxRoutes)
 app.use("/api/square", squareRoutes)
 
 console.log("✅ Routes mounted")
+
+/* ================= SQUARE DEBUG ================= */
+const squareClient = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Production
+})
+
+app.get("/api/square/locations", async (req, res) => {
+  try {
+    const response = await squareClient.locations.list()
+
+    console.log("📍 SQUARE LOCATIONS:", JSON.stringify(response, null, 2))
+
+    res.json(response)
+  } catch (err) {
+    console.error("❌ SQUARE LOCATIONS ERROR:", err)
+    res.status(500).json({
+      message: err.message,
+      details: err
+    })
+  }
+})
 
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
