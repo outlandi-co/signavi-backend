@@ -85,23 +85,30 @@ router.post("/", upload.single("image"), async (req, res) => {
 /* ================= UPDATE ================= */
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
-    const updateData = {
 
+    const sizes = req.body.sizes ? JSON.parse(req.body.sizes) : []
+
+    let colorsRaw = req.body.colors
+      ? JSON.parse(req.body.colors)
+      : []
+
+    const colors = colorsRaw.map(c =>
+      typeof c === "string" ? { name: c } : c
+    )
+
+    const updateData = {
       ...req.body,
 
-      /* NUMBERS */
       price: Number(req.body.price) || 0,
       cost: Number(req.body.cost) || 0,
       stock: Number(req.body.stock) || 0,
 
-      /* ARRAYS */
-      sizes: parseJSON(req.body.sizes, []),
-      colors: parseJSON(req.body.colors, []),
+      sizes,
+      colors,
 
       active: req.body.active !== "false"
     }
 
-    /* 🔥 IMAGE UPDATE */
     if (req.file) {
       updateData.image = `/uploads/${req.file.filename}`
     }
@@ -119,7 +126,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
     res.status(500).json({ error: err.message })
   }
 })
-
 /* ================= DELETE ================= */
 router.delete("/:id", async (req, res) => {
   try {
