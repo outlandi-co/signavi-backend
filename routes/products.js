@@ -33,22 +33,35 @@ const parseJSON = (val, fallback) => {
 }
 
 /* ================= GET ================= */
-router.get("/", async (req, res) => {
-  try {
-    const products = await Product.find().sort({ createdAt: -1 })
-    res.json(products)
-  } catch (err) {
-    console.error("❌ GET PRODUCTS ERROR:", err)
-    res.status(500).json({ error: err.message })
-  }
-})
-
-/* ================= CREATE ================= */
 router.post("/", upload.single("image"), async (req, res) => {
   try {
-    const product = await Product.create({
 
-      /* CORE */
+    /* ================= SAFE PARSE ================= */
+    let sizes = []
+    let colors = []
+
+    try {
+      sizes = req.body.sizes ? JSON.parse(req.body.sizes) : []
+    } catch {
+      sizes = []
+    }
+
+    try {
+      const raw = req.body.colors ? JSON.parse(req.body.colors) : []
+
+      colors = raw.map(c => {
+        if (typeof c === "string") {
+          return { name: c } // 🔥 convert string → object
+        }
+        return c
+      })
+
+    } catch {
+      colors = []
+    }
+
+    /* ================= CREATE ================= */
+    const product = await Product.create({
       name: req.body.name,
       description: req.body.description || "",
       category: (req.body.category || "general").toLowerCase(),
@@ -56,20 +69,17 @@ router.post("/", upload.single("image"), async (req, res) => {
       brand: req.body.brand || "Bella Canvas",
       styleCode: req.body.styleCode || "",
 
-      /* PRICING */
       cost: Number(req.body.cost) || 0,
       price: Number(req.body.price) || Number(req.body.cost) || 0,
 
-      /* INVENTORY */
       stock: Number(req.body.stock) || 0,
 
-      sizes: parseJSON(req.body.sizes, []),
+      sizes,
+      colors,
 
-      /* 🎨 COLORS (ARRAY OF OBJECTS) */
-      colors: parseJSON(req.body.colors, []),
-
-      /* IMAGE */
-      image: req.file ? `/uploads/${req.file.filename}` : req.body.image || "",
+      image: req.file
+        ? `/uploads/${req.file.filename}`
+        : "",
 
       active: req.body.active !== "false"
     })
@@ -133,6 +143,60 @@ router.delete("/:id", async (req, res) => {
     res.json({ message: "Deleted" })
   } catch (err) {
     console.error("❌ DELETE ERROR:", err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+router.put("/:id", upload.single("image"), async (req, res) => {
+  try {
+
+    let sizes = []
+    let colors = []
+
+    try {
+      sizes = req.body.sizes ? JSON.parse(req.body.sizes) : []
+    } catch {
+      sizes = []
+    }
+
+    try {
+      const raw = req.body.colors ? JSON.parse(req.body.colors) : []
+
+      colors = raw.map(c =>
+        typeof c === "string" ? { name: c } : c
+      )
+
+    } catch {
+      colors = []
+    }
+
+    const updateData = {
+      ...req.body,
+
+      price: Number(req.body.price) || 0,
+      cost: Number(req.body.cost) || 0,
+      stock: Number(req.body.stock) || 0,
+
+      sizes,
+      colors,
+
+      active: req.body.active !== "false"
+    }
+
+    if (req.file) {
+      updateData.image = `/uploads/${req.file.filename}`
+    }
+
+    const updated = await Product.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    )
+
+    res.json(updated)
+
+  } catch (err) {
+    console.error("❌ UPDATE ERROR:", err)
     res.status(500).json({ error: err.message })
   }
 })
