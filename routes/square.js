@@ -13,12 +13,6 @@ console.log("🔥 NEW SQUARE CLIENT LOADED")
 console.log("🔥 TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
 console.log("🔥 LOCATION EXISTS:", !!process.env.SQUARE_LOCATION_ID)
 console.log("🌐 CLIENT_URL:", process.env.CLIENT_URL)
-console.log(
-  "🔑 TOKEN:",
-  process.env.SQUARE_ACCESS_TOKEN
-    ? process.env.SQUARE_ACCESS_TOKEN.slice(0, 8) + "..."
-    : "MISSING"
-)
 
 /* 🚨 HARD FAIL */
 if (!process.env.SQUARE_ACCESS_TOKEN) {
@@ -31,7 +25,7 @@ if (!process.env.SQUARE_LOCATION_ID) {
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN, // ✅ FIXED
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
   environment: SquareEnvironment.Production
 })
 
@@ -41,7 +35,7 @@ router.get("/__test", (req, res) => {
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK
+   💳 CREATE PAYMENT LINK (WITH TAX)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -50,40 +44,46 @@ router.post("/create-payment/:id", async (req, res) => {
     const order = await Order.findById(req.params.id)
 
     if (!order) {
-      console.error("❌ Order not found")
       return res.status(404).json({ message: "Order not found" })
     }
 
-    console.log("🧾 ORDER:", order)
-
     const rawAmount = order.finalPrice || order.price || 0
-    const amount = Math.round(Number(rawAmount || 0) * 100)
 
-    console.log("💰 RAW:", rawAmount)
-    console.log("💰 CENTS:", amount)
-
-    if (!amount || amount <= 0) {
+    if (!rawAmount || rawAmount <= 0) {
       return res.status(400).json({ message: "Invalid amount" })
     }
 
-    if (!process.env.CLIENT_URL) {
-      return res.status(500).json({
-        message: "CLIENT_URL missing in environment"
-      })
-    }
+    const TAX_RATE = 0.0825
+    const subtotalCents = Math.round(Number(rawAmount) * 100)
 
-    console.log("📍 LOCATION USED:", process.env.SQUARE_LOCATION_ID)
+    console.log("💰 SUBTOTAL:", rawAmount)
+    console.log("📍 LOCATION:", process.env.SQUARE_LOCATION_ID)
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
 
-      quickPay: {
-        name: `Order #${order._id.toString().slice(-6)}`,
-        priceMoney: {
-          amount: BigInt(amount),
-          currency: "USD"
-        },
-        locationId: process.env.SQUARE_LOCATION_ID // ✅ CRITICAL
+      /* 🔥 SWITCHED FROM quickPay → order */
+      order: {
+        locationId: process.env.SQUARE_LOCATION_ID,
+
+        lineItems: [
+          {
+            name: `Order #${order._id.toString().slice(-6)}`,
+            quantity: "1",
+            basePriceMoney: {
+              amount: BigInt(subtotalCents),
+              currency: "USD"
+            }
+          }
+        ],
+
+        taxes: [
+          {
+            name: "Sales Tax",
+            percentage: (TAX_RATE * 100).toFixed(2),
+            scope: "ORDER"
+          }
+        ]
       },
 
       checkoutOptions: {
@@ -96,8 +96,8 @@ router.post("/create-payment/:id", async (req, res) => {
       response?.url
 
     if (!url) {
-      console.error("❌ FULL SQUARE RESPONSE:", response)
-      throw new Error("No payment link returned from Square")
+      console.error("❌ FULL RESPONSE:", response)
+      throw new Error("No payment link returned")
     }
 
     console.log("🚀 Square URL:", url)
@@ -108,7 +108,7 @@ router.post("/create-payment/:id", async (req, res) => {
     console.error("❌ SQUARE ERROR:", err)
 
     if (err?.body) {
-      console.error("🔎 Square API Response:", err.body)
+      console.error("🔎 Square API:", err.body)
     }
 
     res.status(500).json({
@@ -148,17 +148,17 @@ router.post("/confirm/:id", async (req, res) => {
     const io = req.app.get("io")
     if (io) io.emit("jobUpdated", order)
 
-    try {
-      if (order.email) {
+    if (order.email) {
+      try {
         await sendOrderStatusEmail(
           order.email,
           "paid",
           order._id,
           order
         )
+      } catch (err) {
+        console.warn("⚠️ Email failed:", err.message)
       }
-    } catch (err) {
-      console.warn("⚠️ Email failed:", err.message)
     }
 
     console.log("✅ ORDER MARKED PAID:", order._id)
