@@ -49,7 +49,6 @@ console.log("🚀 SERVER STARTING...")
 
 /* ================= CORS ================= */
 const allowedOrigins = [
-  "https://signavi-studio.netlify.app",
   "http://localhost:5173"
 ]
 
@@ -58,6 +57,11 @@ app.use(cors({
     console.log("🌐 CORS ORIGIN:", origin)
 
     if (!origin) return callback(null, true)
+
+    // ✅ allow ALL vercel deployments
+    if (origin.includes("vercel.app")) {
+      return callback(null, true)
+    }
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true)
@@ -68,7 +72,6 @@ app.use(cors({
   },
   credentials: true
 }))
-
 /* ================= BODY ================= */
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
