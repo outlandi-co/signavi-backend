@@ -1,17 +1,19 @@
 import mongoose from "mongoose"
 
+/* ================= COLOR SCHEMA ================= */
 const colorSchema = new mongoose.Schema({
-  name: String,          // Dust
-  code: String,          // 00390
-  hex: String,           // #D6C6B8 (optional)
+  name: { type: String, required: true },
+  code: String,
+  hex: String,
 
   images: {
     front: String,
     back: String,
     lifestyle: String
   }
-})
+}, { _id: false })
 
+/* ================= PRODUCT ================= */
 const productSchema = new mongoose.Schema({
 
   /* 🔥 CORE */
@@ -28,10 +30,11 @@ const productSchema = new mongoose.Schema({
     default: "Bella Canvas"
   },
 
-  styleCode: String, // 🔥 4739, 4719 etc
+  styleCode: String,
 
   /* 💰 PRICING */
   price: Number,
+
   cost: {
     type: Number,
     default: 0
@@ -43,13 +46,21 @@ const productSchema = new mongoose.Schema({
     default: 0
   },
 
-  sizes: [String], // ["XS","S","M","L","XL"]
+  /* 🔥 SIZES (STRICT VALIDATION UP TO 3XL) */
+  sizes: {
+    type: [String],
+    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL"],
+    default: []
+  },
 
   /* 🎨 COLORS */
-  colors: [colorSchema],
+  colors: {
+    type: [colorSchema],
+    default: []
+  },
 
-  /* 🖼️ FALLBACK IMAGE */
-  image: String, // default placeholder
+  /* 🖼️ IMAGE */
+  image: String,
 
   /* ⚙️ CONTROL */
   active: {

@@ -23,6 +23,15 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage })
 
+/* ================= HELPER ================= */
+const parseJSON = (val, fallback) => {
+  try {
+    return val ? JSON.parse(val) : fallback
+  } catch {
+    return fallback
+  }
+}
+
 /* ================= GET ================= */
 router.get("/", async (req, res) => {
   try {
@@ -38,17 +47,31 @@ router.get("/", async (req, res) => {
 router.post("/", upload.single("image"), async (req, res) => {
   try {
     const product = await Product.create({
+
+      /* CORE */
       name: req.body.name,
       description: req.body.description || "",
       category: (req.body.category || "general").toLowerCase(),
 
+      brand: req.body.brand || "Bella Canvas",
+      styleCode: req.body.styleCode || "",
+
+      /* PRICING */
       cost: Number(req.body.cost) || 0,
       price: Number(req.body.price) || Number(req.body.cost) || 0,
 
+      /* INVENTORY */
       stock: Number(req.body.stock) || 0,
 
-      // 🔥 CRITICAL FIX (consistent frontend URL usage)
-      image: req.file ? `/uploads/${req.file.filename}` : ""
+      sizes: parseJSON(req.body.sizes, []),
+
+      /* 🎨 COLORS (ARRAY OF OBJECTS) */
+      colors: parseJSON(req.body.colors, []),
+
+      /* IMAGE */
+      image: req.file ? `/uploads/${req.file.filename}` : req.body.image || "",
+
+      active: req.body.active !== "false"
     })
 
     res.status(201).json(product)
@@ -63,13 +86,22 @@ router.post("/", upload.single("image"), async (req, res) => {
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
     const updateData = {
+
       ...req.body,
+
+      /* NUMBERS */
       price: Number(req.body.price) || 0,
       cost: Number(req.body.cost) || 0,
-      stock: Number(req.body.stock) || 0
+      stock: Number(req.body.stock) || 0,
+
+      /* ARRAYS */
+      sizes: parseJSON(req.body.sizes, []),
+      colors: parseJSON(req.body.colors, []),
+
+      active: req.body.active !== "false"
     }
 
-    // 🔥 if new image uploaded → replace
+    /* 🔥 IMAGE UPDATE */
     if (req.file) {
       updateData.image = `/uploads/${req.file.filename}`
     }
