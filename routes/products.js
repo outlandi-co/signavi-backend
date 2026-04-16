@@ -53,6 +53,10 @@ router.post("/", upload.single("image"), async (req, res) => {
       typeof c === "string" ? { name: c } : c
     )
 
+    /* 🔥 FIXED NUMBER HANDLING */
+    const parsedPrice = parseFloat(req.body.price)
+    const parsedCost = parseFloat(req.body.cost)
+
     const product = await Product.create({
       name: req.body.name?.trim(),
       description: req.body.description || "",
@@ -64,8 +68,13 @@ router.post("/", upload.single("image"), async (req, res) => {
       brand: req.body.brand || "Bella Canvas",
       styleCode: req.body.styleCode || "",
 
-      cost: Number(req.body.cost) || 0,
-      price: Number(req.body.price) || Number(req.body.cost) || 0,
+      cost: !isNaN(parsedCost) ? parsedCost : 0,
+      price: !isNaN(parsedPrice)
+        ? parsedPrice
+        : !isNaN(parsedCost)
+        ? parsedCost
+        : 0,
+
       stock: Number(req.body.stock) || 0,
 
       sizes,
@@ -96,6 +105,10 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       typeof c === "string" ? { name: c } : c
     )
 
+    /* 🔥 FIXED NUMBER HANDLING */
+    const parsedPrice = parseFloat(req.body.price)
+    const parsedCost = parseFloat(req.body.cost)
+
     const updateData = {
       name: req.body.name?.trim(),
       description: req.body.description || "",
@@ -107,8 +120,13 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       brand: req.body.brand || "Bella Canvas",
       styleCode: req.body.styleCode || "",
 
-      price: Number(req.body.price) || 0,
-      cost: Number(req.body.cost) || 0,
+      cost: !isNaN(parsedCost) ? parsedCost : 0,
+      price: !isNaN(parsedPrice)
+        ? parsedPrice
+        : !isNaN(parsedCost)
+        ? parsedCost
+        : 0,
+
       stock: Number(req.body.stock) || 0,
 
       sizes,
