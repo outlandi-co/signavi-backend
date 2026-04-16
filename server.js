@@ -49,6 +49,8 @@ console.log("🚀 SERVER STARTING...")
 
 /* ================= CORS ================= */
 const allowedOrigins = [
+  "https://signavistudio.store", // 🔥 YOUR REAL DOMAIN
+  "https://signavi-studio-git-main-signavistudio-9574s-projects.vercel.app",
   "http://localhost:5173"
 ]
 
@@ -58,7 +60,7 @@ app.use(cors({
 
     if (!origin) return callback(null, true)
 
-    // ✅ allow ALL vercel deployments
+    // ✅ allow all vercel previews
     if (origin.includes("vercel.app")) {
       return callback(null, true)
     }
