@@ -87,6 +87,28 @@ if (!fs.existsSync(uploadsPath)) {
 }
 app.use("/uploads", express.static(uploadsPath))
 
+/* ================= SQUARE CLIENT ================= */
+const squareClient = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Production
+})
+
+/* ================= 🔥 DEBUG ROUTE (PLACED EARLY) ================= */
+app.get("/api/square/locations", async (req, res) => {
+  try {
+    const response = await squareClient.locations.list()
+
+    console.log("📍 SQUARE LOCATIONS:", response)
+
+    res.json(response)
+  } catch (err) {
+    console.error("❌ SQUARE LOCATIONS ERROR:", err)
+    res.status(500).json({
+      message: err.message
+    })
+  }
+})
+
 /* ================= ROUTES ================= */
 console.log("📦 Mounting routes...")
 
@@ -107,28 +129,6 @@ app.use("/api/tax", taxRoutes)
 app.use("/api/square", squareRoutes)
 
 console.log("✅ Routes mounted")
-
-/* ================= SQUARE DEBUG ================= */
-const squareClient = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
-  environment: SquareEnvironment.Production
-})
-
-app.get("/api/square/locations", async (req, res) => {
-  try {
-    const response = await squareClient.locations.list()
-
-    console.log("📍 SQUARE LOCATIONS:", JSON.stringify(response, null, 2))
-
-    res.json(response)
-  } catch (err) {
-    console.error("❌ SQUARE LOCATIONS ERROR:", err)
-    res.status(500).json({
-      message: err.message,
-      details: err
-    })
-  }
-})
 
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
