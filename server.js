@@ -26,8 +26,6 @@ import customerRoutes from "./routes/customers.js"
 import aiPricingRoutes from "./routes/aiPricing.js"
 import jobRoutes from "./routes/job.js"
 import taxRoutes from "./routes/tax.js"
-
-/* 🔥 ADD THIS */
 import squareRoutes from "./routes/square.js"
 
 /* ================= ENV ================= */
@@ -50,18 +48,24 @@ app.use((req, res, next) => {
 console.log("🚀 SERVER STARTING...")
 
 /* ================= CORS ================= */
-const CLIENT_URL =
-  process.env.CLIENT_URL || "https://signavi-studio.netlify.app"
-
 const allowedOrigins = [
-  "http://localhost:5173",
-  "http://192.168.4.21:5173",
   "https://signavi-studio.netlify.app",
-  CLIENT_URL
+  "http://localhost:5173"
 ]
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    console.log("🌐 CORS ORIGIN:", origin)
+
+    if (!origin) return callback(null, true)
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
+
+    console.warn("❌ BLOCKED BY CORS:", origin)
+    return callback(new Error("Not allowed by CORS"))
+  },
   credentials: true
 }))
 
@@ -94,9 +98,6 @@ app.use("/api/customers", customerRoutes)
 app.use("/api/job", jobRoutes)
 app.use("/api/ai-pricing", aiPricingRoutes)
 app.use("/api/tax", taxRoutes)
-
-
-/* 🔥 CRITICAL FIX */
 app.use("/api/square", squareRoutes)
 
 console.log("✅ Routes mounted")
@@ -121,12 +122,11 @@ app.get("/api/health", (req, res) => {
   })
 })
 
-/* 🔥 ADD THIS DEBUG ROUTE */
 app.get("/api/square/__test", (req, res) => {
   res.json({ message: "SQUARE ROUTE LIVE ✅" })
 })
 
-/* ================= 404 HANDLER ================= */
+/* ================= 404 ================= */
 app.use((req, res) => {
   res.status(404).json({
     message: `Route not found: ${req.originalUrl}`
