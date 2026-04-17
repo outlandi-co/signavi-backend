@@ -1,7 +1,6 @@
 import express from "express"
 import Quote from "../models/Quote.js"
 import upload from "../middleware/upload.js"
-import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
@@ -22,42 +21,11 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     console.log("📦 FILE:", req.file)
     console.log("📦 BODY:", req.body)
 
-    let imageUrl = ""
+    // 🔥 TEMP (no cloudinary yet)
+    const imageUrl = req.file
+      ? `LOCAL_FILE_${req.file.originalname}`
+      : ""
 
-    /* ================= HANDLE FILE ================= */
-    if (req.file && req.file.buffer) {
-      try {
-        const uploadResult = await new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            { folder: "signavi" },
-            (error, result) => {
-              if (error) {
-                console.error("❌ CLOUDINARY ERROR:", error)
-                return reject(error)
-              }
-              resolve(result)
-            }
-          )
-
-          stream.end(req.file.buffer)
-        })
-
-        imageUrl = uploadResult.secure_url
-        console.log("✅ Cloudinary uploaded:", imageUrl)
-
-      } catch (cloudErr) {
-        console.error("❌ CLOUDINARY FAIL:", cloudErr)
-
-        return res.status(500).json({
-          message: "Cloudinary upload failed",
-          error: cloudErr.message
-        })
-      }
-    } else {
-      console.warn("⚠️ No file received")
-    }
-
-    /* ================= CREATE QUOTE ================= */
     const quote = await Quote.create({
       customerName: req.body.customerName || "Unknown",
       email: req.body.email || "",
