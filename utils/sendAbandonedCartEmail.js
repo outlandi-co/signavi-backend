@@ -1,57 +1,40 @@
-import nodemailer from "nodemailer"
+import { sendAbandonedCartEmail } from "../utils/sendEmail.js"
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-})
-
-export const sendAbandonedCartEmail = async (cart) => {
+/**
+ * 🛒 Handle Abandoned Cart Logic
+ * - Can be triggered manually or via interval/cron later
+ */
+export const handleAbandonedCart = async (cart) => {
   try {
+    if (!cart || !cart.email || !cart.items?.length) {
+      console.log("⚠️ Invalid cart, skipping email")
+      return
+    }
 
-    const itemsList = cart.items.map(item => `
-      <li>${item.name} (x${item.quantity}) - $${item.price}</li>
-    `).join("")
+    console.log("🛒 Processing abandoned cart for:", cart.email)
 
-    const discountBlock = cart.discountCode
-      ? `
-        <h3>🔥 Your Discount: ${cart.discountPercent}% OFF</h3>
-        <p>Use code: <b>${cart.discountCode}</b></p>
-      `
-      : ""
+    /* 🔥 Send Email */
+    await sendAbandonedCartEmail(cart)
 
-    /* 🔥 PASS DISCOUNT INTO LINK */
-    const CLIENT_URL =
-  process.env.CLIENT_URL || "https://signavi-studio.netlify.app"
-
-const link = cart.discountCode
-  ? `${CLIENT_URL}/store?code=${cart.discountCode}&discount=${cart.discountPercent}`
-  : `${CLIENT_URL}/store`
-
-    await transporter.sendMail({
-      from: `"Signavi Store" <${process.env.EMAIL_USER}>`,
-      to: cart.email,
-      subject: "🛒 You left items in your cart!",
-      html: `
-        <h2>Don't miss out 👀</h2>
-
-        ${discountBlock}
-
-        <ul>${itemsList}</ul>
-
-        <p>
-          👉 <a href="${link}">
-            Return to your cart
-          </a>
-        </p>
-      `
-    })
-
-    console.log("📧 Discount email sent:", cart.email)
+    console.log("✅ Abandoned cart email sent:", cart.email)
 
   } catch (err) {
-    console.error("❌ EMAIL ERROR:", err)
+    console.error("❌ Abandoned Cart Service Error:", err)
+  }
+}
+
+/**
+ * 🔁 OPTIONAL: Batch processor (future use)
+ */
+export const processAbandonedCarts = async (carts = []) => {
+  try {
+    for (const cart of carts) {
+      await handleAbandonedCart(cart)
+    }
+
+    console.log("🚀 Finished processing abandoned carts")
+
+  } catch (err) {
+    console.error("❌ Batch abandoned cart error:", err)
   }
 }
