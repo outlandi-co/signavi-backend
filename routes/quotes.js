@@ -10,19 +10,26 @@ console.log("📦 quotes.js LOADED")
 /* ================= CREATE QUOTE ================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
+    console.log("🔥 REQUEST RECEIVED")
     console.log("📦 FILE:", req.file)
     console.log("📦 BODY:", req.body)
 
     let imageUrl = ""
 
-    /* 🔥 CLOUDINARY UPLOAD */
+    console.log("🔥 CLOUDINARY CHECK START")
+
     if (req.file && req.file.buffer) {
+      console.log("🔥 ENTERING CLOUDINARY BLOCK")
+
       try {
         const result = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
             { folder: "signavi" },
             (error, result) => {
-              if (error) return reject(error)
+              if (error) {
+                console.error("❌ CLOUDINARY ERROR:", error)
+                return reject(error)
+              }
               resolve(result)
             }
           )
@@ -35,12 +42,14 @@ router.post("/", upload.single("artwork"), async (req, res) => {
         console.log("✅ CLOUDINARY SUCCESS:", imageUrl)
 
       } catch (err) {
-        console.error("❌ CLOUDINARY ERROR:", err.message)
+        console.error("❌ CLOUDINARY FAIL:", err.message)
       }
+
     } else {
-      console.warn("⚠️ No file received (multer issue)")
+      console.warn("⚠️ NO FILE BUFFER — MULTER NOT WORKING")
     }
 
+    /* 🔥 SAVE QUOTE */
     const quote = await Quote.create({
       customerName: req.body.customerName || "Unknown",
       email: req.body.email || "",
@@ -51,6 +60,8 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       approvalStatus: "pending",
       status: "draft"
     })
+
+    console.log("✅ QUOTE SAVED:", quote._id)
 
     res.json({ success: true, data: quote })
 
