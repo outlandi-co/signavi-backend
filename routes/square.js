@@ -1,6 +1,7 @@
 import express from "express"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
+import Quote from "../models/Quote.js" // 🔥 NEW
 import { SquareClient, SquareEnvironment } from "square"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
@@ -35,7 +36,7 @@ router.get("/__test", (req, res) => {
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (WITH TAX)
+   💳 CREATE PAYMENT LINK (LOCKED BY APPROVAL)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -46,6 +47,22 @@ router.post("/create-payment/:id", async (req, res) => {
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
+
+    /* =========================================================
+       🔥 CRITICAL: BLOCK PAYMENT IF NOT APPROVED
+    ========================================================= */
+
+    if (order.source === "quote") {
+      const quote = await Quote.findById(order._id)
+
+      if (!quote || quote.approvalStatus !== "approved") {
+        return res.status(403).json({
+          message: "Artwork must be approved before payment"
+        })
+      }
+    }
+
+    /* ========================================================= */
 
     const rawAmount = order.finalPrice || order.price || 0
 
@@ -62,7 +79,6 @@ router.post("/create-payment/:id", async (req, res) => {
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
 
-      /* 🔥 SWITCHED FROM quickPay → order */
       order: {
         locationId: process.env.SQUARE_LOCATION_ID,
 
