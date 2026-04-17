@@ -1,12 +1,12 @@
 import express from "express"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
-import upload from "../middleware/upload.js" // 🔥 NEW
+import upload from "../middleware/upload.js" // 🔥 IMPORTANT
 
 const router = express.Router()
 
 /* =========================================================
-   📥 CREATE QUOTE (🔥 FIXED WITH IMAGE UPLOAD)
+   🔥 CREATE QUOTE (THIS WAS MISSING)
 ========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
@@ -19,11 +19,10 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price: req.body.price,
       notes: req.body.notes,
 
-      // 🔥 THIS IS THE FIX
-      artwork: req.file?.path || "" 
+      artwork: req.file?.path || "" // 🔥 CLOUDINARY URL
     })
 
-    res.json(quote)
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR:", err)
@@ -67,8 +66,6 @@ router.get("/:id", async (req, res) => {
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
-    console.log("🔥 APPROVE ROUTE HIT:", req.params.id)
-
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
@@ -96,10 +93,7 @@ router.patch("/:id/approve", async (req, res) => {
       )
     }
 
-    const io = req.app.get("io")
-    if (io) {
-      io.emit("jobUpdated", quote)
-    }
+    req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
 
@@ -114,8 +108,6 @@ router.patch("/:id/approve", async (req, res) => {
 ========================================================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
-    console.log("❌ DENY ROUTE HIT:", req.params.id)
-
     const { reason, fee } = req.body
 
     const quote = await Quote.findById(req.params.id)
@@ -147,10 +139,7 @@ router.patch("/:id/deny", async (req, res) => {
       )
     }
 
-    const io = req.app.get("io")
-    if (io) {
-      io.emit("jobUpdated", quote)
-    }
+    req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
 
