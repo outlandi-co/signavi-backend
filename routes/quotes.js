@@ -1,6 +1,7 @@
 import express from "express"
 import Quote from "../models/Quote.js"
 import upload from "../middleware/upload.js"
+import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
@@ -12,9 +13,33 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     console.log("📦 FILE:", req.file)
     console.log("📦 BODY:", req.body)
 
-    const imageUrl = req.file
-      ? `LOCAL_FILE_${req.file.originalname}`
-      : ""
+    let imageUrl = ""
+
+    /* 🔥 CLOUDINARY UPLOAD */
+    if (req.file && req.file.buffer) {
+      try {
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream(
+            { folder: "signavi" },
+            (error, result) => {
+              if (error) return reject(error)
+              resolve(result)
+            }
+          )
+
+          stream.end(req.file.buffer)
+        })
+
+        imageUrl = result.secure_url
+
+        console.log("✅ CLOUDINARY SUCCESS:", imageUrl)
+
+      } catch (err) {
+        console.error("❌ CLOUDINARY ERROR:", err.message)
+      }
+    } else {
+      console.warn("⚠️ No file received (multer issue)")
+    }
 
     const quote = await Quote.create({
       customerName: req.body.customerName || "Unknown",
