@@ -61,13 +61,9 @@ app.use(cors({
 
     if (!origin) return callback(null, true)
 
-    if (origin.includes("vercel.app")) {
-      return callback(null, true)
-    }
+    if (origin.includes("vercel.app")) return callback(null, true)
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true)
-    }
+    if (allowedOrigins.includes(origin)) return callback(null, true)
 
     console.warn("❌ BLOCKED BY CORS:", origin)
     return callback(new Error("Not allowed by CORS"))
@@ -93,19 +89,14 @@ const squareClient = new SquareClient({
   environment: SquareEnvironment.Production
 })
 
-/* ================= 🔥 DEBUG ROUTE (PLACED EARLY) ================= */
+/* ================= DEBUG ROUTE ================= */
 app.get("/api/square/locations", async (req, res) => {
   try {
     const response = await squareClient.locations.list()
-
-    console.log("📍 SQUARE LOCATIONS:", response)
-
     res.json(response)
   } catch (err) {
     console.error("❌ SQUARE LOCATIONS ERROR:", err)
-    res.status(500).json({
-      message: err.message
-    })
+    res.status(500).json({ message: err.message })
   }
 })
 
@@ -119,7 +110,12 @@ app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
+
+/* 🔥 FORCE DEBUG FOR QUOTES */
+console.log("📦 Loading quotes routes...")
 app.use("/api/quotes", quoteRoutes)
+console.log("✅ Quotes route mounted")
+
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
@@ -128,7 +124,7 @@ app.use("/api/ai-pricing", aiPricingRoutes)
 app.use("/api/tax", taxRoutes)
 app.use("/api/square", squareRoutes)
 
-console.log("✅ Routes mounted")
+console.log("✅ All routes mounted")
 
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
@@ -148,10 +144,6 @@ app.get("/api/health", (req, res) => {
     status: "ok",
     uptime: process.uptime()
   })
-})
-
-app.get("/api/square/__test", (req, res) => {
-  res.json({ message: "SQUARE ROUTE LIVE ✅" })
 })
 
 /* ================= 404 ================= */
