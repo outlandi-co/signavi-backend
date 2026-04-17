@@ -6,4 +6,10 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 })
 
+console.log("🌩️ CLOUDINARY CONFIG:", {
+  cloud: process.env.CLOUDINARY_CLOUD_NAME,
+  key: process.env.CLOUDINARY_API_KEY ? "exists" : "missing",
+  secret: process.env.CLOUDINARY_API_SECRET ? "exists" : "missing"
+})
+
 export default cloudinary
