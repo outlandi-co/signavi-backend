@@ -1,18 +1,30 @@
 import mongoose from "mongoose"
 
 const quoteSchema = new mongoose.Schema({
-  customerName: { type: String, default: "Unknown" },
-  email: { type: String, default: "" },
-  quantity: { type: Number, default: 1 },
-  printType: { type: String, default: "custom" },
-  artwork: { type: String, default: null },
 
-  price: { type: Number, default: 0 },
-  cleanupFee: { type: Number, default: 0 },
-  adminNotes: { type: String, default: "" },
+  customerName: String,
+  email: String,
+  quantity: Number,
+  price: Number,
 
-  status: { type: String, default: "pending" },
-  trackingNumber: { type: String, default: "" }
+  artwork: String,
+  notes: String,
+
+  /* 🔥 NEW APPROVAL SYSTEM */
+  approvalStatus: {
+    type: String,
+    enum: ["pending", "approved", "denied"],
+    default: "pending"
+  },
+
+  denialReason: String,
+
+  revisionFee: {
+    type: Number,
+    default: 0
+  },
+
+  adminNotes: String
 
 }, { timestamps: true })
 
