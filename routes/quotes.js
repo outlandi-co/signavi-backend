@@ -6,6 +6,8 @@ import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
+
+console.log("📦 quotes.js LOADED")
 /* ================= TEST ================= */
 router.post("/test", (req, res) => {
   console.log("🔥 TEST ROUTE HIT")
@@ -16,11 +18,12 @@ router.post("/test", (req, res) => {
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     console.log("📦 FILE:", req.file)
+    console.log("📦 BODY:", req.body)
 
     let imageUrl = ""
 
-    /* 🔥 UPLOAD TO CLOUDINARY */
-    if (req.file) {
+    /* 🔥 HANDLE IMAGE */
+    if (req.file && req.file.buffer) {
       const uploadResult = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
           { folder: "signavi" },
@@ -33,15 +36,17 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       })
 
       imageUrl = uploadResult.secure_url
+    } else {
+      console.warn("⚠️ No file uploaded")
     }
 
-    /* 🔥 SAVE QUOTE */
+    /* 🔥 CREATE QUOTE */
     const quote = await Quote.create({
-      customerName: req.body.customerName,
-      email: req.body.email,
-      quantity: req.body.quantity,
-      price: req.body.price,
-      notes: req.body.notes,
+      customerName: req.body.customerName || "Unknown",
+      email: req.body.email || "",
+      quantity: Number(req.body.quantity || 1),
+      price: Number(req.body.price || 0),
+      notes: req.body.notes || "",
       artwork: imageUrl
     })
 

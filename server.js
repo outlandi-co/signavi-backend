@@ -126,6 +126,8 @@ app.use("/api/square", squareRoutes)
 
 console.log("✅ All routes mounted")
 
+console.log("🔥 SERVER VERSION: QUOTES POST SHOULD EXIST")
+
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
   res.send("🚀 Signavi API running")
