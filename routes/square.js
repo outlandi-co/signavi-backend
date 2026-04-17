@@ -1,7 +1,7 @@
 import express from "express"
 import dotenv from "dotenv"
 import Order from "../models/Order.js"
-import Quote from "../models/Quote.js" // 🔥 NEW
+import Quote from "../models/Quote.js"
 import { SquareClient, SquareEnvironment } from "square"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
@@ -36,46 +36,73 @@ router.get("/__test", (req, res) => {
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (LOCKED BY APPROVAL)
+   💳 CREATE PAYMENT LINK (FULLY LOCKED)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
     console.log("💳 CREATE PAYMENT:", req.params.id)
 
-    const order = await Order.findById(req.params.id)
+    let order = await Order.findById(req.params.id)
+    let quote = null
 
+    /* ================= CHECK QUOTE FIRST ================= */
     if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
+      quote = await Quote.findById(req.params.id)
 
-    /* =========================================================
-       🔥 CRITICAL: BLOCK PAYMENT IF NOT APPROVED
-    ========================================================= */
+      if (!quote) {
+        return res.status(404).json({
+          message: "Order or Quote not found"
+        })
+      }
 
-    if (order.source === "quote") {
-      const quote = await Quote.findById(order._id)
-
-      if (!quote || quote.approvalStatus !== "approved") {
+      /* 🔒 HARD LOCK */
+      if (quote.approvalStatus !== "approved") {
         return res.status(403).json({
           message: "Artwork must be approved before payment"
         })
       }
+
+      console.log("🧾 USING QUOTE FOR PAYMENT")
+
+      /* 🔥 TEMP ORDER OBJECT */
+      order = {
+        _id: quote._id,
+        customerName: quote.customerName,
+        email: quote.email,
+        finalPrice: quote.price,
+        price: quote.price
+      }
     }
 
-    /* ========================================================= */
+    /* ================= IF ORDER EXISTS ================= */
+    else {
+      /* 🔥 OPTIONAL: IF ORDER HAS LINKED QUOTE */
+      if (order.quoteId) {
+        quote = await Quote.findById(order.quoteId)
 
+        if (!quote || quote.approvalStatus !== "approved") {
+          return res.status(403).json({
+            message: "Artwork must be approved before payment"
+          })
+        }
+      }
+    }
+
+    /* ================= AMOUNT ================= */
     const rawAmount = order.finalPrice || order.price || 0
 
     if (!rawAmount || rawAmount <= 0) {
-      return res.status(400).json({ message: "Invalid amount" })
+      return res.status(400).json({
+        message: "Invalid amount"
+      })
     }
 
     const TAX_RATE = 0.0825
     const subtotalCents = Math.round(Number(rawAmount) * 100)
 
     console.log("💰 SUBTOTAL:", rawAmount)
-    console.log("📍 LOCATION:", process.env.SQUARE_LOCATION_ID)
 
+    /* ================= SQUARE ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
 
@@ -123,13 +150,8 @@ router.post("/create-payment/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ SQUARE ERROR:", err)
 
-    if (err?.body) {
-      console.error("🔎 Square API:", err.body)
-    }
-
     res.status(500).json({
-      message: err.message,
-      details: err?.body || null
+      message: err.message
     })
   }
 })
