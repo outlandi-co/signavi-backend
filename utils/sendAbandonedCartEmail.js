@@ -1,38 +1,33 @@
+import Cart from "../models/Cart.js"
+import { calculateDiscount } from "./discountEngine.js"
 import { sendAbandonedCartEmail } from "../utils/sendEmail.js"
 
-/* =========================================================
-   🛒 HANDLE ABANDONED CART
-========================================================= */
-export const handleAbandonedCart = async (cart) => {
+export const checkAbandonedCarts = async () => {
   try {
-    if (!cart || !cart.email || !cart.items?.length) {
-      console.log("⚠️ Invalid cart, skipping")
-      return
-    }
+    const now = new Date()
 
-    console.log("🛒 Abandoned cart:", cart.email)
+    const carts = await Cart.find({
+      recovered: false,
+      abandonedEmailSent: false,
+      updatedAt: { $lt: new Date(now - 1000 * 60 * 30) }
+    })
 
-    await sendAbandonedCartEmail(cart)
-
-    console.log("📧 Email sent:", cart.email)
-
-  } catch (err) {
-    console.error("❌ Abandoned cart error:", err)
-  }
-}
-
-/* =========================================================
-   🔁 OPTIONAL BATCH PROCESSOR
-========================================================= */
-export const processAbandonedCarts = async (carts = []) => {
-  try {
     for (const cart of carts) {
-      await handleAbandonedCart(cart)
+
+      const discount = calculateDiscount(cart, cart.attempts || 0)
+
+      cart.discountCode = discount.discountCode
+      cart.discountPercent = discount.discountPercent
+      cart.abandonedEmailSent = true
+
+      await cart.save()
+
+      await sendAbandonedCartEmail(cart)
+
+      console.log("📧 Abandoned cart email sent:", cart.email)
     }
 
-    console.log("✅ Finished abandoned carts")
-
   } catch (err) {
-    console.error("❌ Batch error:", err)
+    console.error("❌ Abandoned cart error:", err.message)
   }
 }
