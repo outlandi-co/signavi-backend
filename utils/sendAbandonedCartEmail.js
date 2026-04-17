@@ -1,40 +1,38 @@
 import { sendAbandonedCartEmail } from "../utils/sendEmail.js"
 
-/**
- * 🛒 Handle Abandoned Cart Logic
- * - Can be triggered manually or via interval/cron later
- */
+/* =========================================================
+   🛒 HANDLE ABANDONED CART
+========================================================= */
 export const handleAbandonedCart = async (cart) => {
   try {
     if (!cart || !cart.email || !cart.items?.length) {
-      console.log("⚠️ Invalid cart, skipping email")
+      console.log("⚠️ Invalid cart, skipping")
       return
     }
 
-    console.log("🛒 Processing abandoned cart for:", cart.email)
+    console.log("🛒 Abandoned cart:", cart.email)
 
-    /* 🔥 Send Email */
     await sendAbandonedCartEmail(cart)
 
-    console.log("✅ Abandoned cart email sent:", cart.email)
+    console.log("📧 Email sent:", cart.email)
 
   } catch (err) {
-    console.error("❌ Abandoned Cart Service Error:", err)
+    console.error("❌ Abandoned cart error:", err)
   }
 }
 
-/**
- * 🔁 OPTIONAL: Batch processor (future use)
- */
+/* =========================================================
+   🔁 OPTIONAL BATCH PROCESSOR
+========================================================= */
 export const processAbandonedCarts = async (carts = []) => {
   try {
     for (const cart of carts) {
       await handleAbandonedCart(cart)
     }
 
-    console.log("🚀 Finished processing abandoned carts")
+    console.log("✅ Finished abandoned carts")
 
   } catch (err) {
-    console.error("❌ Batch abandoned cart error:", err)
+    console.error("❌ Batch error:", err)
   }
 }
