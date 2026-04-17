@@ -1,254 +1,134 @@
-import express from "express"
-import multer from "multer"
-import path from "path"
-import fs from "fs"
+import nodemailer from "nodemailer"
 
-import Quote from "../models/Quote.js"
-import Order from "../models/Order.js"
-import { sendQuoteEmail, sendOrderStatusEmail } from "../utils/sendEmail.js"
+/* ================= TRANSPORT ================= */
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+})
 
-const router = express.Router()
+transporter.verify((err) => {
+  if (err) console.error("❌ EMAIL SERVER ERROR:", err)
+  else console.log("✅ EMAIL SERVER READY")
+})
 
-/* ================= MULTER ================= */
-const uploadPath = path.resolve("uploads")
+/* ================= WRAPPER ================= */
+const wrap = (content) => `
+  <div style="font-family: Arial; padding: 20px; max-width:600px;">
+    <h2>Signavi Studio</h2>
+    ${content}
+  </div>
+`
 
-if (!fs.existsSync(uploadPath)) {
-  fs.mkdirSync(uploadPath, { recursive: true })
+/* =========================================================
+   📄 QUOTE EMAIL
+========================================================= */
+export const sendQuoteEmail = async (to, quote) => {
+  try {
+    const target = to || process.env.EMAIL_USER
+
+    await transporter.sendMail({
+      from: `"Signavi Studio" <${process.env.EMAIL_USER}>`,
+      to: target,
+      subject: "📄 Quote Received — Under Review",
+
+      html: wrap(`
+        <p>Hello ${quote.customerName || "Customer"},</p>
+
+        <h3>📄 We received your quote request</h3>
+
+        <p>Your artwork is currently being reviewed.</p>
+
+        <p><b>Quote ID:</b> ${quote._id}</p>
+        <p><b>Estimated Price:</b> $${(quote.price || 0).toFixed(2)}</p>
+
+        <p>⏳ You will receive another email once approved.</p>
+      `)
+    })
+
+    console.log("📧 QUOTE EMAIL SENT")
+
+  } catch (err) {
+    console.error("❌ QUOTE EMAIL FAILED:", err)
+  }
 }
 
-const storage = multer.diskStorage({
-  destination: uploadPath,
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname)
-  }
-})
-
-const upload = multer({ storage })
-
-/* ================= GET ONE ================= */
-router.get("/:id", async (req, res) => {
+/* =========================================================
+   📦 ORDER / STATUS EMAIL
+========================================================= */
+export const sendOrderStatusEmail = async (to, status, orderId, order) => {
   try {
-    const quote = await Quote.findById(req.params.id)
+    const target = to || process.env.EMAIL_USER
+    const FRONTEND_URL = process.env.CLIENT_URL || "https://signavistudio.store"
 
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
+    let subject = ""
+    let html = ""
+
+    /* ✅ APPROVED */
+    if (status === "approved") {
+      subject = "✅ Artwork Approved — Complete Payment"
+
+      html = wrap(`
+        <p>Hello ${order.customerName || "Customer"},</p>
+
+        <h3 style="color:#22c55e;">✅ Your artwork is approved!</h3>
+
+        <a href="${FRONTEND_URL}/quote/${orderId}"
+          style="padding:12px 20px;background:#06b6d4;color:white;border-radius:6px;">
+          💳 Complete Payment
+        </a>
+      `)
     }
 
-    res.json(quote)
+    /* ❌ DENIED */
+    else if (status === "denied") {
+      subject = "❌ Artwork Needs Revision"
 
-  } catch (err) {
-    console.error("❌ GET QUOTE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
+      html = wrap(`
+        <h3 style="color:#ef4444;">❌ Revision Required</h3>
 
-/* ================= CREATE ================= */
-router.post("/", upload.single("artwork"), async (req, res) => {
-  try {
-    const data = req.body
+        <p><b>Reason:</b> ${order.denialReason || "Artwork issue"}</p>
 
-    if (!data.email) {
-      return res.status(400).json({
-        message: "Email is required"
-      })
+        ${order.revisionFee > 0
+          ? `<p><b>Fee:</b> $${order.revisionFee}</p>`
+          : ""}
+      `)
     }
 
-    const cleanEmail = data.email.toLowerCase().trim()
+    /* 💳 PAYMENT REQUIRED */
+    else if (status === "payment_required") {
+      subject = "💳 Payment Required"
 
-    let parsedPrice = Number(data.price)
-    if (!parsedPrice || parsedPrice <= 0) {
-      parsedPrice = 50
+      html = wrap(`
+        <a href="${FRONTEND_URL}/checkout/${orderId}">
+          Pay Now
+        </a>
+      `)
     }
 
-    const quote = await Quote.create({
-      customerName: data.customerName || "Unknown",
-      email: cleanEmail,
-      quantity: Number(data.quantity) || 1,
-      printType: data.printType || "screenprint",
-      price: parsedPrice,
-      items: data.items || [],
-      artwork: req.file ? `/uploads/${req.file.filename}` : null,
+    /* ✅ PAID */
+    else if (status === "paid") {
+      subject = "✅ Payment Received"
+      html = wrap(`<p>Payment received successfully.</p>`)
+    }
 
-      /* 🔥 NEW APPROVAL FLOW */
-      approvalStatus: "pending",
-      denialReason: "",
-      revisionFee: 0
+    else {
+      subject = "📦 Update"
+      html = wrap(`<p>Status: ${status}</p>`)
+    }
+
+    await transporter.sendMail({
+      from: `"Signavi Studio" <${process.env.EMAIL_USER}>`,
+      to: target,
+      subject,
+      html
     })
 
-    console.log("💰 QUOTE CREATED:", parsedPrice)
-    console.log("📧 EMAIL:", cleanEmail)
-
-    await sendQuoteEmail(cleanEmail, quote).catch(err => {
-      console.error("❌ EMAIL ERROR:", err.message)
-    })
-
-    req.app.get("io")?.emit("jobCreated", {
-      ...quote.toObject(),
-      group: "quotes",
-      source: "quote",
-      type: "quote"
-    })
-
-    res.status(201).json(quote)
+    console.log("📧 STATUS EMAIL SENT")
 
   } catch (err) {
-    console.error("❌ CREATE ERROR:", err)
-    res.status(500).json({ message: err.message })
+    console.error("❌ STATUS EMAIL FAILED:", err)
   }
-})
-
-/* ================= APPROVE ================= */
-router.patch("/:id/approve", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    quote.approvalStatus = "approved"
-    quote.denialReason = ""
-    quote.revisionFee = 0
-
-    await quote.save()
-
-    /* 📧 SEND APPROVAL EMAIL */
-    if (quote.email) {
-      await sendOrderStatusEmail(
-        quote.email,
-        "approved",
-        quote._id,
-        quote
-      )
-    }
-
-    res.json({ success: true, quote })
-
-  } catch (err) {
-    console.error("❌ APPROVE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= DENY ================= */
-router.patch("/:id/deny", async (req, res) => {
-  try {
-    const { reason, fee } = req.body
-
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    quote.approvalStatus = "denied"
-    quote.denialReason = reason || "Artwork issue"
-    quote.revisionFee = Number(fee) || 0
-
-    await quote.save()
-
-    /* 📧 SEND DENIAL EMAIL */
-    if (quote.email) {
-      await sendOrderStatusEmail(
-        quote.email,
-        "denied",
-        quote._id,
-        quote
-      )
-    }
-
-    res.json({ success: true, quote })
-
-  } catch (err) {
-    console.error("❌ DENY ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= SEND TO PAYMENT (LOCKED) ================= */
-router.patch("/:id/send-to-payment", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    /* 🔥 BLOCK IF NOT APPROVED */
-    if (quote.approvalStatus !== "approved") {
-      return res.status(400).json({
-        message: "Quote must be approved before payment"
-      })
-    }
-
-    quote.status = "payment_required"
-
-    await quote.save()
-
-    res.json({
-      success: true,
-      paymentLink: `/checkout/${quote._id}`,
-      quote
-    })
-
-  } catch (err) {
-    console.error("❌ SEND TO PAYMENT ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= CONVERT TO ORDER ================= */
-router.post("/:id/convert", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    if (quote.approvalStatus !== "approved") {
-      return res.status(400).json({
-        message: "Quote must be approved first"
-      })
-    }
-
-    const finalPrice = Number(quote.price)
-
-    const order = await Order.create({
-      customerName: quote.customerName,
-      email: quote.email,
-      quantity: quote.quantity,
-      printType: quote.printType,
-      artwork: quote.artwork,
-      price: finalPrice,
-      finalPrice: finalPrice,
-      items: quote.items || [],
-      status: "production",
-      timeline: [{
-        status: "production",
-        date: new Date(),
-        note: "Converted from approved quote"
-      }]
-    })
-
-    await Quote.findByIdAndDelete(quote._id)
-
-    const io = req.app.get("io")
-
-    io?.emit("jobCreated", {
-      ...order.toObject(),
-      source: "order",
-      type: "order"
-    })
-
-    io?.emit("jobDeleted", quote._id)
-
-    res.json(order)
-
-  } catch (err) {
-    console.error("❌ CONVERT ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-export default router
+}
