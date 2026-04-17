@@ -78,4 +78,52 @@ router.get("/:id", async (req, res) => {
   }
 })
 
+/* ================= APPROVE QUOTE ================= */
+router.patch("/:id/approve", async (req, res) => {
+  try {
+    const quote = await Quote.findById(req.params.id)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    quote.approvalStatus = "approved"
+    quote.status = "payment_required"
+
+    await quote.save()
+
+    req.app.get("io")?.emit("jobUpdated", quote)
+
+    res.json({ success: true, data: quote })
+
+  } catch (err) {
+    console.error("❌ APPROVE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= DENY QUOTE ================= */
+router.patch("/:id/deny", async (req, res) => {
+  try {
+    const quote = await Quote.findById(req.params.id)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    quote.approvalStatus = "denied"
+    quote.status = "denied"
+
+    await quote.save()
+
+    req.app.get("io")?.emit("jobUpdated", quote)
+
+    res.json({ success: true, data: quote })
+
+  } catch (err) {
+    console.error("❌ DENY ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
 export default router
