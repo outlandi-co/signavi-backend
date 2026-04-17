@@ -6,22 +6,12 @@ const router = express.Router()
 
 console.log("📦 quotes.js LOADED")
 
-/* ================= TEST ================= */
-router.post("/test", (req, res) => {
-  console.log("🔥 TEST ROUTE HIT")
-  res.json({ message: "POST WORKS" })
-})
-
 /* ================= CREATE QUOTE ================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
-    console.log("🔥 HEADERS:", req.headers)
-    console.log("🔥 CONTENT TYPE:", req.headers["content-type"])
-
     console.log("📦 FILE:", req.file)
     console.log("📦 BODY:", req.body)
 
-    // 🔥 TEMP: skip cloudinary for now
     const imageUrl = req.file
       ? `LOCAL_FILE_${req.file.originalname}`
       : ""
@@ -32,59 +22,40 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       quantity: Number(req.body.quantity || 1),
       price: Number(req.body.price || 0),
       notes: req.body.notes || "",
-      artwork: imageUrl
+      artwork: imageUrl,
+      approvalStatus: "pending",
+      status: "draft"
     })
-
-    console.log("✅ Quote saved:", quote._id)
 
     res.json({ success: true, data: quote })
 
   } catch (err) {
-    console.error("❌ CREATE QUOTE ERROR FULL:", err)
-
-    // 🔥 THIS IS THE IMPORTANT PART (YOU WILL SEE ERROR IN FRONTEND)
-    res.status(500).json({
-      message: err.message,
-      name: err.name,
-      stack: err.stack
-    })
+    console.error("❌ CREATE ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
-  try {
-    const quotes = await Quote.find().sort({ createdAt: -1 })
-    res.json(quotes)
-  } catch (err) {
-    console.error("❌ GET QUOTES ERROR:", err)
-    res.status(500).json({ message: "Server error" })
-  }
+  const quotes = await Quote.find().sort({ createdAt: -1 })
+  res.json(quotes)
 })
 
 /* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    res.json(quote)
-  } catch (err) {
-    console.error("❌ GET QUOTE ERROR:", err)
-    res.status(500).json({ message: "Server error" })
-  }
+  const quote = await Quote.findById(req.params.id)
+  res.json(quote)
 })
 
-/* ================= APPROVE QUOTE ================= */
+/* ================= APPROVE ================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
+    console.log("🔥 APPROVE HIT:", req.params.id)
+
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
+      return res.status(404).json({ message: "Not found" })
     }
 
     quote.approvalStatus = "approved"
@@ -102,13 +73,15 @@ router.patch("/:id/approve", async (req, res) => {
   }
 })
 
-/* ================= DENY QUOTE ================= */
+/* ================= DENY ================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
+    console.log("🔥 DENY HIT:", req.params.id)
+
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
+      return res.status(404).json({ message: "Not found" })
     }
 
     quote.approvalStatus = "denied"
