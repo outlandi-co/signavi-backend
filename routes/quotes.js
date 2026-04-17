@@ -5,6 +5,15 @@ import upload from "../middleware/upload.js"
 
 const router = express.Router()
 
+
+/* ================= TEST ================= */
+
+router.post("/test", (req, res) => {
+  console.log("🔥 TEST ROUTE HIT")
+  res.json({ message: "POST WORKS" })
+})
+
+
 /* ================= CREATE QUOTE ================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
@@ -50,11 +59,6 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-/* ================= TEST ================= */
 
-router.post("/test", (req, res) => {
-  console.log("🔥 TEST ROUTE HIT")
-  res.json({ message: "POST WORKS" })
-})
 
 export default router
