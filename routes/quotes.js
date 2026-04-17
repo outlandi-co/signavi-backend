@@ -21,7 +21,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     console.log("📦 FILE:", req.file)
     console.log("📦 BODY:", req.body)
 
-    // 🔥 TEMP (no cloudinary yet)
+    // 🔥 TEMP: skip cloudinary for now
     const imageUrl = req.file
       ? `LOCAL_FILE_${req.file.originalname}`
       : ""
@@ -40,11 +40,13 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     res.json({ success: true, data: quote })
 
   } catch (err) {
-    console.error("❌ CREATE QUOTE ERROR:", err)
+    console.error("❌ CREATE QUOTE ERROR FULL:", err)
 
+    // 🔥 THIS IS THE IMPORTANT PART (YOU WILL SEE ERROR IN FRONTEND)
     res.status(500).json({
-      message: "Server error",
-      error: err.message
+      message: err.message,
+      name: err.name,
+      stack: err.stack
     })
   }
 })
