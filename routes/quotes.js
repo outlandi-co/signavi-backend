@@ -48,11 +48,9 @@ router.patch("/:id/approve", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    /* 🔥 UPDATE STATUS */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
 
-    /* 🔥 TIMELINE (SAFE INIT) */
     if (!quote.timeline) quote.timeline = []
 
     quote.timeline.push({
@@ -72,7 +70,7 @@ router.patch("/:id/approve", async (req, res) => {
       )
     }
 
-    /* 🔥 SOCKET UPDATE */
+    /* 🔥 SOCKET */
     const io = req.app.get("io")
     if (io) {
       io.emit("jobUpdated", quote)
@@ -105,7 +103,6 @@ router.patch("/:id/deny", async (req, res) => {
     quote.denialReason = reason || "Artwork issue"
     quote.revisionFee = Number(fee) || 0
 
-    /* 🔥 TIMELINE */
     if (!quote.timeline) quote.timeline = []
 
     quote.timeline.push({
@@ -116,7 +113,6 @@ router.patch("/:id/deny", async (req, res) => {
 
     await quote.save()
 
-    /* 📧 EMAIL */
     if (quote.email) {
       await sendOrderStatusEmail(
         quote.email,
@@ -126,7 +122,6 @@ router.patch("/:id/deny", async (req, res) => {
       )
     }
 
-    /* 🔥 SOCKET UPDATE */
     const io = req.app.get("io")
     if (io) {
       io.emit("jobUpdated", quote)

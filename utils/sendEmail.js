@@ -43,7 +43,7 @@ export const sendQuoteEmail = async (to, quote) => {
 }
 
 /* =========================================================
-   📦 STATUS EMAIL (🔥 THIS WAS MISSING / BROKEN)
+   📦 STATUS EMAIL
 ========================================================= */
 export const sendOrderStatusEmail = async (to, status, id, order) => {
   try {
@@ -58,17 +58,13 @@ export const sendOrderStatusEmail = async (to, status, id, order) => {
           Pay Now
         </a>
       `)
-    }
-
-    else if (status === "denied") {
+    } else if (status === "denied") {
       subject = "❌ Revision Required"
       html = wrap(`
         <p><b>Reason:</b> ${order.denialReason}</p>
         <p>Fee: $${order.revisionFee || 0}</p>
       `)
-    }
-
-    else {
+    } else {
       html = wrap(`<p>Status: ${status}</p>`)
     }
 
