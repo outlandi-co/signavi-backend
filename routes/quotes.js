@@ -1,13 +1,12 @@
 import express from "express"
 import Quote from "../models/Quote.js"
-import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 import upload from "../middleware/upload.js"
 import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
-
 console.log("📦 quotes.js LOADED")
+
 /* ================= TEST ================= */
 router.post("/test", (req, res) => {
   console.log("🔥 TEST ROUTE HIT")
@@ -17,12 +16,15 @@ router.post("/test", (req, res) => {
 /* ================= CREATE QUOTE ================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
+    console.log("🔥 HEADERS:", req.headers)
+    console.log("🔥 CONTENT TYPE:", req.headers["content-type"])
+
     console.log("📦 FILE:", req.file)
     console.log("📦 BODY:", req.body)
 
     let imageUrl = ""
 
-    /* ================= SAFE FILE CHECK ================= */
+    /* ================= HANDLE FILE ================= */
     if (req.file && req.file.buffer) {
       try {
         const uploadResult = await new Promise((resolve, reject) => {
@@ -44,7 +46,8 @@ router.post("/", upload.single("artwork"), async (req, res) => {
         console.log("✅ Cloudinary uploaded:", imageUrl)
 
       } catch (cloudErr) {
-        console.error("❌ CLOUDINARY FAIL:", cloudErr.message)
+        console.error("❌ CLOUDINARY FAIL:", cloudErr)
+
         return res.status(500).json({
           message: "Cloudinary upload failed",
           error: cloudErr.message
@@ -70,12 +73,14 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR:", err)
+
     res.status(500).json({
       message: "Server error",
       error: err.message
     })
   }
 })
+
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
