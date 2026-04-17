@@ -1,8 +1,35 @@
 import express from "express"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
+import upload from "../middleware/upload.js" // 🔥 NEW
 
 const router = express.Router()
+
+/* =========================================================
+   📥 CREATE QUOTE (🔥 FIXED WITH IMAGE UPLOAD)
+========================================================= */
+router.post("/", upload.single("artwork"), async (req, res) => {
+  try {
+    console.log("📦 FILE:", req.file)
+
+    const quote = await Quote.create({
+      customerName: req.body.customerName,
+      email: req.body.email,
+      quantity: req.body.quantity,
+      price: req.body.price,
+      notes: req.body.notes,
+
+      // 🔥 THIS IS THE FIX
+      artwork: req.file?.path || "" 
+    })
+
+    res.json(quote)
+
+  } catch (err) {
+    console.error("❌ CREATE QUOTE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
 
 /* =========================================================
    📥 GET ALL QUOTES
@@ -60,7 +87,6 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    /* 📧 EMAIL */
     if (quote.email) {
       await sendOrderStatusEmail(
         quote.email,
@@ -70,7 +96,6 @@ router.patch("/:id/approve", async (req, res) => {
       )
     }
 
-    /* 🔥 SOCKET */
     const io = req.app.get("io")
     if (io) {
       io.emit("jobUpdated", quote)
