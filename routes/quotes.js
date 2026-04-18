@@ -5,34 +5,35 @@ import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
-console.log("📦 quotes.js LOADED")
-
 /* ================= CREATE QUOTE ================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
-    console.log("🔥 REQUEST RECEIVED")
-
     let imageUrl = null
+    let lowQuality = false
 
     if (req.file?.buffer) {
-      try {
-        const uploadResult = await new Promise((resolve, reject) => {
-          const stream = cloudinary.uploader.upload_stream(
-            { folder: "signavi" },
-            (error, result) => {
-              if (error) return reject(error)
-              resolve(result)
-            }
-          )
-          stream.end(req.file.buffer)
-        })
-
-        imageUrl = uploadResult.secure_url
-        console.log("✅ CLOUDINARY:", imageUrl)
-
-      } catch (err) {
-        console.error("❌ CLOUDINARY FAIL:", err.message)
+      // 🔥 SIMPLE QUALITY CHECK (file size proxy)
+      if (req.file.size < 100 * 1024) {
+        lowQuality = true
+        console.warn("⚠️ LOW QUALITY IMAGE DETECTED")
       }
+
+      const uploadResult = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: "signavi",
+            resource_type: "image"
+          },
+          (error, result) => {
+            if (error) return reject(error)
+            resolve(result)
+          }
+        )
+
+        stream.end(req.file.buffer)
+      })
+
+      imageUrl = uploadResult.secure_url
     }
 
     const quote = await Quote.create({
@@ -42,17 +43,20 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price: Number(req.body.price || 0),
       notes: req.body.notes || "",
       artwork: imageUrl,
-      approvalStatus: "pending",
 
-      // 🔥 CRITICAL FIX
+      // 🔥 IMPORTANT
+      approvalStatus: "pending",
       status: "quotes",
-      source: "quote"
+      source: "quote",
+
+      // 🔥 NEW
+      lowQuality
     })
 
     res.json({ success: true, data: quote })
 
   } catch (err) {
-    console.error("❌ CREATE ERROR:", err)
+    console.error(err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -65,8 +69,6 @@ router.patch("/:id/approve", async (req, res) => {
 
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
-
-    // 🔥 THIS FIXES COLUMN BUG
     quote.source = "order"
 
     await quote.save()
@@ -74,9 +76,7 @@ router.patch("/:id/approve", async (req, res) => {
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
-
   } catch (err) {
-    console.error(err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -99,22 +99,9 @@ router.patch("/:id/deny", async (req, res) => {
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
-
   } catch (err) {
-    console.error(err)
     res.status(500).json({ message: err.message })
   }
-})
-
-/* ================= GET ================= */
-router.get("/", async (req, res) => {
-  const quotes = await Quote.find().sort({ createdAt: -1 })
-  res.json(quotes)
-})
-
-router.get("/:id", async (req, res) => {
-  const quote = await Quote.findById(req.params.id)
-  res.json(quote)
 })
 
 export default router
