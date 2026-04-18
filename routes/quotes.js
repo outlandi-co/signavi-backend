@@ -16,13 +16,12 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
     let imageUrl = ""
 
-    console.log("🔥 CLOUDINARY CHECK START")
-
-    if (req.file && req.file.buffer) {
+    /* ================= CLOUDINARY UPLOAD ================= */
+    if (req.file) {
       console.log("🔥 ENTERING CLOUDINARY BLOCK")
 
       try {
-        const result = await new Promise((resolve, reject) => {
+        const uploadResult = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
             { folder: "signavi" },
             (error, result) => {
@@ -34,22 +33,22 @@ router.post("/", upload.single("artwork"), async (req, res) => {
             }
           )
 
+          // 🔥 THIS IS THE MOST IMPORTANT LINE
           stream.end(req.file.buffer)
         })
 
-        imageUrl = result.secure_url
+        imageUrl = uploadResult.secure_url
 
         console.log("✅ CLOUDINARY SUCCESS:", imageUrl)
 
       } catch (err) {
         console.error("❌ CLOUDINARY FAIL:", err.message)
       }
-
     } else {
-      console.warn("⚠️ NO FILE BUFFER — MULTER NOT WORKING")
+      console.warn("⚠️ NO FILE RECEIVED")
     }
 
-    /* 🔥 SAVE QUOTE */
+    /* ================= SAVE QUOTE ================= */
     const quote = await Quote.create({
       customerName: req.body.customerName || "Unknown",
       email: req.body.email || "",
@@ -89,16 +88,12 @@ router.patch("/:id/approve", async (req, res) => {
     console.log("🔥 APPROVE HIT:", req.params.id)
 
     const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Not found" })
-    }
+    if (!quote) return res.status(404).json({ message: "Not found" })
 
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
@@ -115,16 +110,12 @@ router.patch("/:id/deny", async (req, res) => {
     console.log("🔥 DENY HIT:", req.params.id)
 
     const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Not found" })
-    }
+    if (!quote) return res.status(404).json({ message: "Not found" })
 
     quote.approvalStatus = "denied"
     quote.status = "denied"
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
