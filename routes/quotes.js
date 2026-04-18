@@ -12,61 +12,42 @@ router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     console.log("🔥 REQUEST RECEIVED")
 
-    console.log("🧪 FILE CHECK:", {
-      exists: !!req.file,
-      hasBuffer: !!req.file?.buffer,
-      size: req.file?.size
-    })
+    let imageUrl = null
 
-    console.log("📦 BODY:", req.body)
-
-    let imageUrl = ""
-
-    /* ================= CLOUDINARY UPLOAD ================= */
-    if (req.file && req.file.buffer) {
-      console.log("🔥 ENTERING CLOUDINARY BLOCK")
-
+    if (req.file?.buffer) {
       try {
         const uploadResult = await new Promise((resolve, reject) => {
           const stream = cloudinary.uploader.upload_stream(
             { folder: "signavi" },
             (error, result) => {
-              if (error) {
-                console.error("❌ CLOUDINARY ERROR:", error)
-                return reject(error)
-              }
+              if (error) return reject(error)
               resolve(result)
             }
           )
-
           stream.end(req.file.buffer)
         })
 
         imageUrl = uploadResult.secure_url
-
-        console.log("✅ CLOUDINARY SUCCESS:", imageUrl)
+        console.log("✅ CLOUDINARY:", imageUrl)
 
       } catch (err) {
         console.error("❌ CLOUDINARY FAIL:", err.message)
       }
-
-    } else {
-      console.warn("⚠️ NO VALID FILE BUFFER — upload skipped")
     }
 
-    /* ================= SAVE QUOTE ================= */
     const quote = await Quote.create({
       customerName: req.body.customerName || "Unknown",
       email: req.body.email || "",
       quantity: Number(req.body.quantity || 1),
       price: Number(req.body.price || 0),
       notes: req.body.notes || "",
-      artwork: imageUrl || null, // ✅ NEVER empty string
+      artwork: imageUrl,
       approvalStatus: "pending",
-      status: "draft"
-    })
 
-    console.log("✅ QUOTE SAVED:", quote._id)
+      // 🔥 CRITICAL FIX
+      status: "quotes",
+      source: "quote"
+    })
 
     res.json({ success: true, data: quote })
 
@@ -76,39 +57,17 @@ router.post("/", upload.single("artwork"), async (req, res) => {
   }
 })
 
-/* ================= GET ALL ================= */
-router.get("/", async (req, res) => {
-  try {
-    const quotes = await Quote.find().sort({ createdAt: -1 })
-    res.json(quotes)
-  } catch (err) {
-    console.error("❌ GET ALL ERROR:", err)
-    res.status(500).json({ message: "Server error" })
-  }
-})
-
-/* ================= GET ONE ================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Not found" })
-    res.json(quote)
-  } catch (err) {
-    console.error("❌ GET ONE ERROR:", err)
-    res.status(500).json({ message: "Server error" })
-  }
-})
-
 /* ================= APPROVE ================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
-    console.log("🔥 APPROVE HIT:", req.params.id)
-
     const quote = await Quote.findById(req.params.id)
     if (!quote) return res.status(404).json({ message: "Not found" })
 
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
+
+    // 🔥 THIS FIXES COLUMN BUG
+    quote.source = "order"
 
     await quote.save()
 
@@ -117,7 +76,7 @@ router.patch("/:id/approve", async (req, res) => {
     res.json({ success: true, data: quote })
 
   } catch (err) {
-    console.error("❌ APPROVE ERROR:", err)
+    console.error(err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -125,13 +84,15 @@ router.patch("/:id/approve", async (req, res) => {
 /* ================= DENY ================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
-    console.log("🔥 DENY HIT:", req.params.id)
-
     const quote = await Quote.findById(req.params.id)
     if (!quote) return res.status(404).json({ message: "Not found" })
 
     quote.approvalStatus = "denied"
-    quote.status = "denied"
+    quote.status = "quotes"
+    quote.source = "quote"
+
+    quote.revisionFee = req.body.fee || 0
+    quote.denialReason = req.body.reason || ""
 
     await quote.save()
 
@@ -140,9 +101,20 @@ router.patch("/:id/deny", async (req, res) => {
     res.json({ success: true, data: quote })
 
   } catch (err) {
-    console.error("❌ DENY ERROR:", err)
+    console.error(err)
     res.status(500).json({ message: err.message })
   }
+})
+
+/* ================= GET ================= */
+router.get("/", async (req, res) => {
+  const quotes = await Quote.find().sort({ createdAt: -1 })
+  res.json(quotes)
+})
+
+router.get("/:id", async (req, res) => {
+  const quote = await Quote.findById(req.params.id)
+  res.json(quote)
 })
 
 export default router
