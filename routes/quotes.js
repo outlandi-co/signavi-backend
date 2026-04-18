@@ -11,13 +11,19 @@ console.log("📦 quotes.js LOADED")
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     console.log("🔥 REQUEST RECEIVED")
-    console.log("📦 FILE:", req.file)
+
+    console.log("🧪 FILE CHECK:", {
+      exists: !!req.file,
+      hasBuffer: !!req.file?.buffer,
+      size: req.file?.size
+    })
+
     console.log("📦 BODY:", req.body)
 
     let imageUrl = ""
 
     /* ================= CLOUDINARY UPLOAD ================= */
-    if (req.file) {
+    if (req.file && req.file.buffer) {
       console.log("🔥 ENTERING CLOUDINARY BLOCK")
 
       try {
@@ -33,7 +39,6 @@ router.post("/", upload.single("artwork"), async (req, res) => {
             }
           )
 
-          // 🔥 THIS IS THE MOST IMPORTANT LINE
           stream.end(req.file.buffer)
         })
 
@@ -44,8 +49,9 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       } catch (err) {
         console.error("❌ CLOUDINARY FAIL:", err.message)
       }
+
     } else {
-      console.warn("⚠️ NO FILE RECEIVED")
+      console.warn("⚠️ NO VALID FILE BUFFER — upload skipped")
     }
 
     /* ================= SAVE QUOTE ================= */
@@ -55,7 +61,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       quantity: Number(req.body.quantity || 1),
       price: Number(req.body.price || 0),
       notes: req.body.notes || "",
-      artwork: imageUrl,
+      artwork: imageUrl || null, // ✅ NEVER empty string
       approvalStatus: "pending",
       status: "draft"
     })
@@ -72,14 +78,25 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
-  const quotes = await Quote.find().sort({ createdAt: -1 })
-  res.json(quotes)
+  try {
+    const quotes = await Quote.find().sort({ createdAt: -1 })
+    res.json(quotes)
+  } catch (err) {
+    console.error("❌ GET ALL ERROR:", err)
+    res.status(500).json({ message: "Server error" })
+  }
 })
 
 /* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
-  const quote = await Quote.findById(req.params.id)
-  res.json(quote)
+  try {
+    const quote = await Quote.findById(req.params.id)
+    if (!quote) return res.status(404).json({ message: "Not found" })
+    res.json(quote)
+  } catch (err) {
+    console.error("❌ GET ONE ERROR:", err)
+    res.status(500).json({ message: "Server error" })
+  }
 })
 
 /* ================= APPROVE ================= */
@@ -94,6 +111,7 @@ router.patch("/:id/approve", async (req, res) => {
     quote.status = "payment_required"
 
     await quote.save()
+
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
@@ -116,6 +134,7 @@ router.patch("/:id/deny", async (req, res) => {
     quote.status = "denied"
 
     await quote.save()
+
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
