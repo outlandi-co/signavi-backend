@@ -9,16 +9,15 @@ const router = express.Router()
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     console.log("🔥 CREATE QUOTE HIT")
-
     console.log("📦 BODY:", req.body)
-    console.log("📁 FILE:", req.file ? "exists" : "none")
+    console.log("📁 FILE:", req.file ? req.file.originalname : "none")
 
     let imageUrl = null
     let lowQuality = false
 
-    /* ================= FILE UPLOAD ================= */
+    /* ================= FILE HANDLING ================= */
     if (req.file && req.file.buffer) {
-      console.log("📁 FILE DETECTED:", req.file.originalname)
+      console.log("📁 PROCESSING FILE...")
 
       if (req.file.size < 100 * 1024) {
         lowQuality = true
@@ -42,20 +41,19 @@ router.post("/", upload.single("artwork"), async (req, res) => {
         })
 
         imageUrl = uploadResult.secure_url
-        console.log("🌩️ CLOUDINARY URL:", imageUrl)
+        console.log("🌩️ CLOUDINARY SUCCESS:", imageUrl)
 
       } catch (uploadErr) {
         console.error("❌ CLOUDINARY ERROR:", uploadErr)
+
         return res.status(500).json({
-          message: "Image upload failed",
+          message: "Cloudinary upload failed",
           error: uploadErr.message
         })
       }
-    } else {
-      console.warn("⚠️ NO FILE UPLOADED (using null)")
     }
 
-    /* ================= SAFE BODY PARSE ================= */
+    /* ================= SAFE PARSE ================= */
     const customerName = req.body.customerName || "Unknown"
     const email = req.body.email || ""
     const quantity = Number(req.body.quantity || 1)
@@ -70,17 +68,12 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price,
       notes,
       artwork: imageUrl,
-
-      approvalStatus: "pending",
-      status: "quotes",
-      source: "quote",
-
       lowQuality
     })
 
     console.log("✅ QUOTE CREATED:", quote._id)
 
-    res.json({
+    return res.json({
       success: true,
       data: quote
     })
@@ -88,9 +81,9 @@ router.post("/", upload.single("artwork"), async (req, res) => {
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR:", err)
 
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message,
-      error: err.stack
+      stack: err.stack
     })
   }
 })
