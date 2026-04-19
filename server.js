@@ -73,6 +73,7 @@ if (!fs.existsSync(uploadsPath)) {
 app.use("/uploads", express.static(uploadsPath))
 
 /* ================= ROUTES ================= */
+/* ================= ROUTES ================= */
 console.log("📦 Mounting routes...")
 
 app.use("/api/products", productRoutes)
@@ -82,7 +83,7 @@ app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
 
-/* 🔥 CRITICAL ROUTE */
+/* 🔥 FIXED */
 app.use("/api/quotes", quoteRoutes)
 
 app.use("/api/expenses", expenseRoutes)
