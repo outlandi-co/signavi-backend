@@ -38,7 +38,6 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price: Number(req.body.price || 0),
       notes: req.body.notes || "",
       artwork: imageUrl,
-
       approvalStatus: "pending",
       status: "quotes",
       source: "quote",
@@ -111,9 +110,16 @@ router.patch("/:id/approve", async (req, res) => {
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* ================= CREATE PAYMENT LINK ================= */
-    const BASE_URL =
-      process.env.BASE_URL || "https://signavi-backend.onrender.com"
+    /* 🔥 ENSURE TIMELINE EXISTS */
+    if (!quote.timeline) quote.timeline = []
+
+    /* ================= PAYMENT CALL ================= */
+    const BASE_URL = process.env.BASE_URL
+
+    if (!BASE_URL) {
+      console.error("❌ BASE_URL missing in env")
+      throw new Error("Server config error")
+    }
 
     const createPayUrl = `${BASE_URL}/api/square/create-payment/${quote._id}`
 
@@ -121,7 +127,6 @@ router.patch("/:id/approve", async (req, res) => {
 
     const payRes = await fetch(createPayUrl, { method: "POST" })
 
-    /* 🔥 HARD FAIL */
     if (!payRes.ok) {
       const text = await payRes.text()
       console.error("❌ PAYMENT LINK ERROR:", text)
@@ -131,16 +136,15 @@ router.patch("/:id/approve", async (req, res) => {
     const payJson = await payRes.json()
 
     if (!payJson?.url) {
-      console.error("❌ NO PAYMENT URL RETURNED:", payJson)
+      console.error("❌ INVALID PAYMENT RESPONSE:", payJson)
       throw new Error("Square did not return a payment link")
     }
 
-    /* ================= SAVE PAYMENT LINK ================= */
+    /* ================= SAVE ================= */
     quote.paymentUrl = payJson.url
 
     console.log("💳 PAYMENT URL CREATED:", quote.paymentUrl)
 
-    /* ================= TIMELINE ================= */
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
@@ -154,7 +158,7 @@ router.patch("/:id/approve", async (req, res) => {
 
     /* ================= EMAIL ================= */
     if (quote.email && quote.paymentUrl) {
-      console.log("📧 SENDING EMAIL WITH LINK:", quote.paymentUrl)
+      console.log("📧 SENDING EMAIL")
 
       await sendOrderStatusEmail(
         quote.email,
@@ -162,8 +166,6 @@ router.patch("/:id/approve", async (req, res) => {
         quote._id,
         { ...quote.toObject(), paymentUrl: quote.paymentUrl }
       )
-    } else {
-      console.warn("⚠️ EMAIL OR PAYMENT URL MISSING")
     }
 
     res.json({ success: true, data: quote })
@@ -181,6 +183,8 @@ router.patch("/:id/deny", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
     if (!quote) return res.status(404).json({ message: "Not found" })
+
+    if (!quote.timeline) quote.timeline = []
 
     quote.approvalStatus = "denied"
     quote.denialReason = req.body.reason || ""

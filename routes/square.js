@@ -6,42 +6,40 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* ================= INIT SQUARE ================= */
+/* ================= INIT ================= */
 const SQUARE_TOKEN = process.env.SQUARE_ACCESS_TOKEN
 const SQUARE_LOCATION_ID = process.env.SQUARE_LOCATION_ID
 
-if (!SQUARE_TOKEN) {
-  console.warn("⚠️ Missing SQUARE_ACCESS_TOKEN")
-}
-if (!SQUARE_LOCATION_ID) {
-  console.warn("⚠️ Missing SQUARE_LOCATION_ID")
-}
+if (!SQUARE_TOKEN) console.warn("⚠️ Missing SQUARE_ACCESS_TOKEN")
+if (!SQUARE_LOCATION_ID) console.warn("⚠️ Missing SQUARE_LOCATION_ID")
 
 const client = new SquareClient({
   accessToken: SQUARE_TOKEN,
-  environment: SquareEnvironment.Production // or Sandbox if testing
+  environment: SquareEnvironment.Production // switch to Sandbox if testing
 })
 
-/* ================= CREATE PAYMENT ================= */
+/* =========================================================
+   💳 CREATE PAYMENT LINK
+========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
-    console.log("💳 CREATE PAYMENT FOR:", id)
+    console.log("💳 CREATE PAYMENT:", id)
 
     let order = await Order.findById(id)
-    let quote = null
 
+    /* 🔄 QUOTE FALLBACK */
     if (!order) {
-      quote = await Quote.findById(id)
+      const quote = await Quote.findById(id)
 
       if (!quote) {
-        console.log("❌ Not found in Order or Quote")
         return res.status(404).json({ message: "Not found" })
       }
 
       if (quote.approvalStatus !== "approved") {
-        console.log("❌ Quote not approved")
-        return res.status(403).json({ message: "Artwork must be approved" })
+        return res.status(403).json({
+          message: "Artwork must be approved"
+        })
       }
 
       order = {
@@ -55,17 +53,16 @@ router.post("/create-payment/:id", async (req, res) => {
     const rawAmount = Number(order.finalPrice || 0)
 
     if (!rawAmount || rawAmount <= 0) {
-      console.log("❌ Invalid amount:", rawAmount)
       return res.status(400).json({ message: "Invalid amount" })
     }
 
-    const amount = Math.round(rawAmount * 100) // cents
+    const amount = Math.round(rawAmount * 100)
 
-    console.log("💰 AMOUNT:", amount)
+    console.log("💰 AMOUNT (cents):", amount)
 
-    /* ================= CREATE PAYMENT LINK ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
+
       order: {
         locationId: SQUARE_LOCATION_ID,
         lineItems: [
@@ -73,12 +70,13 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${order._id.toString().slice(-6)}`,
             quantity: "1",
             basePriceMoney: {
-              amount: amount, // ⚠️ MUST be number, not BigInt
+              amount: BigInt(amount), // 🔥 REQUIRED
               currency: "USD"
             }
           }
         ]
       },
+
       checkoutOptions: {
         redirectUrl: `${process.env.CLIENT_URL}/success/${order._id}`
       }
@@ -87,26 +85,26 @@ router.post("/create-payment/:id", async (req, res) => {
     const url = response?.paymentLink?.url
 
     if (!url) {
-      console.log("❌ No payment URL returned")
       return res.status(500).json({ message: "Payment link failed" })
     }
 
-    console.log("✅ PAYMENT LINK CREATED:", url)
+    console.log("✅ PAYMENT LINK:", url)
 
     res.json({ url })
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR FULL:", err)
+    console.error("❌ SQUARE ERROR:", err)
 
-    // 🔥 expose useful error to frontend for debugging
     res.status(500).json({
       message: err?.message || "Payment error",
-      squareError: err?.body || null
+      details: err?.body || null
     })
   }
 })
 
-/* ================= CONFIRM PAYMENT ================= */
+/* =========================================================
+   ✅ CONFIRM PAYMENT
+========================================================= */
 router.post("/confirm/:id", async (req, res) => {
   try {
     const { id } = req.params
@@ -114,6 +112,7 @@ router.post("/confirm/:id", async (req, res) => {
 
     let order = await Order.findById(id)
 
+    /* 🔄 QUOTE → ORDER */
     if (!order) {
       const quote = await Quote.findById(id)
 
@@ -121,7 +120,7 @@ router.post("/confirm/:id", async (req, res) => {
         return res.status(404).json({ message: "Not found" })
       }
 
-      console.log("🔄 CONVERT QUOTE → ORDER")
+      console.log("🔄 Converting Quote → Order")
 
       order = await Order.create({
         customerName: quote.customerName,
@@ -145,17 +144,7 @@ router.post("/confirm/:id", async (req, res) => {
       await Quote.findByIdAndDelete(id)
     }
 
-    if (order.status !== "paid") {
-      order.status = "paid"
-
-      order.timeline.push({
-        status: "paid",
-        date: new Date(),
-        note: "Payment confirmed"
-      })
-    }
-
-    /* 🔥 AUTO MOVE */
+    /* 🔥 UPDATE STATUS */
     order.status = "production"
 
     order.timeline.push({
@@ -172,7 +161,7 @@ router.post("/confirm/:id", async (req, res) => {
       await sendOrderStatusEmail(order.email, "paid", order._id, order)
     }
 
-    console.log("✅ ORDER → PRODUCTION:", order._id)
+    console.log("✅ ORDER READY:", order._id)
 
     res.json({ success: true, data: order })
 
