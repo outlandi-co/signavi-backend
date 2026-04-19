@@ -1,3 +1,5 @@
+console.log("🔥 QUOTES ROUTE LOADED")
+
 import express from "express"
 import Quote from "../models/Quote.js"
 import upload from "../middleware/upload.js"
