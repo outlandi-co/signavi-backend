@@ -20,8 +20,9 @@ if (!SQUARE_LOCATION_ID) console.warn("⚠️ Missing SQUARE_LOCATION_ID")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  accessToken: SQUARE_TOKEN,
-  environment: SquareEnvironment.Production // change to Sandbox if needed
+  token: SQUARE_TOKEN, // 🔥 ADD THIS
+  accessToken: SQUARE_TOKEN, // keep both for safety
+  environment: SquareEnvironment.Production
 })
 
 /* =========================================================
