@@ -6,16 +6,24 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* ================= INIT ================= */
+/* ================= ENV ================= */
 const SQUARE_TOKEN = process.env.SQUARE_ACCESS_TOKEN
 const SQUARE_LOCATION_ID = process.env.SQUARE_LOCATION_ID
+
+console.log("🔑 SQUARE ENV:", {
+  token: SQUARE_TOKEN ? "exists" : "missing",
+  location: SQUARE_LOCATION_ID || "missing",
+  env: process.env.NODE_ENV
+})
 
 if (!SQUARE_TOKEN) console.warn("⚠️ Missing SQUARE_ACCESS_TOKEN")
 if (!SQUARE_LOCATION_ID) console.warn("⚠️ Missing SQUARE_LOCATION_ID")
 
+/* ================= CLIENT ================= */
+/* 🔥 IMPORTANT: SWITCH TO SANDBOX FIRST */
 const client = new SquareClient({
   accessToken: SQUARE_TOKEN,
-  environment: SquareEnvironment.Production // switch to Sandbox if testing
+  environment: SquareEnvironment.Sandbox // 🔥 CHANGE THIS FOR NOW
 })
 
 /* =========================================================
@@ -33,10 +41,12 @@ router.post("/create-payment/:id", async (req, res) => {
       const quote = await Quote.findById(id)
 
       if (!quote) {
+        console.log("❌ Not found")
         return res.status(404).json({ message: "Not found" })
       }
 
       if (quote.approvalStatus !== "approved") {
+        console.log("❌ Not approved")
         return res.status(403).json({
           message: "Artwork must be approved"
         })
@@ -53,13 +63,15 @@ router.post("/create-payment/:id", async (req, res) => {
     const rawAmount = Number(order.finalPrice || 0)
 
     if (!rawAmount || rawAmount <= 0) {
+      console.log("❌ Invalid amount:", rawAmount)
       return res.status(400).json({ message: "Invalid amount" })
     }
 
     const amount = Math.round(rawAmount * 100)
 
-    console.log("💰 AMOUNT (cents):", amount)
+    console.log("💰 FINAL AMOUNT:", amount)
 
+    /* ================= CREATE LINK ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
 
@@ -70,7 +82,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${order._id.toString().slice(-6)}`,
             quantity: "1",
             basePriceMoney: {
-              amount: BigInt(amount), // 🔥 REQUIRED
+              amount: BigInt(amount), // ✅ REQUIRED
               currency: "USD"
             }
           }
@@ -82,10 +94,16 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
+    console.log("🧾 FULL SQUARE RESPONSE:", JSON.stringify(response, null, 2))
+
     const url = response?.paymentLink?.url
 
     if (!url) {
-      return res.status(500).json({ message: "Payment link failed" })
+      console.log("❌ Missing payment URL")
+      return res.status(500).json({
+        message: "Payment link failed",
+        squareResponse: response
+      })
     }
 
     console.log("✅ PAYMENT LINK:", url)
@@ -93,11 +111,12 @@ router.post("/create-payment/:id", async (req, res) => {
     res.json({ url })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR:", err)
+    console.error("❌ SQUARE ERROR FULL:", err)
 
     res.status(500).json({
-      message: err?.message || "Payment error",
-      details: err?.body || null
+      message: err?.message,
+      errors: err?.errors || null,
+      body: err?.body || null
     })
   }
 })
@@ -143,6 +162,8 @@ router.post("/confirm/:id", async (req, res) => {
 
       await Quote.findByIdAndDelete(id)
     }
+
+    if (!order.timeline) order.timeline = []
 
     /* 🔥 UPDATE STATUS */
     order.status = "production"
