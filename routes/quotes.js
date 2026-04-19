@@ -25,6 +25,7 @@ router.get("/", async (req, res) => {
 })
 
 /* ================= GET ONE (🔥 FIX) ================= */
+/* ================= GET ONE QUOTE ================= */
 router.get("/:id", async (req, res) => {
   try {
     console.log("🔥 GET QUOTE:", req.params.id)
@@ -32,13 +33,14 @@ router.get("/:id", async (req, res) => {
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
+      console.warn("❌ QUOTE NOT FOUND:", req.params.id)
       return res.status(404).json({ message: "Quote not found" })
     }
 
     res.json(quote)
 
   } catch (err) {
-    console.error("❌ GET ONE ERROR:", err)
+    console.error("❌ GET QUOTE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
