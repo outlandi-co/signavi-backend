@@ -5,10 +5,12 @@ import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
-/* ================= CREATE QUOTE ================= */
+/* =========================================================
+   🔥 CREATE QUOTE (FULL SAFE VERSION)
+========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
-    console.log("🔥 CREATE QUOTE HIT")
+    console.log("\n🔥 ===== CREATE QUOTE HIT =====")
 
     console.log("📦 BODY:", req.body)
     console.log("📁 FILE:", req.file ? "exists" : "none")
@@ -16,7 +18,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     let imageUrl = null
     let lowQuality = false
 
-    /* ================= FILE UPLOAD ================= */
+    /* ================= FILE HANDLING ================= */
     if (req.file) {
       try {
         if (!req.file.buffer) {
@@ -32,7 +34,10 @@ router.post("/", upload.single("artwork"), async (req, res) => {
               resource_type: "image"
             },
             (error, result) => {
-              if (error) return reject(error)
+              if (error) {
+                console.error("❌ CLOUDINARY ERROR:", error)
+                return reject(error)
+              }
               resolve(result)
             }
           )
@@ -43,10 +48,19 @@ router.post("/", upload.single("artwork"), async (req, res) => {
         imageUrl = uploadResult.secure_url
         console.log("🌩️ CLOUDINARY SUCCESS:", imageUrl)
 
+        if (req.file.size < 100 * 1024) {
+          lowQuality = true
+          console.warn("⚠️ LOW QUALITY IMAGE")
+        }
+
       } catch (uploadErr) {
         console.error("❌ CLOUDINARY FAILED:", uploadErr.message)
-        imageUrl = null // 🔥 DO NOT CRASH
+
+        // 🔥 DO NOT CRASH — continue without image
+        imageUrl = null
       }
+    } else {
+      console.warn("⚠️ NO FILE RECEIVED")
     }
 
     /* ================= SAFE BODY ================= */
@@ -56,7 +70,15 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     const price = Number(req.body.price || 0)
     const notes = req.body.notes || ""
 
-    /* ================= CREATE ================= */
+    console.log("🧾 PARSED DATA:", {
+      customerName,
+      email,
+      quantity,
+      price,
+      notes
+    })
+
+    /* ================= CREATE DOCUMENT ================= */
     const quote = await Quote.create({
       customerName,
       email,
@@ -64,48 +86,78 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price,
       notes,
       artwork: imageUrl,
+
       approvalStatus: "pending",
       status: "quotes",
       source: "quote",
-      lowQuality
+
+      lowQuality,
+
+      timeline: [
+        {
+          status: "created",
+          date: new Date(),
+          note: "Quote created"
+        }
+      ]
     })
 
     console.log("✅ QUOTE CREATED:", quote._id)
 
-    res.json({
+    return res.json({
       success: true,
       data: quote
     })
 
   } catch (err) {
-    console.error("❌ CREATE QUOTE ERROR:", err)
+    console.error("❌ CREATE QUOTE ERROR FULL:", err)
 
-    res.status(500).json({
+    return res.status(500).json({
       message: err.message,
-      error: err.stack
+      name: err.name,
+      stack: err.stack,
+      body: req.body,
+      file: req.file ? "exists" : "none"
     })
   }
 })
 
-/* ================= GET ALL ================= */
+/* =========================================================
+   📄 GET ALL QUOTES
+========================================================= */
 router.get("/", async (req, res) => {
   try {
+    console.log("📄 GET ALL QUOTES")
+
     const quotes = await Quote.find().sort({ createdAt: -1 })
-    res.json(quotes)
+
+    return res.json(quotes)
+
   } catch (err) {
-    res.status(500).json({ message: err.message })
+    console.error("❌ GET QUOTES ERROR:", err)
+    return res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= GET ONE ================= */
+/* =========================================================
+   📄 GET ONE QUOTE
+========================================================= */
 router.get("/:id", async (req, res) => {
   try {
-    const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Not found" })
+    console.log("📄 GET QUOTE:", req.params.id)
 
-    res.json(quote)
+    const quote = await Quote.findById(req.params.id)
+
+    if (!quote) {
+      console.warn("⚠️ QUOTE NOT FOUND")
+      return res.status(404).json({ message: "Not found" })
+    }
+
+    return res.json(quote)
+
   } catch (err) {
-    res.status(500).json({ message: err.message })
+    console.error("❌ GET QUOTE ERROR:", err)
+    return res.status(500).json({ message: err.message })
   }
 })
 
