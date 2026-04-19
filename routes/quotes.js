@@ -15,13 +15,12 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     let imageUrl = null
     let lowQuality = false
 
-    /* ================= FILE HANDLING ================= */
+    /* ================= SAFE FILE HANDLING ================= */
     if (req.file && req.file.buffer) {
       console.log("📁 PROCESSING FILE...")
 
       if (req.file.size < 100 * 1024) {
         lowQuality = true
-        console.warn("⚠️ LOW QUALITY IMAGE")
       }
 
       try {
@@ -43,13 +42,12 @@ router.post("/", upload.single("artwork"), async (req, res) => {
         imageUrl = uploadResult.secure_url
         console.log("🌩️ CLOUDINARY SUCCESS:", imageUrl)
 
-      } catch (uploadErr) {
-        console.error("❌ CLOUDINARY ERROR:", uploadErr)
+      } catch (err) {
+        console.error("⚠️ CLOUDINARY FAILED — continuing without image")
+        console.error(err.message)
 
-        return res.status(500).json({
-          message: "Cloudinary upload failed",
-          error: uploadErr.message
-        })
+        // 🔥 DO NOT CRASH — continue without image
+        imageUrl = null
       }
     }
 
@@ -91,12 +89,8 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
-    console.log("📄 GET ALL QUOTES")
-
     const quotes = await Quote.find().sort({ createdAt: -1 })
-
     res.json(quotes)
-
   } catch (err) {
     console.error("❌ GET QUOTES ERROR:", err)
     res.status(500).json({ message: err.message })
@@ -106,17 +100,9 @@ router.get("/", async (req, res) => {
 /* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   try {
-    console.log("📄 GET QUOTE:", req.params.id)
-
     const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      console.warn("⚠️ QUOTE NOT FOUND")
-      return res.status(404).json({ message: "Not found" })
-    }
-
+    if (!quote) return res.status(404).json({ message: "Not found" })
     res.json(quote)
-
   } catch (err) {
     console.error("❌ GET QUOTE ERROR:", err)
     res.status(500).json({ message: err.message })
