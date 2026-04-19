@@ -39,17 +39,6 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const server = http.createServer(app)
 
-/* ================= SOCKET ================= */
-const io = new Server(server, {
-  cors: { origin: "*" }
-})
-
-app.set("io", io)
-
-io.on("connection", (socket) => {
-  console.log("🟢 Socket connected:", socket.id)
-})
-
 /* ================= DEBUG ================= */
 app.use((req, res, next) => {
   console.log(`🔥 ${req.method} ${req.originalUrl}`)
@@ -63,11 +52,6 @@ console.log("📧 EMAIL DEBUG:", {
   pass: process.env.EMAIL_PASS ? "exists" : "missing"
 })
 
-console.log("🔑 ENV CHECK:", {
-  mongo: process.env.MONGO_URI ? "exists" : "missing",
-  square: process.env.SQUARE_ACCESS_TOKEN ? "exists" : "missing"
-})
-
 /* ================= CORS ================= */
 const allowedOrigins = [
   "https://signavistudio.store",
@@ -76,12 +60,8 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    console.log("🌐 CORS ORIGIN:", origin)
-
     if (!origin) return callback(null, true)
-
     if (origin.includes("vercel.app")) return callback(null, true)
-
     if (allowedOrigins.includes(origin)) return callback(null, true)
 
     console.warn("❌ BLOCKED:", origin)
@@ -89,11 +69,6 @@ app.use(cors({
   },
   credentials: true
 }))
-
-/* ================= BODY ================= */
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
-app.use(cookieParser())
 
 /* ================= STATIC ================= */
 const uploadsPath = path.join(__dirname, "uploads")
@@ -104,17 +79,26 @@ if (!fs.existsSync(uploadsPath)) {
 
 app.use("/uploads", express.static(uploadsPath))
 
-/* ================= ROUTES ================= */
-console.log("📦 Mounting routes...")
+/* =========================================================
+   🔥 IMPORTANT: ROUTE ORDER (FIXES YOUR 500 ERROR)
+========================================================= */
 
+/* 🔥 MULTER ROUTES FIRST (NO JSON PARSER YET) */
+app.use("/api/quotes", quoteRoutes)
 app.use("/api/products", productRoutes)
+
+/* 🔥 THEN ENABLE BODY PARSING */
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser())
+
+/* 🔥 OTHER ROUTES */
 app.use("/api/orders", orderRoutes)
 app.use("/api/checkout", checkoutRoutes)
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
-app.use("/api/quotes", quoteRoutes)
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
@@ -126,34 +110,15 @@ app.use("/api/square", squareRoutes)
 console.log("✅ Routes mounted")
 
 /* ================= SQUARE ================= */
-let squareClient = null
+const squareClient = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Production
+})
 
-if (process.env.SQUARE_ACCESS_TOKEN) {
-  squareClient = new SquareClient({
-    token: process.env.SQUARE_ACCESS_TOKEN,
-    environment: SquareEnvironment.Production
-  })
-
-  console.log("💳 Square initialized")
-} else {
-  console.warn("⚠️ Square NOT initialized (missing token)")
-}
-
-/* ================= SQUARE TEST ================= */
 app.get("/api/square/locations", async (req, res) => {
   try {
-    if (!squareClient) {
-      return res.status(500).json({
-        message: "Square not configured"
-      })
-    }
-
     const response = await squareClient.locations.list()
-
-    console.log("📍 SQUARE LOCATIONS:", JSON.stringify(response, null, 2))
-
     res.json(response)
-
   } catch (err) {
     console.error("❌ SQUARE ERROR:", err)
     res.status(500).json({ message: err.message })
@@ -179,15 +144,21 @@ app.use((req, res) => {
   })
 })
 
+/* ================= SOCKET ================= */
+const io = new Server(server, {
+  cors: { origin: "*" }
+})
+
+app.set("io", io)
+
+io.on("connection", socket => {
+  console.log("🟢 Socket connected:", socket.id)
+})
+
 /* ================= START ================= */
 async function startServer() {
   try {
-    if (!process.env.MONGO_URI) {
-      throw new Error("MONGO_URI missing")
-    }
-
     await mongoose.connect(process.env.MONGO_URI)
-
     console.log("✅ Mongo connected")
 
     const PORT = process.env.PORT || 5050
@@ -196,9 +167,8 @@ async function startServer() {
       console.log(`🚀 Running on port ${PORT}`)
     })
 
-    /* 🔥 Abandoned cart checker */
+    /* 🔥 Abandoned Cart Checker */
     setInterval(() => {
-      console.log("🛒 Checking abandoned carts...")
       checkAbandonedCarts()
     }, 1000 * 60 * 10)
 
