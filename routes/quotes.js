@@ -6,7 +6,55 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* ================= CREATE QUOTE ================= */
+/* =========================================================
+   🧪 TEST ROUTE
+========================================================= */
+router.get("/__test", (req, res) => {
+  res.json({ message: "QUOTES ROUTE LIVE ✅" })
+})
+
+/* =========================================================
+   📦 GET ALL QUOTES
+========================================================= */
+router.get("/", async (req, res) => {
+  try {
+    console.log("🔥 GET ALL QUOTES")
+
+    const quotes = await Quote.find().sort({ createdAt: -1 })
+
+    res.json(quotes)
+
+  } catch (err) {
+    console.error("❌ GET ALL ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   🔍 GET SINGLE QUOTE (🔥 THIS FIXES YOUR 404)
+========================================================= */
+router.get("/:id", async (req, res) => {
+  try {
+    console.log("🔥 GET QUOTE:", req.params.id)
+
+    const quote = await Quote.findById(req.params.id)
+
+    if (!quote) {
+      console.warn("❌ QUOTE NOT FOUND:", req.params.id)
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    res.json(quote)
+
+  } catch (err) {
+    console.error("❌ GET ONE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   📄 CREATE QUOTE
+========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     let imageUrl = null
@@ -47,43 +95,42 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     res.json({ success: true, data: quote })
 
   } catch (err) {
-    console.error(err)
+    console.error("❌ CREATE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= APPROVE ================= */
-/* ================= APPROVE ================= */
+/* =========================================================
+   ✅ APPROVE QUOTE
+========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
     if (!quote) return res.status(404).json({ message: "Not found" })
 
-    /* ================= UPDATE ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
     await quote.save()
 
-    /* ================= EMAIL (NO BROKEN FETCH) ================= */
-    await sendOrderStatusEmail(
-      quote.email,
-      "approved",
-      quote._id,
-      {
-        ...quote.toObject(),
-        paymentUrl: `${process.env.CLIENT_URL}/checkout/${quote._id}`
-      }
-    )
+    /* 📧 EMAIL */
+    if (quote.email) {
+      await sendOrderStatusEmail(
+        quote.email,
+        "approved",
+        quote._id,
+        {
+          ...quote.toObject(),
+          paymentUrl: `${process.env.CLIENT_URL}/checkout/${quote._id}`
+        }
+      )
+    }
 
-    /* ================= SOCKET ================= */
+    /* 🔥 SOCKET */
     req.app.get("io")?.emit("jobUpdated", quote)
 
-    res.json({
-      success: true,
-      data: quote
-    })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
@@ -91,7 +138,9 @@ router.patch("/:id/approve", async (req, res) => {
   }
 })
 
-/* ================= DENY ================= */
+/* =========================================================
+   ❌ DENY QUOTE
+========================================================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
@@ -119,6 +168,7 @@ router.patch("/:id/deny", async (req, res) => {
     res.json({ success: true, data: quote })
 
   } catch (err) {
+    console.error("❌ DENY ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
