@@ -1,4 +1,4 @@
-// 🔥 LOAD ENV FIRST
+// 🔥 LOAD ENV FIRST (CRITICAL)
 import "dotenv/config"
 
 import express from "express"
@@ -18,7 +18,7 @@ import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
 import cartRoutes from "./routes/cart.js"
 import productionRoutes from "./routes/production.js"
-import quoteRoutes from "./routes/quotes.js" // 🔥 IMPORTANT
+import quoteRoutes from "./routes/quotes.js"
 import expenseRoutes from "./routes/expenses.js"
 import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
@@ -32,10 +32,18 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const server = http.createServer(app)
 
-/* ================= VERSION LOG ================= */
-console.log("🔥 SERVER VERSION: QUOTES DEBUG ACTIVE")
+/* ================= VERSION ================= */
+console.log("\n🔥 SERVER VERSION: FINAL PRODUCTION BUILD\n")
 
-/* ================= DEBUG LOGGER ================= */
+/* ================= ENV DEBUG ================= */
+console.log("🔑 ENV CHECK:", {
+  mongo: process.env.MONGO_URI ? "exists" : "missing",
+  squareToken: process.env.SQUARE_ACCESS_TOKEN ? "exists" : "missing",
+  squareLocation: process.env.SQUARE_LOCATION_ID ? "exists" : "missing",
+  email: process.env.EMAIL_USER ? "exists" : "missing"
+})
+
+/* ================= REQUEST LOGGER ================= */
 app.use((req, res, next) => {
   console.log(`🔥 ${req.method} ${req.originalUrl}`)
   next()
@@ -49,9 +57,15 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
+    console.log("🌐 CORS ORIGIN:", origin)
+
     if (!origin) return callback(null, true)
+
     if (origin.includes("vercel.app")) return callback(null, true)
-    if (allowedOrigins.includes(origin)) return callback(null, true)
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
 
     console.warn("❌ BLOCKED CORS:", origin)
     return callback(new Error("Not allowed by CORS"))
@@ -66,13 +80,13 @@ app.use(cookieParser())
 
 /* ================= STATIC ================= */
 const uploadsPath = path.join(__dirname, "uploads")
+
 if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true })
 }
 
 app.use("/uploads", express.static(uploadsPath))
 
-/* ================= ROUTES ================= */
 /* ================= ROUTES ================= */
 console.log("📦 Mounting routes...")
 
@@ -82,10 +96,7 @@ app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
-
-/* 🔥 FIXED */
 app.use("/api/quotes", quoteRoutes)
-
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
@@ -120,13 +131,17 @@ const io = new Server(server, {
 
 app.set("io", io)
 
-io.on("connection", socket => {
+io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
 })
 
 /* ================= START ================= */
 async function startServer() {
   try {
+    if (!process.env.MONGO_URI) {
+      throw new Error("Missing MONGO_URI")
+    }
+
     await mongoose.connect(process.env.MONGO_URI)
     console.log("✅ Mongo connected")
 
@@ -137,7 +152,7 @@ async function startServer() {
     })
 
   } catch (err) {
-    console.error("💥 START ERROR:", err)
+    console.error("💥 START ERROR:", err.message)
   }
 }
 
