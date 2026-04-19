@@ -111,8 +111,9 @@ router.patch("/:id/approve", async (req, res) => {
     quote.source = "order"
 
     /* 🔥 SAFE PAYMENT LINK (NO CRASHES) */
-    const CLIENT_URL =
-      process.env.CLIENT_URL || "https://signavistudio.store"
+  const CLIENT_URL =
+  process.env.CLIENT_URL ||
+  "http://localhost:5173"
 
     let paymentUrl = `${CLIENT_URL}/checkout/${quote._id}`
 

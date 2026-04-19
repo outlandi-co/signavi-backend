@@ -74,11 +74,16 @@ export const sendOrderStatusEmail = async (to, status, id, order) => {
     let subject = "Order Update"
     let html = ""
 
-    const CLIENT_URL =
-      process.env.CLIENT_URL || "https://signavi-studio.netlify.app"
+   const CLIENT_URL = process.env.CLIENT_URL
 
-    const paymentLink =
-      order?.paymentUrl || `${CLIENT_URL}/quote/${id}`
+if (!CLIENT_URL) {
+  console.error("❌ CLIENT_URL MISSING")
+  throw new Error("CLIENT_URL must be set")
+}
+
+
+      
+    const paymentLink = order?.paymentUrl
 
     if (status === "approved") {
       subject = "✅ Approved — Complete Payment"
@@ -170,7 +175,8 @@ export const sendAbandonedCartEmail = async (cart) => {
     `).join("")
 
     const CLIENT_URL =
-      process.env.CLIENT_URL || "https://signavi-studio.netlify.app"
+  process.env.CLIENT_URL ||
+  "http://localhost:5173"
 
     const link = cart.discountCode
       ? `${CLIENT_URL}/store?code=${cart.discountCode}&discount=${cart.discountPercent}`
