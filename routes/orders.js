@@ -7,25 +7,10 @@ const router = express.Router()
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
-/* ================= TEST ================= */
-router.get("/__test", (req, res) => {
-  res.json({ message: "ORDERS ROUTE LIVE ✅" })
-})
-
-/* =========================================================
-   🛒 CREATE ORDER
-========================================================= */
+/* ================= CREATE ORDER ================= */
 router.post("/", async (req, res) => {
   try {
-    console.log("🔥 CREATE ORDER BODY:", req.body)
-
-    const {
-      customerName,
-      email,
-      items,
-      quantity,
-      printType
-    } = req.body
+    const { customerName, email, items, quantity, printType } = req.body
 
     const safeItems = Array.isArray(items)
       ? items.map(item => ({
@@ -35,15 +20,8 @@ router.post("/", async (req, res) => {
         }))
       : []
 
-    const totalQuantity = safeItems.reduce(
-      (acc, item) => acc + item.quantity,
-      0
-    )
-
-    const totalPrice = safeItems.reduce(
-      (acc, item) => acc + item.price * item.quantity,
-      0
-    )
+    const totalQuantity = safeItems.reduce((acc, i) => acc + i.quantity, 0)
+    const totalPrice = safeItems.reduce((acc, i) => acc + i.price * i.quantity, 0)
 
     const order = await Order.create({
       customerName: customerName || "Guest",
@@ -59,18 +37,22 @@ router.post("/", async (req, res) => {
         {
           status: "created",
           date: new Date(),
-          note: "Order created from cart"
+          note: "Order created"
         }
       ]
     })
 
-    console.log("✅ ORDER CREATED:", order._id)
-
-    /* 🔥 SOCKET PUSH */
-    const io = req.app.get("io")
-    if (io) {
-      io.emit("jobCreated", order)
+    /* 🔥 SEND EMAIL (optional) */
+    if (order.email) {
+      await sendOrderStatusEmail(
+        order.email,
+        "payment_required",
+        order._id,
+        order
+      )
     }
+
+    req.app.get("io")?.emit("jobCreated", order)
 
     res.json({ success: true, data: order })
 
@@ -80,9 +62,7 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* =========================================================
-   🔥 STATUS UPDATE
-========================================================= */
+/* ================= UPDATE STATUS ================= */
 router.patch("/update-status/:id", async (req, res) => {
   try {
     const { status } = req.body
@@ -93,13 +73,9 @@ router.patch("/update-status/:id", async (req, res) => {
     }
 
     const order = await Order.findById(id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
+    if (!order) return res.status(404).json({ message: "Order not found" })
 
     const prevStatus = order.status
-
     order.status = status
 
     if (!order.timeline) order.timeline = []
@@ -108,14 +84,23 @@ router.patch("/update-status/:id", async (req, res) => {
       order.timeline.push({
         status,
         date: new Date(),
-        note: `Moved from ${prevStatus} → ${status}`
+        note: `${prevStatus} → ${status}`
       })
     }
 
     await order.save()
 
-    const io = req.app.get("io")
-    if (io) io.emit("jobUpdated", order)
+    /* 🔥 EMAIL */
+    if (order.email) {
+      await sendOrderStatusEmail(
+        order.email,
+        status,
+        order._id,
+        order
+      )
+    }
+
+    req.app.get("io")?.emit("jobUpdated", order)
 
     res.json({ success: true, data: order })
 
@@ -125,13 +110,12 @@ router.patch("/update-status/:id", async (req, res) => {
   }
 })
 
-/* ================= GET ALL ================= */
+/* ================= GET ================= */
 router.get("/", async (req, res) => {
   const orders = await Order.find().sort({ createdAt: -1 })
   res.json({ success: true, data: orders })
 })
 
-/* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   const order = await Order.findById(req.params.id)
   res.json({ success: true, data: order })

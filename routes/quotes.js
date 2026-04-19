@@ -2,6 +2,7 @@ import express from "express"
 import Quote from "../models/Quote.js"
 import upload from "../middleware/upload.js"
 import cloudinary from "../utils/cloudinary.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
@@ -12,24 +13,18 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     let lowQuality = false
 
     if (req.file?.buffer) {
-      // 🔥 SIMPLE QUALITY CHECK (file size proxy)
       if (req.file.size < 100 * 1024) {
         lowQuality = true
-        console.warn("⚠️ LOW QUALITY IMAGE DETECTED")
       }
 
       const uploadResult = await new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
-          {
-            folder: "signavi",
-            resource_type: "image"
-          },
+          { folder: "signavi" },
           (error, result) => {
             if (error) return reject(error)
             resolve(result)
           }
         )
-
         stream.end(req.file.buffer)
       })
 
@@ -43,13 +38,9 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price: Number(req.body.price || 0),
       notes: req.body.notes || "",
       artwork: imageUrl,
-
-      // 🔥 IMPORTANT
       approvalStatus: "pending",
       status: "quotes",
       source: "quote",
-
-      // 🔥 NEW
       lowQuality
     })
 
@@ -73,10 +64,33 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
+    /* 🔥 CREATE PAYMENT LINK */
+    const paymentRes = await fetch(
+      `${process.env.BASE_URL}/api/square/create-payment/${quote._id}`,
+      { method: "POST" }
+    )
+
+    const paymentData = await paymentRes.json()
+    const paymentUrl = paymentData?.url
+
+    if (!paymentUrl) throw new Error("Payment link failed")
+
+    /* 🔥 EMAIL CUSTOMER */
+    if (quote.email) {
+      await sendOrderStatusEmail(
+        quote.email,
+        "approved",
+        quote._id,
+        { ...quote.toObject(), paymentUrl }
+      )
+    }
+
     req.app.get("io")?.emit("jobUpdated", quote)
 
-    res.json({ success: true, data: quote })
+    res.json({ success: true, paymentUrl, data: quote })
+
   } catch (err) {
+    console.error("❌ APPROVE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -90,15 +104,24 @@ router.patch("/:id/deny", async (req, res) => {
     quote.approvalStatus = "denied"
     quote.status = "quotes"
     quote.source = "quote"
-
     quote.revisionFee = req.body.fee || 0
     quote.denialReason = req.body.reason || ""
 
     await quote.save()
 
+    if (quote.email) {
+      await sendOrderStatusEmail(
+        quote.email,
+        "denied",
+        quote._id,
+        quote
+      )
+    }
+
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
+
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

@@ -1,108 +1,45 @@
 import express from "express"
-import dotenv from "dotenv"
 import Order from "../models/Order.js"
 import Quote from "../models/Quote.js"
 import { SquareClient, SquareEnvironment } from "square"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
-dotenv.config()
-
 const router = express.Router()
 
-/* ================= DEBUG ================= */
-console.log("🔥 NEW SQUARE CLIENT LOADED")
-console.log("🔥 TOKEN EXISTS:", !!process.env.SQUARE_ACCESS_TOKEN)
-console.log("🔥 LOCATION EXISTS:", !!process.env.SQUARE_LOCATION_ID)
-console.log("🌐 CLIENT_URL:", process.env.CLIENT_URL)
-
-/* 🚨 HARD FAIL */
-if (!process.env.SQUARE_ACCESS_TOKEN) {
-  throw new Error("❌ Missing SQUARE_ACCESS_TOKEN")
-}
-
-if (!process.env.SQUARE_LOCATION_ID) {
-  throw new Error("❌ Missing SQUARE_LOCATION_ID")
-}
-
-/* ================= CLIENT ================= */
 const client = new SquareClient({
   accessToken: process.env.SQUARE_ACCESS_TOKEN,
   environment: SquareEnvironment.Production
 })
 
-/* ================= TEST ================= */
-router.get("/__test", (req, res) => {
-  res.json({ message: "SQUARE ROUTE LIVE ✅" })
-})
-
-/* =========================================================
-   💳 CREATE PAYMENT LINK (FULLY LOCKED)
-========================================================= */
+/* ================= CREATE PAYMENT ================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
-    console.log("💳 CREATE PAYMENT:", req.params.id)
-
     let order = await Order.findById(req.params.id)
     let quote = null
 
-    /* ================= CHECK QUOTE FIRST ================= */
     if (!order) {
       quote = await Quote.findById(req.params.id)
 
       if (!quote) {
-        return res.status(404).json({
-          message: "Order or Quote not found"
-        })
+        return res.status(404).json({ message: "Not found" })
       }
 
-      /* 🔒 HARD LOCK */
       if (quote.approvalStatus !== "approved") {
         return res.status(403).json({
-          message: "Artwork must be approved before payment"
+          message: "Artwork must be approved"
         })
       }
 
-      console.log("🧾 USING QUOTE FOR PAYMENT")
-
-      /* 🔥 TEMP ORDER OBJECT */
       order = {
         _id: quote._id,
         customerName: quote.customerName,
         email: quote.email,
-        finalPrice: quote.price,
-        price: quote.price
+        finalPrice: quote.price
       }
     }
 
-    /* ================= IF ORDER EXISTS ================= */
-    else {
-      /* 🔥 OPTIONAL: IF ORDER HAS LINKED QUOTE */
-      if (order.quoteId) {
-        quote = await Quote.findById(order.quoteId)
+    const amount = Math.round((order.finalPrice || 0) * 100)
 
-        if (!quote || quote.approvalStatus !== "approved") {
-          return res.status(403).json({
-            message: "Artwork must be approved before payment"
-          })
-        }
-      }
-    }
-
-    /* ================= AMOUNT ================= */
-    const rawAmount = order.finalPrice || order.price || 0
-
-    if (!rawAmount || rawAmount <= 0) {
-      return res.status(400).json({
-        message: "Invalid amount"
-      })
-    }
-
-    const TAX_RATE = 0.0825
-    const subtotalCents = Math.round(Number(rawAmount) * 100)
-
-    console.log("💰 SUBTOTAL:", rawAmount)
-
-    /* ================= SQUARE ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
 
@@ -114,17 +51,9 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${order._id.toString().slice(-6)}`,
             quantity: "1",
             basePriceMoney: {
-              amount: BigInt(subtotalCents),
+              amount: BigInt(amount),
               currency: "USD"
             }
-          }
-        ],
-
-        taxes: [
-          {
-            name: "Sales Tax",
-            percentage: (TAX_RATE * 100).toFixed(2),
-            scope: "ORDER"
           }
         ]
       },
@@ -134,31 +63,17 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url =
-      response?.paymentLink?.url ||
-      response?.url
-
-    if (!url) {
-      console.error("❌ FULL RESPONSE:", response)
-      throw new Error("No payment link returned")
-    }
-
-    console.log("🚀 Square URL:", url)
+    const url = response?.paymentLink?.url
 
     res.json({ url })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR:", err)
-
-    res.status(500).json({
-      message: err.message
-    })
+    console.error("❌ PAYMENT ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 
-/* =========================================================
-   🔥 CONFIRM PAYMENT
-========================================================= */
+/* ================= CONFIRM PAYMENT ================= */
 router.post("/confirm/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -168,40 +83,47 @@ router.post("/confirm/:id", async (req, res) => {
     }
 
     if (order.status === "paid") {
-      return res.json({ success: true, message: "Already paid" })
+      return res.json({ success: true, data: order })
     }
 
-    order.status = "paid"
-
     if (!order.timeline) order.timeline = []
+
+    // 🔥 MARK AS PAID
+    order.status = "paid"
 
     order.timeline.push({
       status: "paid",
       date: new Date(),
-      note: "Paid via Square"
+      note: "Payment confirmed via Square"
+    })
+
+    // 🔥 AUTO MOVE TO PRODUCTION
+    order.status = "production"
+
+    order.timeline.push({
+      status: "production",
+      date: new Date(),
+      note: "Auto moved to production after payment"
     })
 
     await order.save()
 
-    const io = req.app.get("io")
-    if (io) io.emit("jobUpdated", order)
+    // 🔥 REALTIME UPDATE
+    req.app.get("io")?.emit("jobUpdated", order)
 
+    // 🔥 EMAIL
     if (order.email) {
-      try {
-        await sendOrderStatusEmail(
-          order.email,
-          "paid",
-          order._id,
-          order
-        )
-      } catch (err) {
-        console.warn("⚠️ Email failed:", err.message)
-      }
+      await sendOrderStatusEmail(
+        order.email,
+        "production",
+        order._id,
+        order
+      )
     }
 
-    console.log("✅ ORDER MARKED PAID:", order._id)
+    console.log("🔥 ORDER → PRODUCTION:", order._id)
 
-    res.json({ success: true })
+    res.json({ success: true, data: order })
 
   } catch (err) {
     console.error("❌ CONFIRM ERROR:", err)
