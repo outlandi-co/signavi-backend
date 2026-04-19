@@ -10,10 +10,13 @@ router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     console.log("🔥 CREATE QUOTE HIT")
 
+    console.log("📦 BODY:", req.body)
+    console.log("📁 FILE:", req.file ? "exists" : "none")
+
     let imageUrl = null
     let lowQuality = false
 
-    /* ================= SAFE FILE CHECK ================= */
+    /* ================= FILE UPLOAD ================= */
     if (req.file && req.file.buffer) {
       console.log("📁 FILE DETECTED:", req.file.originalname)
 
@@ -39,6 +42,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
         })
 
         imageUrl = uploadResult.secure_url
+        console.log("🌩️ CLOUDINARY URL:", imageUrl)
 
       } catch (uploadErr) {
         console.error("❌ CLOUDINARY ERROR:", uploadErr)
@@ -48,16 +52,23 @@ router.post("/", upload.single("artwork"), async (req, res) => {
         })
       }
     } else {
-      console.warn("⚠️ NO FILE UPLOADED")
+      console.warn("⚠️ NO FILE UPLOADED (using null)")
     }
 
-    /* ================= CREATE QUOTE ================= */
+    /* ================= SAFE BODY PARSE ================= */
+    const customerName = req.body.customerName || "Unknown"
+    const email = req.body.email || ""
+    const quantity = Number(req.body.quantity || 1)
+    const price = Number(req.body.price || 0)
+    const notes = req.body.notes || ""
+
+    /* ================= CREATE ================= */
     const quote = await Quote.create({
-      customerName: req.body.customerName || "Unknown",
-      email: req.body.email || "",
-      quantity: Number(req.body.quantity || 1),
-      price: Number(req.body.price || 0),
-      notes: req.body.notes || "",
+      customerName,
+      email,
+      quantity,
+      price,
+      notes,
       artwork: imageUrl,
 
       approvalStatus: "pending",
@@ -79,7 +90,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
     res.status(500).json({
       message: err.message,
-      stack: err.stack
+      error: err.stack
     })
   }
 })
@@ -87,9 +98,14 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
+    console.log("📄 GET ALL QUOTES")
+
     const quotes = await Quote.find().sort({ createdAt: -1 })
+
     res.json(quotes)
+
   } catch (err) {
+    console.error("❌ GET QUOTES ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -97,11 +113,19 @@ router.get("/", async (req, res) => {
 /* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   try {
+    console.log("📄 GET QUOTE:", req.params.id)
+
     const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Not found" })
+
+    if (!quote) {
+      console.warn("⚠️ QUOTE NOT FOUND")
+      return res.status(404).json({ message: "Not found" })
+    }
 
     res.json(quote)
+
   } catch (err) {
+    console.error("❌ GET QUOTE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
