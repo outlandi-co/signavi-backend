@@ -1,4 +1,4 @@
-// 🔥 LOAD ENV FIRST (CRITICAL)
+// 🔥 LOAD ENV FIRST
 import "dotenv/config"
 
 import express from "express"
@@ -10,25 +10,18 @@ import { Server } from "socket.io"
 import path from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
-import { SquareClient, SquareEnvironment } from "square"
-
-import { checkAbandonedCarts } from "./services/abandonedCartService.js"
 
 /* ================= ROUTES ================= */
 import productRoutes from "./routes/products.js"
-import checkoutRoutes from "./routes/checkoutRoutes.js"
 import orderRoutes from "./routes/orders.js"
 import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
 import cartRoutes from "./routes/cart.js"
 import productionRoutes from "./routes/production.js"
-import quoteRoutes from "./routes/quotes.js"
+import quoteRoutes from "./routes/quotes.js" // 🔥 IMPORTANT
 import expenseRoutes from "./routes/expenses.js"
 import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
-import aiPricingRoutes from "./routes/aiPricing.js"
-import jobRoutes from "./routes/job.js"
-import taxRoutes from "./routes/tax.js"
 import squareRoutes from "./routes/square.js"
 
 /* ================= PATH ================= */
@@ -39,17 +32,13 @@ const __dirname = path.dirname(__filename)
 const app = express()
 const server = http.createServer(app)
 
-/* ================= DEBUG ================= */
+/* ================= VERSION LOG ================= */
+console.log("🔥 SERVER VERSION: QUOTES DEBUG ACTIVE")
+
+/* ================= DEBUG LOGGER ================= */
 app.use((req, res, next) => {
   console.log(`🔥 ${req.method} ${req.originalUrl}`)
   next()
-})
-
-console.log("🚀 SERVER STARTING...")
-
-console.log("📧 EMAIL DEBUG:", {
-  user: process.env.EMAIL_USER,
-  pass: process.env.EMAIL_PASS ? "exists" : "missing"
 })
 
 /* ================= CORS ================= */
@@ -64,66 +53,44 @@ app.use(cors({
     if (origin.includes("vercel.app")) return callback(null, true)
     if (allowedOrigins.includes(origin)) return callback(null, true)
 
-    console.warn("❌ BLOCKED:", origin)
+    console.warn("❌ BLOCKED CORS:", origin)
     return callback(new Error("Not allowed by CORS"))
   },
   credentials: true
 }))
 
+/* ================= BODY ================= */
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser())
+
 /* ================= STATIC ================= */
 const uploadsPath = path.join(__dirname, "uploads")
-
 if (!fs.existsSync(uploadsPath)) {
   fs.mkdirSync(uploadsPath, { recursive: true })
 }
 
 app.use("/uploads", express.static(uploadsPath))
 
-/* =========================================================
-   🔥 IMPORTANT: ROUTE ORDER (FIXES YOUR 500 ERROR)
-========================================================= */
+/* ================= ROUTES ================= */
+console.log("📦 Mounting routes...")
 
-/* 🔥 MULTER ROUTES FIRST (NO JSON PARSER YET) */
-app.use("/api/quotes", quoteRoutes)
 app.use("/api/products", productRoutes)
-
-/* 🔥 THEN ENABLE BODY PARSING */
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
-app.use(cookieParser())
-
-/* 🔥 OTHER ROUTES */
 app.use("/api/orders", orderRoutes)
-app.use("/api/checkout", checkoutRoutes)
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
+
+/* 🔥 CRITICAL ROUTE */
+app.use("/api/quotes", quoteRoutes)
+
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
-app.use("/api/job", jobRoutes)
-app.use("/api/ai-pricing", aiPricingRoutes)
-app.use("/api/tax", taxRoutes)
 app.use("/api/square", squareRoutes)
 
 console.log("✅ Routes mounted")
-
-/* ================= SQUARE ================= */
-const squareClient = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
-  environment: SquareEnvironment.Production
-})
-
-app.get("/api/square/locations", async (req, res) => {
-  try {
-    const response = await squareClient.locations.list()
-    res.json(response)
-  } catch (err) {
-    console.error("❌ SQUARE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
 
 /* ================= HEALTH ================= */
 app.get("/", (req, res) => {
@@ -139,6 +106,7 @@ app.get("/api/health", (req, res) => {
 
 /* ================= 404 ================= */
 app.use((req, res) => {
+  console.warn("❌ 404 HIT:", req.originalUrl)
   res.status(404).json({
     message: `Route not found: ${req.originalUrl}`
   })
@@ -166,11 +134,6 @@ async function startServer() {
     server.listen(PORT, () => {
       console.log(`🚀 Running on port ${PORT}`)
     })
-
-    /* 🔥 Abandoned Cart Checker */
-    setInterval(() => {
-      checkAbandonedCarts()
-    }, 1000 * 60 * 10)
 
   } catch (err) {
     console.error("💥 START ERROR:", err)

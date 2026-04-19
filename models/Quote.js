@@ -26,7 +26,7 @@ const quoteSchema = new mongoose.Schema({
 
   adminNotes: String,
 
-  /* ================= 🔥 WORKFLOW FIELDS ================= */
+  /* ================= WORKFLOW ================= */
   status: {
     type: String,
     enum: [
@@ -50,7 +50,6 @@ const quoteSchema = new mongoose.Schema({
     default: "quote"
   },
 
-  /* ================= OPTIONAL FLAGS ================= */
   lowQuality: {
     type: Boolean,
     default: false
@@ -66,22 +65,21 @@ const quoteSchema = new mongoose.Schema({
 
 }, { timestamps: true })
 
-/* ================= 🔥 AUTO SYNC LOGIC ================= */
-quoteSchema.pre("save", function (next) {
+/* ================= FIXED PRE SAVE ================= */
+quoteSchema.pre("save", function () {
 
-  // 🔥 Approval → Payment flow
+  // 🔥 Approval → Payment
   if (this.approvalStatus === "approved") {
     this.status = "payment_required"
     this.source = "order"
   }
 
-  // 🔥 Denied → back to quotes
+  // 🔥 Denied → Back to quotes
   if (this.approvalStatus === "denied") {
     this.status = "quotes"
     this.source = "quote"
   }
 
-  next()
 })
 
 export default mongoose.model("Quote", quoteSchema)
