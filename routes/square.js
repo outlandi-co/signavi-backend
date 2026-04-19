@@ -6,17 +6,23 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
+/* ================= SQUARE CLIENT ================= */
 const client = new SquareClient({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  token: process.env.SQUARE_ACCESS_TOKEN, // ✅ FIXED
   environment: SquareEnvironment.Production
 })
 
-/* ================= CREATE PAYMENT ================= */
+/* =========================================================
+   💳 CREATE PAYMENT LINK
+========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
+    console.log("\n💳 CREATE PAYMENT START:", req.params.id)
+
     let order = await Order.findById(req.params.id)
     let quote = null
 
+    /* ================= FALLBACK TO QUOTE ================= */
     if (!order) {
       quote = await Quote.findById(req.params.id)
 
@@ -38,8 +44,24 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     }
 
-    const amount = Math.round((order.finalPrice || 0) * 100)
+    /* ================= FIX PRICE ================= */
+    let price = Number(order.finalPrice || 0)
 
+    if (!price || price <= 0) {
+      console.warn("⚠️ INVALID PRICE → forcing minimum $1")
+      price = 1 // 🔥 fallback so Square doesn't crash
+    }
+
+    const amount = Math.round(price * 100)
+
+    console.log("💰 FINAL AMOUNT:", amount)
+
+    /* ================= LOCATION CHECK ================= */
+    if (!process.env.SQUARE_LOCATION_ID) {
+      throw new Error("Missing SQUARE_LOCATION_ID")
+    }
+
+    /* ================= CREATE LINK ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${order._id}-${Date.now()}`,
 
@@ -51,7 +73,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${order._id.toString().slice(-6)}`,
             quantity: "1",
             basePriceMoney: {
-              amount: BigInt(amount),
+              amount: amount, // ✅ FIXED (NO BigInt)
               currency: "USD"
             }
           }
@@ -65,24 +87,36 @@ router.post("/create-payment/:id", async (req, res) => {
 
     const url = response?.paymentLink?.url
 
+    if (!url) {
+      throw new Error("No payment URL returned from Square")
+    }
+
+    console.log("✅ PAYMENT LINK CREATED:", url)
+
     res.json({ url })
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err)
-    res.status(500).json({ message: err.message })
+    console.error("❌ PAYMENT ERROR FULL:", err)
+
+    res.status(500).json({
+      message: "Payment creation failed",
+      error: err.message
+    })
   }
 })
 
-/* ================= CONFIRM PAYMENT ================= */
+/* =========================================================
+   ✅ CONFIRM PAYMENT
+========================================================= */
 router.post("/confirm/:id", async (req, res) => {
   try {
     const { id } = req.params
 
-    console.log("💳 CONFIRM PAYMENT:", id)
+    console.log("\n💳 CONFIRM PAYMENT:", id)
 
     let order = await Order.findById(id)
 
-    /* ================= HANDLE QUOTE → ORDER ================= */
+    /* ================= QUOTE → ORDER ================= */
     if (!order) {
       const quote = await Quote.findById(id)
 
@@ -111,24 +145,23 @@ router.post("/confirm/:id", async (req, res) => {
         ]
       })
 
-      // 🔥 REMOVE OLD QUOTE
       await Quote.findByIdAndDelete(id)
     }
 
-    /* ================= UPDATE EXISTING ORDER ================= */
+    /* ================= UPDATE STATUS ================= */
     if (order.status !== "paid") {
       order.status = "paid"
-
-      if (!order.timeline) order.timeline = []
-
-      order.timeline.push({
-        status: "paid",
-        date: new Date(),
-        note: "Payment confirmed via Square"
-      })
     }
 
-    /* ================= AUTO MOVE TO PRODUCTION ================= */
+    if (!order.timeline) order.timeline = []
+
+    order.timeline.push({
+      status: "paid",
+      date: new Date(),
+      note: "Payment confirmed via Square"
+    })
+
+    /* 🔥 AUTO MOVE TO PRODUCTION */
     order.status = "production"
 
     order.timeline.push({
@@ -158,7 +191,10 @@ router.post("/confirm/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ CONFIRM ERROR:", err)
-    res.status(500).json({ message: err.message })
+
+    res.status(500).json({
+      message: err.message
+    })
   }
 })
 
