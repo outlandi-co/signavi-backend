@@ -6,33 +6,23 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* =========================================================
-   🧪 TEST ROUTE
-========================================================= */
+/* ================= TEST ================= */
 router.get("/__test", (req, res) => {
   res.json({ message: "QUOTES ROUTE LIVE ✅" })
 })
 
-/* =========================================================
-   📦 GET ALL QUOTES
-========================================================= */
+/* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
-    console.log("🔥 GET ALL QUOTES")
-
     const quotes = await Quote.find().sort({ createdAt: -1 })
-
     res.json(quotes)
-
   } catch (err) {
     console.error("❌ GET ALL ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* =========================================================
-   🔍 GET SINGLE QUOTE (🔥 THIS FIXES YOUR 404)
-========================================================= */
+/* ================= GET ONE (🔥 FIX) ================= */
 router.get("/:id", async (req, res) => {
   try {
     console.log("🔥 GET QUOTE:", req.params.id)
@@ -40,7 +30,6 @@ router.get("/:id", async (req, res) => {
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
-      console.warn("❌ QUOTE NOT FOUND:", req.params.id)
       return res.status(404).json({ message: "Quote not found" })
     }
 
@@ -52,9 +41,7 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-/* =========================================================
-   📄 CREATE QUOTE
-========================================================= */
+/* ================= CREATE ================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   try {
     let imageUrl = null
@@ -100,9 +87,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
   }
 })
 
-/* =========================================================
-   ✅ APPROVE QUOTE
-========================================================= */
+/* ================= APPROVE ================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
@@ -114,7 +99,6 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    /* 📧 EMAIL */
     if (quote.email) {
       await sendOrderStatusEmail(
         quote.email,
@@ -127,7 +111,6 @@ router.patch("/:id/approve", async (req, res) => {
       )
     }
 
-    /* 🔥 SOCKET */
     req.app.get("io")?.emit("jobUpdated", quote)
 
     res.json({ success: true, data: quote })
@@ -138,9 +121,7 @@ router.patch("/:id/approve", async (req, res) => {
   }
 })
 
-/* =========================================================
-   ❌ DENY QUOTE
-========================================================= */
+/* ================= DENY ================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
