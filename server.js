@@ -1,83 +1,210 @@
-
-// 🔥 LOAD ENV FIRST (CRITICAL FIX)
+// 🔥 LOAD ENV FIRST (CRITICAL)
 import "dotenv/config"
 
 import express from "express"
-import cors from "cors"
 import mongoose from "mongoose"
+import cors from "cors"
+import cookieParser from "cookie-parser"
 import http from "http"
 import { Server } from "socket.io"
+import path from "path"
+import fs from "fs"
+import { fileURLToPath } from "url"
+import { SquareClient, SquareEnvironment } from "square"
 
-// ================= ROUTES =================
-import quotesRoutes from "./routes/quotes.js"
-import ordersRoutes from "./routes/orders.js"
-import squareRoutes from "./routes/square.js"
-import webhookRoutes from "./routes/webhookRoutes.js"
+import { checkAbandonedCarts } from "./services/abandonedCartService.js"
+
+/* ================= ROUTES ================= */
+import productRoutes from "./routes/products.js"
+import checkoutRoutes from "./routes/checkoutRoutes.js"
+import orderRoutes from "./routes/orders.js"
+import authRoutes from "./routes/authRoutes.js"
+import logoutRoutes from "./routes/logout.js"
+import cartRoutes from "./routes/cart.js"
 import productionRoutes from "./routes/production.js"
+import quoteRoutes from "./routes/quotes.js"
+import expenseRoutes from "./routes/expenses.js"
+import pricingRoutes from "./routes/pricing.js"
+import customerRoutes from "./routes/customers.js"
+import aiPricingRoutes from "./routes/aiPricing.js"
+import jobRoutes from "./routes/job.js"
+import taxRoutes from "./routes/tax.js"
+import squareRoutes from "./routes/square.js"
 
-// ================= APP SETUP =================
+/* ================= PATH ================= */
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+/* ================= APP ================= */
 const app = express()
 const server = http.createServer(app)
 
-// ================= SOCKET =================
+/* ================= SOCKET ================= */
 const io = new Server(server, {
-  cors: {
-    origin: "*"
-  }
+  cors: { origin: "*" }
 })
 
 app.set("io", io)
 
-// ================= MIDDLEWARE =================
-app.use(cors({
-  origin: true,
-  credentials: true
-}))
+io.on("connection", (socket) => {
+  console.log("🟢 Socket connected:", socket.id)
+})
 
-app.use(express.json())
+/* ================= DEBUG ================= */
+app.use((req, res, next) => {
+  console.log(`🔥 ${req.method} ${req.originalUrl}`)
+  next()
+})
 
-// 🔥 IMPORTANT: raw body for webhooks (Stripe/Square safety)
-app.use("/api/webhook", express.raw({ type: "*/*" }))
+console.log("🚀 SERVER STARTING...")
 
-// ================= DEBUG =================
 console.log("📧 EMAIL DEBUG:", {
   user: process.env.EMAIL_USER,
   pass: process.env.EMAIL_PASS ? "exists" : "missing"
 })
 
-// ================= ROUTES =================
-console.log("📦 Mounting routes...")
-
-app.use("/api/quotes", quotesRoutes)
-app.use("/api/orders", ordersRoutes)
-app.use("/api/square", squareRoutes)
-app.use("/api/webhook", webhookRoutes)
-app.use("/api/production", productionRoutes)
-
-console.log("✅ All routes mounted")
-
-// ================= ROOT =================
-app.get("/", (req, res) => {
-  res.send("🚀 SignaVi Backend Running")
+console.log("🔑 ENV CHECK:", {
+  mongo: process.env.MONGO_URI ? "exists" : "missing",
+  square: process.env.SQUARE_ACCESS_TOKEN ? "exists" : "missing"
 })
 
-// ================= MONGO =================
-mongoose.connect(process.env.MONGO_URI)
-.then(() => console.log("✅ Mongo connected"))
-.catch(err => console.error("❌ Mongo error:", err))
+/* ================= CORS ================= */
+const allowedOrigins = [
+  "https://signavistudio.store",
+  "http://localhost:5173"
+]
 
-// ================= SOCKET EVENTS =================
-io.on("connection", (socket) => {
-  console.log("🟢 Socket:", socket.id)
+app.use(cors({
+  origin: (origin, callback) => {
+    console.log("🌐 CORS ORIGIN:", origin)
 
-  socket.on("disconnect", () => {
-    console.log("🔴 Socket disconnected:", socket.id)
+    if (!origin) return callback(null, true)
+
+    if (origin.includes("vercel.app")) return callback(null, true)
+
+    if (allowedOrigins.includes(origin)) return callback(null, true)
+
+    console.warn("❌ BLOCKED:", origin)
+    return callback(new Error("Not allowed by CORS"))
+  },
+  credentials: true
+}))
+
+/* ================= BODY ================= */
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser())
+
+/* ================= STATIC ================= */
+const uploadsPath = path.join(__dirname, "uploads")
+
+if (!fs.existsSync(uploadsPath)) {
+  fs.mkdirSync(uploadsPath, { recursive: true })
+}
+
+app.use("/uploads", express.static(uploadsPath))
+
+/* ================= ROUTES ================= */
+console.log("📦 Mounting routes...")
+
+app.use("/api/products", productRoutes)
+app.use("/api/orders", orderRoutes)
+app.use("/api/checkout", checkoutRoutes)
+app.use("/api/auth", authRoutes)
+app.use("/api/logout", logoutRoutes)
+app.use("/api/cart", cartRoutes)
+app.use("/api/production", productionRoutes)
+app.use("/api/quotes", quoteRoutes)
+app.use("/api/expenses", expenseRoutes)
+app.use("/api/pricing", pricingRoutes)
+app.use("/api/customers", customerRoutes)
+app.use("/api/job", jobRoutes)
+app.use("/api/ai-pricing", aiPricingRoutes)
+app.use("/api/tax", taxRoutes)
+app.use("/api/square", squareRoutes)
+
+console.log("✅ Routes mounted")
+
+/* ================= SQUARE ================= */
+let squareClient = null
+
+if (process.env.SQUARE_ACCESS_TOKEN) {
+  squareClient = new SquareClient({
+    token: process.env.SQUARE_ACCESS_TOKEN,
+    environment: SquareEnvironment.Production
+  })
+
+  console.log("💳 Square initialized")
+} else {
+  console.warn("⚠️ Square NOT initialized (missing token)")
+}
+
+/* ================= SQUARE TEST ================= */
+app.get("/api/square/locations", async (req, res) => {
+  try {
+    if (!squareClient) {
+      return res.status(500).json({
+        message: "Square not configured"
+      })
+    }
+
+    const response = await squareClient.locations.list()
+
+    console.log("📍 SQUARE LOCATIONS:", JSON.stringify(response, null, 2))
+
+    res.json(response)
+
+  } catch (err) {
+    console.error("❌ SQUARE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= HEALTH ================= */
+app.get("/", (req, res) => {
+  res.send("🚀 Signavi API running")
+})
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    uptime: process.uptime()
   })
 })
 
-// ================= START =================
-const PORT = process.env.PORT || 5050
-
-server.listen(PORT, () => {
-  console.log(`🚀 Running on port ${PORT}`)
+/* ================= 404 ================= */
+app.use((req, res) => {
+  res.status(404).json({
+    message: `Route not found: ${req.originalUrl}`
+  })
 })
+
+/* ================= START ================= */
+async function startServer() {
+  try {
+    if (!process.env.MONGO_URI) {
+      throw new Error("MONGO_URI missing")
+    }
+
+    await mongoose.connect(process.env.MONGO_URI)
+
+    console.log("✅ Mongo connected")
+
+    const PORT = process.env.PORT || 5050
+
+    server.listen(PORT, () => {
+      console.log(`🚀 Running on port ${PORT}`)
+    })
+
+    /* 🔥 Abandoned cart checker */
+    setInterval(() => {
+      console.log("🛒 Checking abandoned carts...")
+      checkAbandonedCarts()
+    }, 1000 * 60 * 10)
+
+  } catch (err) {
+    console.error("💥 START ERROR:", err)
+  }
+}
+
+startServer()
