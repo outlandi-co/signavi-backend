@@ -76,52 +76,83 @@ router.post("/create-payment/:id", async (req, res) => {
 /* ================= CONFIRM PAYMENT ================= */
 router.post("/confirm/:id", async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id)
+    const { id } = req.params
 
+    console.log("💳 CONFIRM PAYMENT:", id)
+
+    let order = await Order.findById(id)
+
+    /* ================= HANDLE QUOTE → ORDER ================= */
     if (!order) {
-      return res.status(404).json({ message: "Order not found" })
+      const quote = await Quote.findById(id)
+
+      if (!quote) {
+        return res.status(404).json({ message: "Not found" })
+      }
+
+      console.log("🔄 CONVERTING QUOTE → ORDER")
+
+      order = await Order.create({
+        customerName: quote.customerName,
+        email: quote.email,
+        quantity: quote.quantity,
+        printType: quote.printType,
+        artwork: quote.artwork,
+        price: quote.price,
+        finalPrice: quote.price,
+        source: "quote",
+        status: "paid",
+        timeline: [
+          {
+            status: "paid",
+            date: new Date(),
+            note: "Payment confirmed via Square"
+          }
+        ]
+      })
+
+      // 🔥 REMOVE OLD QUOTE
+      await Quote.findByIdAndDelete(id)
     }
 
-    if (order.status === "paid") {
-      return res.json({ success: true, data: order })
+    /* ================= UPDATE EXISTING ORDER ================= */
+    if (order.status !== "paid") {
+      order.status = "paid"
+
+      if (!order.timeline) order.timeline = []
+
+      order.timeline.push({
+        status: "paid",
+        date: new Date(),
+        note: "Payment confirmed via Square"
+      })
     }
 
-    if (!order.timeline) order.timeline = []
-
-    // 🔥 MARK AS PAID
-    order.status = "paid"
-
-    order.timeline.push({
-      status: "paid",
-      date: new Date(),
-      note: "Payment confirmed via Square"
-    })
-
-    // 🔥 AUTO MOVE TO PRODUCTION
+    /* ================= AUTO MOVE TO PRODUCTION ================= */
     order.status = "production"
 
     order.timeline.push({
       status: "production",
       date: new Date(),
-      note: "Auto moved to production after payment"
+      note: "Auto moved to production"
     })
 
     await order.save()
 
-    // 🔥 REALTIME UPDATE
+    console.log("✅ ORDER → PRODUCTION:", order._id)
+
+    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobUpdated", order)
 
-    // 🔥 EMAIL
+    /* ================= EMAIL ================= */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
-        "production",
+        "paid",
         order._id,
         order
       )
     }
-
-    console.log("🔥 ORDER → PRODUCTION:", order._id)
 
     res.json({ success: true, data: order })
 
