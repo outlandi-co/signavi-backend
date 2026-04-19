@@ -79,9 +79,9 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${order._id.toString().slice(-6)}`,
             quantity: "1",
             basePriceMoney: {
-              amount: amount, // ✅ FIXED (NUMBER ONLY)
-              currency: "USD"
-            }
+  amount: BigInt(amount), // ✅ REQUIRED
+  currency: "USD"
+}
           }
         ]
       },
