@@ -53,41 +53,37 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 })
 
 /* ================= APPROVE ================= */
+/* ================= APPROVE ================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
     if (!quote) return res.status(404).json({ message: "Not found" })
 
+    /* ================= UPDATE ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
     await quote.save()
 
-    /* 🔥 CREATE PAYMENT LINK */
-    const paymentRes = await fetch(
-      `${process.env.BASE_URL}/api/square/create-payment/${quote._id}`,
-      { method: "POST" }
+    /* ================= EMAIL (NO BROKEN FETCH) ================= */
+    await sendOrderStatusEmail(
+      quote.email,
+      "approved",
+      quote._id,
+      {
+        ...quote.toObject(),
+        paymentUrl: `${process.env.CLIENT_URL}/checkout/${quote._id}`
+      }
     )
 
-    const paymentData = await paymentRes.json()
-    const paymentUrl = paymentData?.url
-
-    if (!paymentUrl) throw new Error("Payment link failed")
-
-    /* 🔥 EMAIL CUSTOMER */
-    if (quote.email) {
-      await sendOrderStatusEmail(
-        quote.email,
-        "approved",
-        quote._id,
-        { ...quote.toObject(), paymentUrl }
-      )
-    }
-
+    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobUpdated", quote)
 
-    res.json({ success: true, paymentUrl, data: quote })
+    res.json({
+      success: true,
+      data: quote
+    })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
