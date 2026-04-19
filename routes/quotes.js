@@ -64,20 +64,19 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 })
 
 /* =========================================================
-   📄 GET ALL
+   📄 GET ALL QUOTES
 ========================================================= */
 router.get("/", async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 })
     res.json(quotes)
   } catch (err) {
-    console.error("❌ GET ALL ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   📄 GET ONE (🔥 FIXES YOUR 404)
+   📄 GET ONE QUOTE
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
@@ -86,7 +85,6 @@ router.get("/:id", async (req, res) => {
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
-      console.warn("❌ NOT FOUND:", req.params.id)
       return res.status(404).json({ message: "Quote not found" })
     }
 
@@ -99,51 +97,50 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   ✅ APPROVE
+   ✅ APPROVE QUOTE → CREATE PAYMENT LINK
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
+    console.log("🔥 APPROVE START:", req.params.id)
+
     const quote = await Quote.findById(req.params.id)
     if (!quote) return res.status(404).json({ message: "Not found" })
 
+    /* ================= UPDATE STATUS ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* 🔥 SAFE PAYMENT LINK (NO CRASHES) */
-  const CLIENT_URL =
-  process.env.CLIENT_URL ||
-  "http://localhost:5173"
+    /* ================= CREATE PAYMENT LINK ================= */
+    const BASE_URL =
+      process.env.BASE_URL || "https://signavi-backend.onrender.com"
 
-    let paymentUrl = `${CLIENT_URL}/checkout/${quote._id}`
+    const createPayUrl = `${BASE_URL}/api/square/create-payment/${quote._id}`
 
-    /* 🔥 TRY REAL SQUARE LINK (OPTIONAL) */
-    try {
-      const baseUrl =
-        process.env.BASE_URL || "https://signavi-backend.onrender.com"
+    console.log("💳 CALLING PAYMENT API:", createPayUrl)
 
-      const payRes = await fetch(
-        `${baseUrl}/api/square/create-payment/${quote._id}`,
-        { method: "POST" }
-      )
+    const payRes = await fetch(createPayUrl, { method: "POST" })
 
-      if (payRes.ok) {
-        const payJson = await payRes.json()
-        if (payJson?.url) {
-          paymentUrl = payJson.url
-        }
-      } else {
-        console.warn("⚠️ Square route failed, using fallback link")
-      }
-
-    } catch (err) {
-      console.warn("⚠️ Square error, fallback used:", err.message)
+    /* 🔥 HARD FAIL */
+    if (!payRes.ok) {
+      const text = await payRes.text()
+      console.error("❌ PAYMENT LINK ERROR:", text)
+      throw new Error("Payment link failed")
     }
 
-    quote.paymentUrl = paymentUrl
+    const payJson = await payRes.json()
 
-    /* 🔥 TIMELINE */
-    quote.timeline = quote.timeline || []
+    if (!payJson?.url) {
+      console.error("❌ NO PAYMENT URL RETURNED:", payJson)
+      throw new Error("Square did not return a payment link")
+    }
+
+    /* ================= SAVE PAYMENT LINK ================= */
+    quote.paymentUrl = payJson.url
+
+    console.log("💳 PAYMENT URL CREATED:", quote.paymentUrl)
+
+    /* ================= TIMELINE ================= */
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
@@ -152,19 +149,21 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    console.log("✅ APPROVED:", quote._id)
-
-    /* 🔔 REALTIME */
+    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobUpdated", quote)
 
-    /* 📧 EMAIL */
-    if (quote.email) {
+    /* ================= EMAIL ================= */
+    if (quote.email && quote.paymentUrl) {
+      console.log("📧 SENDING EMAIL WITH LINK:", quote.paymentUrl)
+
       await sendOrderStatusEmail(
         quote.email,
         "approved",
         quote._id,
-        { ...quote.toObject(), paymentUrl }
+        { ...quote.toObject(), paymentUrl: quote.paymentUrl }
       )
+    } else {
+      console.warn("⚠️ EMAIL OR PAYMENT URL MISSING")
     }
 
     res.json({ success: true, data: quote })
@@ -184,16 +183,13 @@ router.patch("/:id/deny", async (req, res) => {
     if (!quote) return res.status(404).json({ message: "Not found" })
 
     quote.approvalStatus = "denied"
-    quote.status = "quotes"
-    quote.source = "quote"
     quote.denialReason = req.body.reason || ""
     quote.revisionFee = Number(req.body.fee || 0)
 
-    quote.timeline = quote.timeline || []
     quote.timeline.push({
       status: "denied",
       date: new Date(),
-      note: "Artwork denied"
+      note: "Quote denied"
     })
 
     await quote.save()
