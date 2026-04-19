@@ -12,18 +12,16 @@ const SQUARE_LOCATION_ID = process.env.SQUARE_LOCATION_ID
 
 console.log("🔑 SQUARE ENV:", {
   token: SQUARE_TOKEN ? "exists" : "missing",
-  location: SQUARE_LOCATION_ID || "missing",
-  env: process.env.NODE_ENV
+  location: SQUARE_LOCATION_ID || "missing"
 })
 
 if (!SQUARE_TOKEN) console.warn("⚠️ Missing SQUARE_ACCESS_TOKEN")
 if (!SQUARE_LOCATION_ID) console.warn("⚠️ Missing SQUARE_LOCATION_ID")
 
 /* ================= CLIENT ================= */
-/* 🔥 IMPORTANT: SWITCH TO SANDBOX FIRST */
 const client = new SquareClient({
   accessToken: SQUARE_TOKEN,
-  environment: SquareEnvironment.Sandbox // 🔥 CHANGE THIS FOR NOW
+  environment: SquareEnvironment.Production // change to Sandbox if needed
 })
 
 /* =========================================================
@@ -46,7 +44,6 @@ router.post("/create-payment/:id", async (req, res) => {
       }
 
       if (quote.approvalStatus !== "approved") {
-        console.log("❌ Not approved")
         return res.status(403).json({
           message: "Artwork must be approved"
         })
@@ -82,7 +79,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${order._id.toString().slice(-6)}`,
             quantity: "1",
             basePriceMoney: {
-              amount: BigInt(amount), // ✅ REQUIRED
+              amount: amount, // ✅ FIXED (NUMBER ONLY)
               currency: "USD"
             }
           }
@@ -94,7 +91,7 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧾 FULL SQUARE RESPONSE:", JSON.stringify(response, null, 2))
+    console.log("🧾 FULL SQUARE RESPONSE:", response)
 
     const url = response?.paymentLink?.url
 
@@ -165,7 +162,6 @@ router.post("/confirm/:id", async (req, res) => {
 
     if (!order.timeline) order.timeline = []
 
-    /* 🔥 UPDATE STATUS */
     order.status = "production"
 
     order.timeline.push({
