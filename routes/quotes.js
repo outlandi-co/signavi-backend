@@ -1,5 +1,3 @@
-console.log("🔥 QUOTES ROUTE LOADED")
-
 import express from "express"
 import Quote from "../models/Quote.js"
 import upload from "../middleware/upload.js"
@@ -7,6 +5,19 @@ import cloudinary from "../utils/cloudinary.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
+
+/* ================= NORMALIZER ================= */
+const normalizeQuote = (q) => {
+  if (!q.status) q.status = "quotes"
+  if (!q.source) q.source = "quote"
+
+  if (q.approvalStatus === "approved") {
+    q.status = "payment_required"
+    q.source = "order"
+  }
+
+  return q
+}
 
 /* ================= TEST ================= */
 router.get("/__test", (req, res) => {
@@ -17,15 +28,15 @@ router.get("/__test", (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 })
-    res.json(quotes)
+    const normalized = quotes.map(q => normalizeQuote(q.toObject()))
+    res.json(normalized)
   } catch (err) {
     console.error("❌ GET ALL ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= GET ONE (🔥 FIX) ================= */
-/* ================= GET ONE QUOTE ================= */
+/* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   try {
     console.log("🔥 GET QUOTE:", req.params.id)
@@ -33,14 +44,13 @@ router.get("/:id", async (req, res) => {
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
-      console.warn("❌ QUOTE NOT FOUND:", req.params.id)
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    res.json(quote)
+    res.json(normalizeQuote(quote.toObject()))
 
   } catch (err) {
-    console.error("❌ GET QUOTE ERROR:", err)
+    console.error("❌ GET ONE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })

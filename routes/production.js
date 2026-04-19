@@ -6,7 +6,6 @@ const router = express.Router()
 
 router.get("/", async (req, res) => {
   try {
-
     console.log("🔥 PRODUCTION ROUTE HIT")
 
     const orders = await Order.find().lean().sort({ createdAt: -1 })
@@ -18,7 +17,7 @@ router.get("/", async (req, res) => {
     for (const o of orders) {
       if (!o) continue
 
-      const status = normalizeStatus(o.status)
+      const status = normalizeOrderStatus(o.status)
 
       all.push({
         _id: o._id,
@@ -29,8 +28,10 @@ router.get("/", async (req, res) => {
         artwork: o.artwork || null,
         price: o.price || 0,
         finalPrice: o.finalPrice || 0,
-        status,                // 🔥 workflow status
-        group: status,         // 🔥 UI grouping
+
+        status,            // workflow
+        group: status,     // UI column
+
         source: "order",
         type: "order",
         createdAt: o.createdAt
@@ -41,6 +42,22 @@ router.get("/", async (req, res) => {
     for (const q of quotes) {
       if (!q) continue
 
+      let status = "quotes"
+      let group = "quotes"
+      let source = "quote"
+
+      // 🔥 HANDLE APPROVAL FLOW
+      if (q.approvalStatus === "approved") {
+        status = "payment_required"
+        group = "payment_required"
+        source = "order"
+      }
+
+      if (q.approvalStatus === "denied") {
+        status = "denied"
+        group = "quotes" // keep visible in quotes column
+      }
+
       all.push({
         _id: q._id,
         customerName: q.customerName || "Unknown",
@@ -50,9 +67,11 @@ router.get("/", async (req, res) => {
         artwork: q.artwork || null,
         price: q.price || 0,
         finalPrice: q.price || 0,
-        status: "draft",       // 🔥 FIXED (NOT "quotes")
-        group: "quotes",       // 🔥 UI bucket
-        source: "quote",
+
+        status,
+        group,
+
+        source,
         type: "quote",
         createdAt: q.createdAt
       })
@@ -92,8 +111,8 @@ router.get("/", async (req, res) => {
   }
 })
 
-/* ================= STATUS NORMALIZER ================= */
-function normalizeStatus(status) {
+/* ================= ORDER STATUS NORMALIZER ================= */
+function normalizeOrderStatus(status) {
   if (!status) return "pending"
 
   if (["paid", "printing", "ready"].includes(status)) {
