@@ -2,13 +2,45 @@ import mongoose from "mongoose"
 
 const quoteSchema = new mongoose.Schema({
 
-  customerName: String,
-  email: String,
-  quantity: Number,
-  price: Number,
+  /* ================= CUSTOMER ================= */
+  customerName: {
+    type: String,
+    default: "New Customer"
+  },
 
+  email: {
+    type: String,
+    default: ""
+  },
+
+  quantity: {
+    type: Number,
+    default: 1
+  },
+
+  price: {
+    type: Number,
+    default: 25
+  },
+
+  /* ================= ITEMS ================= */
+  items: [
+    {
+      name: String,
+      quantity: Number,
+      price: Number
+    }
+  ],
+
+  /* ================= FILE / NOTES ================= */
   artwork: String,
   notes: String,
+
+  /* ================= PAYMENT ================= */
+  paymentUrl: {
+    type: String,
+    default: null
+  },
 
   /* ================= APPROVAL ================= */
   approvalStatus: {
@@ -55,6 +87,7 @@ const quoteSchema = new mongoose.Schema({
     default: false
   },
 
+  /* ================= TIMELINE ================= */
   timeline: [
     {
       status: String,
@@ -65,21 +98,42 @@ const quoteSchema = new mongoose.Schema({
 
 }, { timestamps: true })
 
-/* ================= FIXED PRE SAVE ================= */
-quoteSchema.pre("save", function () {
+/* =========================================================
+   🔥 PRE-SAVE WORKFLOW LOGIC (IMPROVED)
+========================================================= */
+quoteSchema.pre("save", function (next) {
 
-  // 🔥 Approval → Payment
+  /* ================= APPROVED ================= */
   if (this.approvalStatus === "approved") {
-    this.status = "payment_required"
-    this.source = "order"
+
+    if (this.status !== "payment_required") {
+      this.status = "payment_required"
+      this.source = "order"
+
+      this.timeline.push({
+        status: "payment_required",
+        date: new Date(),
+        note: "Approved – awaiting payment"
+      })
+    }
   }
 
-  // 🔥 Denied → Back to quotes
+  /* ================= DENIED ================= */
   if (this.approvalStatus === "denied") {
-    this.status = "quotes"
-    this.source = "quote"
+
+    if (this.status !== "denied") {
+      this.status = "denied"
+      this.source = "quote"
+
+      this.timeline.push({
+        status: "denied",
+        date: new Date(),
+        note: this.denialReason || "Quote denied"
+      })
+    }
   }
 
+  next()
 })
 
 export default mongoose.model("Quote", quoteSchema)
