@@ -62,7 +62,8 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
     /* ================= DEBUG RESPONSE ================= */
-    console.log("🧪 RAW RESPONSE:", JSON.stringify(response, null, 2))
+console.log("🧪 RESPONSE RECEIVED FROM SQUARE")
+
 
     /* ================= GET URL ================= */
     const url =
