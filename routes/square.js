@@ -1,6 +1,8 @@
 import express from "express"
-import { Client, Environment } from "square"
+import pkg from "square"
 import Quote from "../models/Quote.js"
+
+const { Client, Environment } = pkg
 
 const router = express.Router()
 
