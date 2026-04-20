@@ -1,110 +1,74 @@
 import express from "express"
 import Quote from "../models/Quote.js"
-import { sendOrderStatusEmail } from "../utils/sendEmail.js"
+import { SquareClient, SquareEnvironment } from "square"
 
 const router = express.Router()
 
-/* =========================================================
-   📄 GET ONE QUOTE
-========================================================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
-    res.json(quote)
-  } catch (err) {
-    console.error("❌ GET QUOTE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
+/* ================= ENV ================= */
+const client = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Production
 })
 
 /* =========================================================
-   ✅ APPROVE (BULLETPROOF)
+   💳 CREATE PAYMENT LINK (FINAL)
 ========================================================= */
-router.patch("/:id/approve", async (req, res) => {
-  console.log("🚨 APPROVE HIT")
-  console.log("📦 BODY:", req.body)
-
+router.post("/create-payment/:id", async (req, res) => {
   try {
-    const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
+    const { id } = req.params
 
-    // 🔥 PRICE HANDLING (SAFE)
-    let incomingPrice = Number(req.body?.price)
+    console.log("💳 CREATE PAYMENT:", id)
 
-    if (incomingPrice > 0) {
-      quote.price = incomingPrice
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
     }
 
-    // 🔥 HARD FALLBACK (NO CRASH EVER)
-    if (!quote.price || quote.price <= 0) {
-      console.warn("⚠️ No valid price → forcing 25")
-      quote.price = 25
+    // 🔥 SAFE PRICE
+    let price = Number(quote.price || 25)
+    if (!price || price <= 0) {
+      console.warn("⚠️ Invalid price → fallback 25")
+      price = 25
     }
 
-    // ✅ STATUS UPDATE
-    quote.approvalStatus = "approved"
-    quote.status = "payment_required"
-    quote.source = "order"
+    const amount = Math.round(price * 100)
 
-    // ✅ TIMELINE
-    quote.timeline = quote.timeline || []
-    quote.timeline.push({
-      status: "payment_required",
-      date: new Date(),
-      note: "Approved"
+    console.log("💰 FINAL AMOUNT:", amount)
+
+    const response = await client.checkout.paymentLinks.create({
+      idempotencyKey: `${id}-${Date.now()}`,
+      order: {
+        locationId: process.env.SQUARE_LOCATION_ID,
+        lineItems: [
+          {
+            name: `Quote #${id}`,
+            quantity: "1",
+            basePriceMoney: {
+              amount,
+              currency: "USD"
+            }
+          }
+        ]
+      },
+      checkoutOptions: {
+        redirectUrl: `${process.env.CLIENT_URL}/success/${id}`
+      }
     })
 
-    await quote.save()
+    const url = response?.paymentLink?.url
 
-    // 🔌 SOCKET SAFE
-    try {
-      req.app.get("io")?.emit("jobUpdated", quote)
-    } catch (e) {
-      console.warn("Socket failed:", e.message)
+    console.log("🔗 PAYMENT URL:", url)
+
+    if (!url) {
+      return res.status(500).json({ message: "No payment URL returned" })
     }
 
-    // 📧 EMAIL SAFE (NON-BLOCKING)
-    if (quote.email) {
-      sendOrderStatusEmail(
-        quote.email,
-        "approved",
-        quote._id,
-        quote.toObject()
-      ).catch(err => console.warn("Email failed:", err.message))
-    }
-
-    return res.json({ success: true, data: quote })
+    return res.json({ url })
 
   } catch (err) {
-    console.error("❌ APPROVE ERROR:", err)
+    console.error("❌ PAYMENT ERROR:", err)
     return res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   ❌ DENY
-========================================================= */
-router.patch("/:id/deny", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Not found" })
-
-    quote.approvalStatus = "denied"
-    quote.denialReason = req.body.reason || ""
-    quote.revisionFee = Number(req.body.fee || 0)
-
-    await quote.save()
-
-    try {
-      req.app.get("io")?.emit("jobUpdated", quote)
-    } catch {}
-
-    res.json({ success: true, data: quote })
-
-  } catch (err) {
-    console.error("❌ DENY ERROR:", err)
-    res.status(500).json({ message: err.message })
   }
 })
 
