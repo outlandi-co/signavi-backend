@@ -15,17 +15,27 @@ router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
+    /* ================= ENV CHECK ================= */
+    if (!process.env.SQUARE_ACCESS_TOKEN || !process.env.SQUARE_LOCATION_ID) {
+      throw new Error("Missing Square ENV variables")
+    }
+
+    /* ================= FIND QUOTE ================= */
     const quote = await Quote.findById(id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
+
+    if (!quote) {
+      throw new Error("Quote not found")
+    }
 
     let price = Number(quote.price || 25)
     if (!price || price <= 0) price = 25
 
-    /* 🔥 FIX */
+    /* ================= BIGINT FIX ================= */
     const amount = BigInt(Math.round(price * 100))
 
     console.log("💰 AMOUNT TYPE:", typeof amount, amount.toString())
 
+    /* ================= SQUARE REQUEST ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
       order: {
@@ -43,17 +53,28 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url = response?.result?.paymentLink?.url
-    if (!url) throw new Error("No payment URL")
+    console.log("🧪 RAW RESPONSE:", JSON.stringify(response, null, 2))
 
+    const url = response?.result?.paymentLink?.url
+
+    if (!url) {
+      throw new Error("Square did not return payment URL")
+    }
+
+    /* ================= SAVE ================= */
     quote.paymentUrl = url
     await quote.save()
 
-    res.json({ success: true, url })
+    console.log("✅ PAYMENT LINK:", url)
+
+    return res.json({ success: true, url })
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err)
-    res.status(500).json({ message: err.message })
+    console.error("❌ PAYMENT ERROR FULL:", err)
+
+    return res.status(500).json({
+      message: err.message
+    })
   }
 })
 
