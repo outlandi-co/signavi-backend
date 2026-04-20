@@ -13,7 +13,7 @@ router.post("/create-payment/:id", async (req, res) => {
     let price = Number(quote.price || 25)
     if (!price || price <= 0) price = 25
 
-    // 🔥 FIX: Convert to BigInt
+    /* 🔥 CRITICAL FIX */
     const amount = BigInt(Math.round(price * 100))
 
     console.log("💰 AMOUNT (BigInt):", amount.toString())
@@ -27,7 +27,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${id}`,
             quantity: "1",
             basePriceMoney: {
-              amount: amount, // ✅ FIXED
+              amount: amount, // ✅ MUST BE BIGINT
               currency: "USD"
             }
           }
@@ -41,7 +41,7 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("No payment URL returned from Square")
     }
 
-    // 🔥 Save to DB (important for email reuse)
+    /* 🔥 SAVE LINK */
     quote.paymentUrl = url
     await quote.save()
 
@@ -53,7 +53,7 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err)
+    console.error("❌ PAYMENT ERROR FULL:", err)
 
     return res.status(500).json({
       message: err.message
