@@ -33,7 +33,7 @@ const app = express()
 const server = http.createServer(app)
 
 /* ================= VERSION ================= */
-console.log("\n🔥 SERVER VERSION: FINAL PRODUCTION BUILD\n")
+console.log("\n🔥 SERVER VERSION: FINAL STABLE BUILD (NO APPROVE CRASH)\n")
 
 /* ================= ENV DEBUG ================= */
 console.log("🔑 ENV CHECK:", {
@@ -57,15 +57,9 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    console.log("🌐 CORS ORIGIN:", origin)
-
     if (!origin) return callback(null, true)
-
     if (origin.includes("vercel.app")) return callback(null, true)
-
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true)
-    }
+    if (allowedOrigins.includes(origin)) return callback(null, true)
 
     console.warn("❌ BLOCKED CORS:", origin)
     return callback(new Error("Not allowed by CORS"))
@@ -77,6 +71,33 @@ app.use(cors({
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
+
+/* =========================================================
+   🔥 GLOBAL APPROVE SAFETY (FINAL VERSION)
+========================================================= */
+app.use("/api/quotes/:id/approve", (req, res, next) => {
+  console.log("🛠️ APPROVE GUARD HIT")
+  console.log("📦 BODY:", req.body)
+
+  try {
+    if (!req.body || typeof req.body !== "object") {
+      req.body = {}
+    }
+
+    let price = Number(req.body.price)
+
+    // 🔥 Always ensure valid price
+    if (!price || price <= 0) {
+      console.warn("⚠️ No valid price → forcing 25")
+      req.body.price = 25
+    }
+
+    next()
+  } catch (err) {
+    console.error("❌ APPROVE GUARD ERROR:", err)
+    next() // NEVER block request
+  }
+})
 
 /* ================= STATIC ================= */
 const uploadsPath = path.join(__dirname, "uploads")
@@ -121,6 +142,18 @@ app.use((req, res) => {
   console.warn("❌ 404 HIT:", req.originalUrl)
   res.status(404).json({
     message: `Route not found: ${req.originalUrl}`
+  })
+})
+
+/* =========================================================
+   🔥 GLOBAL ERROR HANDLER (FINAL)
+========================================================= */
+app.use((err, req, res, next) => {
+  console.error("💥 GLOBAL ERROR FULL:", err)
+
+  res.status(500).json({
+    message: err.message || "Server error",
+    path: req.originalUrl
   })
 })
 

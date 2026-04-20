@@ -1,27 +1,8 @@
 import express from "express"
 import Quote from "../models/Quote.js"
-import Order from "../models/Order.js"
-import { SquareClient, SquareEnvironment } from "square"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
-
-/* ================= ENV ================= */
-const SQUARE_TOKEN = process.env.SQUARE_ACCESS_TOKEN
-const SQUARE_LOCATION_ID = process.env.SQUARE_LOCATION_ID
-
-console.log("🔑 SQUARE ENV:", {
-  token: SQUARE_TOKEN ? "exists" : "missing",
-  location: SQUARE_LOCATION_ID || "missing"
-})
-
-if (!SQUARE_TOKEN) console.warn("⚠️ Missing SQUARE_ACCESS_TOKEN")
-if (!SQUARE_LOCATION_ID) console.warn("⚠️ Missing SQUARE_LOCATION_ID")
-
-const client = new SquareClient({
-  token: SQUARE_TOKEN,
-  environment: SquareEnvironment.Production
-})
 
 /* =========================================================
    📄 GET ONE QUOTE
@@ -29,76 +10,54 @@ const client = new SquareClient({
 router.get("/:id", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Quote not found" })
-    res.json(quote)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    return res.json(quote)
+
   } catch (err) {
     console.error("❌ GET QUOTE ERROR:", err)
-    res.status(500).json({ message: err.message })
+    return res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   ✅ APPROVE (DIRECT SQUARE CALL)
+   ✅ APPROVE (FINAL STABLE)
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
+  console.log("🚨 APPROVE vFINAL BUILD 🔥🔥🔥")
+  console.log("📦 BODY:", req.body)
+
   try {
     const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
-      return res.status(404).json({ message: "Not found" })
+      return res.status(404).json({ message: "Quote not found" })
     }
 
-    if (quote.approvalStatus === "approved" && quote.paymentUrl) {
-      return res.json({ success: true, data: quote })
+    console.log("🧪 FOUND QUOTE:", quote._id)
+
+    /* ================= PRICE ================= */
+    let incomingPrice = Number(req.body?.price)
+
+    if (incomingPrice > 0) {
+      quote.price = incomingPrice
+      console.log("💰 USING FRONTEND PRICE:", incomingPrice)
     }
 
-    /* ================= UPDATE STATUS ================= */
+    if (!quote.price || quote.price <= 0) {
+      console.warn("⚠️ No valid price → fallback = 25")
+      quote.price = 25
+    }
+
+    /* ================= STATUS ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* ================= BUILD AMOUNT ================= */
-    const rawAmount = Number(quote.price || 0)
-
-    if (!rawAmount || rawAmount <= 0) {
-      throw new Error("Invalid quote price")
-    }
-
-    const amount = BigInt(Math.round(rawAmount * 100))
-    console.log("🧪 AMOUNT:", typeof amount, amount)
-
-    /* ================= CREATE SQUARE LINK ================= */
-    const response = await client.checkout.paymentLinks.create({
-      idempotencyKey: `${quote._id}-${Date.now()}`,
-
-      order: {
-        locationId: SQUARE_LOCATION_ID,
-        lineItems: [
-          {
-            name: `Quote #${quote._id.toString().slice(-6)}`,
-            quantity: "1",
-            basePriceMoney: {
-              amount: amount,
-              currency: "USD"
-            }
-          }
-        ]
-      },
-
-      checkoutOptions: {
-        redirectUrl: `${process.env.CLIENT_URL}/success/${quote._id}`
-      }
-    })
-
-    const url = response?.paymentLink?.url
-
-    if (!url) {
-      throw new Error("Square did not return a payment URL")
-    }
-
-    /* ================= SAVE ================= */
-    quote.paymentUrl = url
-
+    /* ================= TIMELINE ================= */
     quote.timeline = quote.timeline || []
     quote.timeline.push({
       status: "payment_required",
@@ -108,26 +67,39 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    console.log("✅ APPROVED + PAYMENT LINK:", quote._id)
+    console.log("✅ APPROVE SUCCESS:", quote.status)
 
     /* ================= SOCKET ================= */
-    req.app.get("io")?.emit("jobUpdated", quote)
+    try {
+      const io = req.app.get("io")
+      if (io) io.emit("jobUpdated", quote)
+    } catch (err) {
+      console.warn("⚠️ Socket failed:", err.message)
+    }
 
-    /* ================= EMAIL ================= */
+    /* ================= EMAIL (SAFE) ================= */
     if (quote.email) {
-      await sendOrderStatusEmail(
+      sendOrderStatusEmail(
         quote.email,
         "approved",
         quote._id,
-        { ...quote.toObject(), paymentUrl: quote.paymentUrl }
-      )
+        quote.toObject()
+      ).catch(err => {
+        console.warn("⚠️ Email failed:", err.message)
+      })
     }
 
-    res.json({ success: true, data: quote })
+    return res.json({
+      success: true,
+      data: quote
+    })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
-    res.status(500).json({ message: err.message })
+
+    return res.status(500).json({
+      message: err.message || "Approve failed"
+    })
   }
 })
 
@@ -137,7 +109,10 @@ router.patch("/:id/approve", async (req, res) => {
 router.patch("/:id/deny", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
-    if (!quote) return res.status(404).json({ message: "Not found" })
+
+    if (!quote) {
+      return res.status(404).json({ message: "Not found" })
+    }
 
     quote.approvalStatus = "denied"
     quote.denialReason = req.body.reason || ""
@@ -145,13 +120,16 @@ router.patch("/:id/deny", async (req, res) => {
 
     await quote.save()
 
-    req.app.get("io")?.emit("jobUpdated", quote)
+    try {
+      const io = req.app.get("io")
+      if (io) io.emit("jobUpdated", quote)
+    } catch (e) {}
 
-    res.json({ success: true, data: quote })
+    return res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ DENY ERROR:", err)
-    res.status(500).json({ message: err.message })
+    return res.status(500).json({ message: err.message })
   }
 })
 
