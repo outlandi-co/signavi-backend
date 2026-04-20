@@ -106,50 +106,44 @@ router.patch("/:id/approve", async (req, res) => {
       return res.status(404).json({ message: "Not found" })
     }
 
-    /* ================= UPDATE STATUS ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* ================= CREATE PAYMENT LINK ================= */
+    /* ================= CALL PAYMENT ================= */
     const baseUrl =
       process.env.BASE_URL || "https://signavi-backend.onrender.com"
 
-    const createPayUrl = `${baseUrl}/api/square/create-payment/${quote._id}`
+    const url = `${baseUrl}/api/square/create-payment/${quote._id}`
 
-    console.log("💳 CALLING PAYMENT API:", createPayUrl)
+    console.log("💳 CALLING:", url)
 
-    const payRes = await fetch(createPayUrl, { method: "POST" })
+    const payRes = await fetch(url, { method: "POST" })
+
+    const raw = await payRes.text()
+
+    console.log("🧾 RAW RESPONSE:", raw)
 
     let payJson = null
 
-    /* 🔥 SAFE PARSE */
     try {
-      const text = await payRes.text()
-
-      console.log("🧾 PAYMENT RAW RESPONSE:", text)
-
-      payJson = JSON.parse(text)
-    } catch (err) {
-      console.error("❌ JSON PARSE FAILED")
-      throw new Error("Payment service returned invalid response")
+      payJson = JSON.parse(raw)
+    } catch {
+      throw new Error("Payment API returned invalid JSON")
     }
 
     if (!payRes.ok) {
-      console.error("❌ PAYMENT API ERROR:", payJson)
-      throw new Error(payJson?.message || "Payment link failed")
+      throw new Error(payJson?.message || "Payment failed")
     }
 
-    /* ================= SAVE URL ================= */
-    quote.paymentUrl = payJson?.url || null
-
-    if (!quote.paymentUrl) {
+    if (!payJson?.url) {
       throw new Error("No payment URL returned")
     }
 
-    /* ================= TIMELINE ================= */
-    quote.timeline = quote.timeline || []
+    /* ================= SAVE ================= */
+    quote.paymentUrl = payJson.url
 
+    quote.timeline = quote.timeline || []
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
@@ -158,12 +152,10 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    console.log("✅ APPROVED + PAYMENT LINK:", quote._id)
+    console.log("✅ APPROVED:", quote._id)
 
-    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobUpdated", quote)
 
-    /* ================= EMAIL ================= */
     if (quote.email) {
       await sendOrderStatusEmail(
         quote.email,
@@ -177,7 +169,10 @@ router.patch("/:id/approve", async (req, res) => {
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
-    res.status(500).json({ message: err.message })
+
+    res.status(500).json({
+      message: err.message
+    })
   }
 })
 
