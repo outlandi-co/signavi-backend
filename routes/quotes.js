@@ -5,29 +5,42 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
-   🆕 CREATE QUOTE
+   🆕 CREATE QUOTE (FIXED - NO MORE 500)
 ========================================================= */
 router.post("/", async (req, res) => {
   console.log("🔥 CREATE QUOTE HIT")
   console.log("📦 BODY:", req.body)
 
   try {
-    const {
+    let {
       customerName,
       email,
       quantity,
       printType,
       price,
       items
-    } = req.body
+    } = req.body || {}
+
+    /* ================= SAFE DEFAULTS ================= */
+    customerName = customerName || "New Customer"
+    email = email || ""
+    quantity = Number(quantity || 1)
+    printType = printType || "unknown"
+    price = Number(price || 25)
+
+    /* 🔥 CRITICAL FIX: items must be array */
+    if (!Array.isArray(items)) {
+      console.warn("⚠️ items was not array → forcing []")
+      items = []
+    }
 
     const quote = new Quote({
-      customerName: customerName || "New Customer",
-      email: email || "",
-      quantity: Number(quantity || 1),
-      printType: printType || "unknown",
-      price: Number(price || 25),
-      items: items || [],
+      customerName,
+      email,
+      quantity,
+      printType,
+      price,
+      items,
       status: "pending",
       approvalStatus: "pending",
       source: "quote",
@@ -44,6 +57,7 @@ router.post("/", async (req, res) => {
 
     console.log("✅ QUOTE CREATED:", quote._id)
 
+    /* SOCKET */
     try {
       const io = req.app.get("io")
       if (io) io.emit("jobCreated", quote)
@@ -57,21 +71,24 @@ router.post("/", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ CREATE QUOTE ERROR:", err)
+    console.error("❌ CREATE QUOTE ERROR FULL:", err)
+
     return res.status(500).json({
-      message: err.message || "Failed to create quote"
+      message: err.message,
+      stack: err.stack // 🔥 TEMP DEBUG (remove later)
     })
   }
 })
 
 /* =========================================================
-   📄 GET ALL QUOTES (optional but useful)
+   📄 GET ALL QUOTES
 ========================================================= */
 router.get("/", async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 })
     res.json(quotes)
   } catch (err) {
+    console.error("❌ GET ALL ERROR:", err)
     res.status(500).json({ message: "Server error" })
   }
 })
@@ -89,6 +106,7 @@ router.get("/:id", async (req, res) => {
 
     res.json(quote)
   } catch (err) {
+    console.error("❌ GET ONE ERROR:", err)
     res.status(500).json({ message: "Server error" })
   }
 })
