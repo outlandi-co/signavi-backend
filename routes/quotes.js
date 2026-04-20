@@ -5,6 +5,78 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
+   🆕 CREATE QUOTE
+========================================================= */
+router.post("/", async (req, res) => {
+  console.log("🔥 CREATE QUOTE HIT")
+  console.log("📦 BODY:", req.body)
+
+  try {
+    const {
+      customerName,
+      email,
+      quantity,
+      printType,
+      price,
+      items
+    } = req.body
+
+    const quote = new Quote({
+      customerName: customerName || "New Customer",
+      email: email || "",
+      quantity: Number(quantity || 1),
+      printType: printType || "unknown",
+      price: Number(price || 25),
+      items: items || [],
+      status: "pending",
+      approvalStatus: "pending",
+      source: "quote",
+      timeline: [
+        {
+          status: "pending",
+          date: new Date(),
+          note: "Quote created"
+        }
+      ]
+    })
+
+    await quote.save()
+
+    console.log("✅ QUOTE CREATED:", quote._id)
+
+    try {
+      const io = req.app.get("io")
+      if (io) io.emit("jobCreated", quote)
+    } catch (err) {
+      console.warn("⚠️ Socket failed:", err.message)
+    }
+
+    return res.status(201).json({
+      success: true,
+      data: quote
+    })
+
+  } catch (err) {
+    console.error("❌ CREATE QUOTE ERROR:", err)
+    return res.status(500).json({
+      message: err.message || "Failed to create quote"
+    })
+  }
+})
+
+/* =========================================================
+   📄 GET ALL QUOTES (optional but useful)
+========================================================= */
+router.get("/", async (req, res) => {
+  try {
+    const quotes = await Quote.find().sort({ createdAt: -1 })
+    res.json(quotes)
+  } catch (err) {
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+/* =========================================================
    📄 GET ONE QUOTE
 ========================================================= */
 router.get("/:id", async (req, res) => {
@@ -15,20 +87,17 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    return res.json(quote)
-
+    res.json(quote)
   } catch (err) {
-    console.error("❌ GET QUOTE ERROR:", err)
-    return res.status(500).json({ message: err.message })
+    res.status(500).json({ message: "Server error" })
   }
 })
 
 /* =========================================================
-   ✅ APPROVE (FINAL STABLE)
+   ✅ APPROVE
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
-  console.log("🚨 APPROVE vFINAL BUILD 🔥🔥🔥")
-  console.log("📦 BODY:", req.body)
+  console.log("🚨 APPROVE HIT")
 
   try {
     const quote = await Quote.findById(req.params.id)
@@ -37,27 +106,14 @@ router.patch("/:id/approve", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    console.log("🧪 FOUND QUOTE:", quote._id)
+    let price = Number(req.body?.price)
+    if (price > 0) quote.price = price
+    if (!quote.price || quote.price <= 0) quote.price = 25
 
-    /* ================= PRICE ================= */
-    let incomingPrice = Number(req.body?.price)
-
-    if (incomingPrice > 0) {
-      quote.price = incomingPrice
-      console.log("💰 USING FRONTEND PRICE:", incomingPrice)
-    }
-
-    if (!quote.price || quote.price <= 0) {
-      console.warn("⚠️ No valid price → fallback = 25")
-      quote.price = 25
-    }
-
-    /* ================= STATUS ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* ================= TIMELINE ================= */
     quote.timeline = quote.timeline || []
     quote.timeline.push({
       status: "payment_required",
@@ -67,21 +123,19 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    console.log("✅ APPROVE SUCCESS:", quote.status)
+    console.log("✅ APPROVED:", quote._id)
 
-    /* ================= SOCKET ================= */
+    /* SOCKET */
     try {
       const io = req.app.get("io")
       if (io) io.emit("jobUpdated", quote)
-    } catch (err) {
-      console.warn("⚠️ Socket failed:", err.message)
-    }
+    } catch (err) {}
 
-    /* ================= EMAIL (SAFE) ================= */
+    /* EMAIL */
     if (quote.email) {
       sendOrderStatusEmail(
         quote.email,
-        "approved",
+        "payment_required",
         quote._id,
         quote.toObject()
       ).catch(err => {
@@ -89,17 +143,11 @@ router.patch("/:id/approve", async (req, res) => {
       })
     }
 
-    return res.json({
-      success: true,
-      data: quote
-    })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
-
-    return res.status(500).json({
-      message: err.message || "Approve failed"
-    })
+    res.status(500).json({ message: err.message })
   }
 })
 
@@ -125,11 +173,11 @@ router.patch("/:id/deny", async (req, res) => {
       if (io) io.emit("jobUpdated", quote)
     } catch (e) {}
 
-    return res.json({ success: true, data: quote })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ DENY ERROR:", err)
-    return res.status(500).json({ message: err.message })
+    res.status(500).json({ message: err.message })
   }
 })
 

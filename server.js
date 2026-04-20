@@ -1,4 +1,4 @@
-// 🔥 LOAD ENV FIRST (CRITICAL)
+// 🔥 LOAD ENV FIRST
 import "dotenv/config"
 
 import express from "express"
@@ -33,13 +33,13 @@ const app = express()
 const server = http.createServer(app)
 
 /* ================= VERSION ================= */
-console.log("\n🔥 SERVER VERSION: FINAL STABLE BUILD (NO APPROVE CRASH)\n")
+console.log("\n🔥 SERVER VERSION: SIGNAVI FULL SYSTEM READY 🚀\n")
 
 /* ================= ENV DEBUG ================= */
 console.log("🔑 ENV CHECK:", {
   mongo: process.env.MONGO_URI ? "exists" : "missing",
+  stripe: process.env.STRIPE_SECRET_KEY ? "exists" : "missing",
   squareToken: process.env.SQUARE_ACCESS_TOKEN ? "exists" : "missing",
-  squareLocation: process.env.SQUARE_LOCATION_ID ? "exists" : "missing",
   email: process.env.EMAIL_USER ? "exists" : "missing"
 })
 
@@ -51,13 +51,14 @@ app.use((req, res, next) => {
 
 /* ================= CORS ================= */
 const allowedOrigins = [
-  "https://signavistudio.store",
-  "http://localhost:5173"
+  "http://localhost:5173",
+  "https://signavistudio.store"
 ]
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true)
+
     if (origin.includes("vercel.app")) return callback(null, true)
     if (allowedOrigins.includes(origin)) return callback(null, true)
 
@@ -68,38 +69,11 @@ app.use(cors({
 }))
 
 /* ================= BODY ================= */
-app.use(express.json())
+app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
-/* =========================================================
-   🔥 GLOBAL APPROVE SAFETY (FINAL VERSION)
-========================================================= */
-app.use("/api/quotes/:id/approve", (req, res, next) => {
-  console.log("🛠️ APPROVE GUARD HIT")
-  console.log("📦 BODY:", req.body)
-
-  try {
-    if (!req.body || typeof req.body !== "object") {
-      req.body = {}
-    }
-
-    let price = Number(req.body.price)
-
-    // 🔥 Always ensure valid price
-    if (!price || price <= 0) {
-      console.warn("⚠️ No valid price → forcing 25")
-      req.body.price = 25
-    }
-
-    next()
-  } catch (err) {
-    console.error("❌ APPROVE GUARD ERROR:", err)
-    next() // NEVER block request
-  }
-})
-
-/* ================= STATIC ================= */
+/* ================= STATIC (UPLOADS) ================= */
 const uploadsPath = path.join(__dirname, "uploads")
 
 if (!fs.existsSync(uploadsPath)) {
@@ -107,6 +81,41 @@ if (!fs.existsSync(uploadsPath)) {
 }
 
 app.use("/uploads", express.static(uploadsPath))
+
+/* ================= HEALTH ================= */
+app.get("/", (req, res) => {
+  res.send("🚀 SignaVi API running")
+})
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    uptime: process.uptime()
+  })
+})
+
+/* =========================================================
+   🔥 APPROVE SAFETY (NEVER CRASH ON BAD BODY)
+========================================================= */
+app.use("/api/quotes/:id/approve", (req, res, next) => {
+  try {
+    if (!req.body || typeof req.body !== "object") {
+      req.body = {}
+    }
+
+    let price = Number(req.body.price)
+
+    if (!price || price <= 0) {
+      console.warn("⚠️ Invalid price → forcing fallback = 25")
+      req.body.price = 25
+    }
+
+    next()
+  } catch (err) {
+    console.error("❌ APPROVE GUARD ERROR:", err)
+    next()
+  }
+})
 
 /* ================= ROUTES ================= */
 console.log("📦 Mounting routes...")
@@ -123,21 +132,9 @@ app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 
-console.log("✅ Routes mounted")
+console.log("✅ All routes mounted")
 
-/* ================= HEALTH ================= */
-app.get("/", (req, res) => {
-  res.send("🚀 Signavi API running")
-})
-
-app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    uptime: process.uptime()
-  })
-})
-
-/* ================= 404 ================= */
+/* ================= 404 HANDLER ================= */
 app.use((req, res) => {
   console.warn("❌ 404 HIT:", req.originalUrl)
   res.status(404).json({
@@ -145,11 +142,9 @@ app.use((req, res) => {
   })
 })
 
-/* =========================================================
-   🔥 GLOBAL ERROR HANDLER (FINAL)
-========================================================= */
+/* ================= GLOBAL ERROR HANDLER ================= */
 app.use((err, req, res, next) => {
-  console.error("💥 GLOBAL ERROR FULL:", err)
+  console.error("💥 GLOBAL ERROR:", err)
 
   res.status(500).json({
     message: err.message || "Server error",
@@ -159,7 +154,9 @@ app.use((err, req, res, next) => {
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
-  cors: { origin: "*" }
+  cors: {
+    origin: "*"
+  }
 })
 
 app.set("io", io)
@@ -168,7 +165,7 @@ io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
 })
 
-/* ================= START ================= */
+/* ================= START SERVER ================= */
 async function startServer() {
   try {
     if (!process.env.MONGO_URI) {
@@ -181,7 +178,7 @@ async function startServer() {
     const PORT = process.env.PORT || 5050
 
     server.listen(PORT, () => {
-      console.log(`🚀 Running on port ${PORT}`)
+      console.log(`🚀 Server running on port ${PORT}`)
     })
 
   } catch (err) {
