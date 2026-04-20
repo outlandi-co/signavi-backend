@@ -31,34 +31,37 @@ router.post("/create-payment/:id", async (req, res) => {
     let price = Number(quote.price || 25)
     if (!price || price <= 0) price = 25
 
-    /* ================= BIGINT FIX (FINAL) ================= */
+    /* ================= BIGINT FIX ================= */
     const rawAmount = Math.round(price * 100)
     const amount = BigInt(rawAmount)
 
     console.log("💰 RAW:", rawAmount)
     console.log("💰 TYPE:", typeof amount, amount.toString())
 
-    /* ================= BUILD LINE ITEM ================= */
-    const lineItem = {
-      name: `Order #${id}`,
-      quantity: "1",
-      basePriceMoney: {
-        amount: amount, // 🔥 MUST BE BIGINT
-        currency: "USD",
-      },
-    }
-
-    console.log("🧪 LINE ITEM:", lineItem)
-
-    /* ================= CREATE PAYMENT LINK ================= */
+    /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
       order: {
         locationId: process.env.SQUARE_LOCATION_ID,
-        lineItems: [lineItem],
+        lineItems: [
+          {
+            name: `Order #${id}`,
+            quantity: "1",
+            basePriceMoney: {
+              amount: amount, // 🔥 MUST BE BIGINT
+              currency: "USD",
+            },
+          },
+        ],
+      },
+      checkoutOptions: {
+        redirectUrl: `${
+          process.env.CLIENT_URL || "https://signavistudio.store"
+        }/success`,
       },
     })
 
+    /* ================= DEBUG RESPONSE ================= */
     console.log("🧪 RAW RESPONSE:", JSON.stringify(response, null, 2))
 
     /* ================= GET URL ================= */
@@ -66,7 +69,9 @@ router.post("/create-payment/:id", async (req, res) => {
       response?.paymentLink?.url ||
       response?.result?.paymentLink?.url
 
-    if (!url) throw new Error("No payment URL returned from Square")
+    if (!url) {
+      throw new Error("Square did not return payment URL")
+    }
 
     /* ================= SAVE ================= */
     quote.paymentUrl = url
