@@ -1,15 +1,29 @@
 import express from "express"
+import multer from "multer"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
 /* =========================================================
-   🆕 CREATE QUOTE (FIXED - NO MORE 500)
+   📦 MULTER SETUP (FILE UPLOAD)
 ========================================================= */
-router.post("/", async (req, res) => {
+const storage = multer.diskStorage({
+  destination: "uploads/",
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + "-" + file.originalname)
+  }
+})
+
+const upload = multer({ storage })
+
+/* =========================================================
+   🆕 CREATE QUOTE (FIXED + FILE SUPPORT)
+========================================================= */
+router.post("/", upload.single("artwork"), async (req, res) => {
   console.log("🔥 CREATE QUOTE HIT")
   console.log("📦 BODY:", req.body)
+  console.log("📁 FILE:", req.file)
 
   try {
     let {
@@ -23,15 +37,34 @@ router.post("/", async (req, res) => {
 
     /* ================= SAFE DEFAULTS ================= */
     customerName = customerName || "New Customer"
-    email = email || ""
+    email = email || "noemail@placeholder.com"
     quantity = Number(quantity || 1)
     printType = printType || "unknown"
     price = Number(price || 25)
 
-    /* 🔥 CRITICAL FIX: items must be array */
+    /* 🔥 FIX: items comes as string from FormData */
+    if (typeof items === "string") {
+      try {
+        items = JSON.parse(items)
+      } catch {
+        items = []
+      }
+    }
+
     if (!Array.isArray(items)) {
-      console.warn("⚠️ items was not array → forcing []")
       items = []
+    }
+
+    items = items.map(item => ({
+      name: item?.name || "Item",
+      quantity: Number(item?.quantity || 1),
+      price: Number(item?.price || 0)
+    }))
+
+    /* 🔥 HANDLE FILE */
+    let artwork = null
+    if (req.file) {
+      artwork = `/uploads/${req.file.filename}`
     }
 
     const quote = new Quote({
@@ -41,6 +74,7 @@ router.post("/", async (req, res) => {
       printType,
       price,
       items,
+      artwork,
       status: "pending",
       approvalStatus: "pending",
       source: "quote",
@@ -74,8 +108,7 @@ router.post("/", async (req, res) => {
     console.error("❌ CREATE QUOTE ERROR FULL:", err)
 
     return res.status(500).json({
-      message: err.message,
-      stack: err.stack // 🔥 TEMP DEBUG (remove later)
+      message: err.message
     })
   }
 })
@@ -147,7 +180,7 @@ router.patch("/:id/approve", async (req, res) => {
     try {
       const io = req.app.get("io")
       if (io) io.emit("jobUpdated", quote)
-    } catch (err) {}
+    } catch {}
 
     /* EMAIL */
     if (quote.email) {
@@ -189,7 +222,7 @@ router.patch("/:id/deny", async (req, res) => {
     try {
       const io = req.app.get("io")
       if (io) io.emit("jobUpdated", quote)
-    } catch (e) {}
+    } catch {}
 
     res.json({ success: true, data: quote })
 
