@@ -1,77 +1,26 @@
 import express from "express"
 import Quote from "../models/Quote.js"
-import upload from "../middleware/upload.js"
-import cloudinary from "../utils/cloudinary.js"
+import Order from "../models/Order.js"
+import { SquareClient, SquareEnvironment } from "square"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* =========================================================
-   🔥 CREATE QUOTE
-========================================================= */
-router.post("/", upload.single("artwork"), async (req, res) => {
-  try {
-    console.log("\n🔥 ===== CREATE QUOTE START =====")
+/* ================= ENV ================= */
+const SQUARE_TOKEN = process.env.SQUARE_ACCESS_TOKEN
+const SQUARE_LOCATION_ID = process.env.SQUARE_LOCATION_ID
 
-    let imageUrl = null
-
-    if (req.file?.buffer) {
-      const uploadResult = await new Promise((resolve, reject) => {
-        const stream = cloudinary.uploader.upload_stream(
-          { folder: "signavi" },
-          (error, result) => {
-            if (error) return reject(error)
-            resolve(result)
-          }
-        )
-        stream.end(req.file.buffer)
-      })
-
-      imageUrl = uploadResult.secure_url
-      console.log("🌩️ CLOUDINARY SUCCESS:", imageUrl)
-    }
-
-    const quote = await Quote.create({
-      customerName: req.body.customerName || "Unknown",
-      email: req.body.email || "",
-      quantity: Number(req.body.quantity || 1),
-      price: Number(req.body.price || 0),
-      notes: req.body.notes || "",
-      artwork: imageUrl,
-      approvalStatus: "pending",
-      status: "quotes",
-      source: "quote",
-      timeline: [
-        {
-          status: "quotes",
-          date: new Date(),
-          note: "Quote created"
-        }
-      ]
-    })
-
-    console.log("✅ QUOTE CREATED:", quote._id)
-
-    req.app.get("io")?.emit("jobCreated", quote)
-
-    res.json({ success: true, data: quote })
-
-  } catch (err) {
-    console.error("❌ CREATE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
+console.log("🔑 SQUARE ENV:", {
+  token: SQUARE_TOKEN ? "exists" : "missing",
+  location: SQUARE_LOCATION_ID || "missing"
 })
 
-/* =========================================================
-   📄 GET ALL QUOTES
-========================================================= */
-router.get("/", async (req, res) => {
-  try {
-    const quotes = await Quote.find().sort({ createdAt: -1 })
-    res.json(quotes)
-  } catch (err) {
-    res.status(500).json({ message: err.message })
-  }
+if (!SQUARE_TOKEN) console.warn("⚠️ Missing SQUARE_ACCESS_TOKEN")
+if (!SQUARE_LOCATION_ID) console.warn("⚠️ Missing SQUARE_LOCATION_ID")
+
+const client = new SquareClient({
+  token: SQUARE_TOKEN,
+  environment: SquareEnvironment.Production
 })
 
 /* =========================================================
@@ -79,24 +28,17 @@ router.get("/", async (req, res) => {
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
-    console.log("📄 GET QUOTE:", req.params.id)
-
     const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
+    if (!quote) return res.status(404).json({ message: "Quote not found" })
     res.json(quote)
-
   } catch (err) {
-    console.error("❌ GET ONE ERROR:", err)
+    console.error("❌ GET QUOTE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   ✅ APPROVE QUOTE → CREATE PAYMENT LINK
+   ✅ APPROVE (DIRECT SQUARE CALL)
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
@@ -106,42 +48,56 @@ router.patch("/:id/approve", async (req, res) => {
       return res.status(404).json({ message: "Not found" })
     }
 
+    if (quote.approvalStatus === "approved" && quote.paymentUrl) {
+      return res.json({ success: true, data: quote })
+    }
+
+    /* ================= UPDATE STATUS ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* ================= CALL PAYMENT ================= */
-    const baseUrl =
-      process.env.BASE_URL || "https://signavi-backend.onrender.com"
+    /* ================= BUILD AMOUNT ================= */
+    const rawAmount = Number(quote.price || 0)
 
-    const url = `${baseUrl}/api/square/create-payment/${quote._id}`
-
-    console.log("💳 CALLING:", url)
-
-    const payRes = await fetch(url, { method: "POST" })
-
-    const raw = await payRes.text()
-
-    console.log("🧾 RAW RESPONSE:", raw)
-
-    let payJson = null
-
-    try {
-      payJson = JSON.parse(raw)
-    } catch {
-      throw new Error("Payment API returned invalid JSON")
+    if (!rawAmount || rawAmount <= 0) {
+      throw new Error("Invalid quote price")
     }
 
-    if (!payRes.ok) {
-      throw new Error(payJson?.message || "Payment failed")
-    }
+    const amount = BigInt(Math.round(rawAmount * 100))
+    console.log("🧪 AMOUNT:", typeof amount, amount)
 
-    if (!payJson?.url) {
-      throw new Error("No payment URL returned")
+    /* ================= CREATE SQUARE LINK ================= */
+    const response = await client.checkout.paymentLinks.create({
+      idempotencyKey: `${quote._id}-${Date.now()}`,
+
+      order: {
+        locationId: SQUARE_LOCATION_ID,
+        lineItems: [
+          {
+            name: `Quote #${quote._id.toString().slice(-6)}`,
+            quantity: "1",
+            basePriceMoney: {
+              amount: amount,
+              currency: "USD"
+            }
+          }
+        ]
+      },
+
+      checkoutOptions: {
+        redirectUrl: `${process.env.CLIENT_URL}/success/${quote._id}`
+      }
+    })
+
+    const url = response?.paymentLink?.url
+
+    if (!url) {
+      throw new Error("Square did not return a payment URL")
     }
 
     /* ================= SAVE ================= */
-    quote.paymentUrl = payJson.url
+    quote.paymentUrl = url
 
     quote.timeline = quote.timeline || []
     quote.timeline.push({
@@ -152,10 +108,12 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    console.log("✅ APPROVED:", quote._id)
+    console.log("✅ APPROVED + PAYMENT LINK:", quote._id)
 
+    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobUpdated", quote)
 
+    /* ================= EMAIL ================= */
     if (quote.email) {
       await sendOrderStatusEmail(
         quote.email,
@@ -169,10 +127,7 @@ router.patch("/:id/approve", async (req, res) => {
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
-
-    res.status(500).json({
-      message: err.message
-    })
+    res.status(500).json({ message: err.message })
   }
 })
 
@@ -184,17 +139,9 @@ router.patch("/:id/deny", async (req, res) => {
     const quote = await Quote.findById(req.params.id)
     if (!quote) return res.status(404).json({ message: "Not found" })
 
-    if (!quote.timeline) quote.timeline = []
-
     quote.approvalStatus = "denied"
     quote.denialReason = req.body.reason || ""
     quote.revisionFee = Number(req.body.fee || 0)
-
-    quote.timeline.push({
-      status: "denied",
-      date: new Date(),
-      note: "Quote denied"
-    })
 
     await quote.save()
 
