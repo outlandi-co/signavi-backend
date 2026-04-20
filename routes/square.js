@@ -1,14 +1,11 @@
 import express from "express"
-import pkg from "square"
+import { SquareClient } from "square"
 import Quote from "../models/Quote.js"
-
-const { Client } = pkg
 
 const router = express.Router()
 
-const client = new Client({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
-  environment: "production"
+const client = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
 })
 
 router.post("/create-payment/:id", async (req, res) => {
@@ -23,12 +20,10 @@ router.post("/create-payment/:id", async (req, res) => {
     let price = Number(quote.price || 25)
     if (!price || price <= 0) price = 25
 
-    /* 🔥 FORCE BIGINT (THIS IS THE FIX) */
-    const rawAmount = Math.round(price * 100)
-    const amount = BigInt(rawAmount)
+    /* 🔥 THIS IS THE REAL FIX */
+    const amount = BigInt(Math.round(price * 100))
 
-    console.log("💰 RAW:", rawAmount)
-    console.log("💰 FINAL TYPE:", typeof amount, amount.toString())
+    console.log("💰 TYPE:", typeof amount, amount.toString())
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
@@ -47,7 +42,7 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url = response?.result?.paymentLink?.url
+    const url = response.paymentLink?.url
 
     if (!url) throw new Error("No payment URL returned")
 
@@ -59,7 +54,7 @@ router.post("/create-payment/:id", async (req, res) => {
     res.json({ success: true, url })
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err)
+    console.error("❌ PAYMENT ERROR FULL:", err)
     res.status(500).json({ message: err.message })
   }
 })
