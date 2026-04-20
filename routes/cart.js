@@ -1,77 +1,94 @@
-import { useNavigate } from "react-router-dom"
-import { useState } from "react"
+import express from "express"
+import Cart from "../models/Cart.js"
+import { sendAbandonedCartEmail } from "../utils/sendEmail.js"
 
-export default function Cart() {
-  const navigate = useNavigate()
+const router = express.Router()
 
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
+/* ================= TRACK CART ================= */
+router.post("/track", async (req, res) => {
+  try {
+    const { email, cart } = req.body
 
-  /* =========================================================
-     💳 GO TO CHECKOUT (SQUARE FLOW)
-  ========================================================= */
-  const handleCheckout = async () => {
-    try {
-      setLoading(true)
-      setError("")
-
-      const orderId = localStorage.getItem("lastOrderId")
-
-      if (!orderId) {
-        setError("No active order found. Please create a quote first.")
-        setLoading(false)
-        return
-      }
-
-      console.log("🛒 Redirecting to checkout:", orderId)
-
-      navigate(`/checkout/${orderId}`)
-
-    } catch (err) {
-      console.error("❌ CART CHECKOUT ERROR:", err)
-      setError("Failed to start checkout")
-      setLoading(false)
+    if (!email || !cart?.length) {
+      return res.status(400).json({ message: "Missing data" })
     }
+
+    let cartDoc = await Cart.findOneAndUpdate(
+      { email, recovered: false },
+      {
+        items: cart.map(i => ({
+          productId: i._id,
+          name: i.name,
+          price: i.price,
+          quantity: i.quantity,
+          image: i.image
+        }))
+      },
+      { new: true, upsert: true }
+    )
+
+    if (!cartDoc.abandonedEmailSent) {
+
+      setTimeout(async () => {
+        const fresh = await Cart.findById(cartDoc._id)
+
+        if (!fresh || fresh.recovered) return
+
+        fresh.discountCode = "SAVE10"
+        fresh.discountPercent = 10
+        fresh.abandonedEmailSent = true
+
+        await fresh.save()
+
+        await sendAbandonedCartEmail(email, fresh)
+
+      }, 1000 * 60 * 10)
+    }
+
+    res.json({ success: true })
+
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ message: err.message })
   }
+})
 
-  return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center">
-      
-      <h1 className="text-3xl font-bold mb-4">🛒 Cart</h1>
+/* ================= GET DISCOUNT ================= */
+router.post("/discount", async (req, res) => {
+  try {
+    const { email } = req.body
 
-      <p className="text-gray-400 mb-6 max-w-md">
-        Your cart uses a drawer-based checkout. Click below to proceed with your latest order.
-      </p>
+    const cart = await Cart.findOne({ email, recovered: false })
 
-      {/* 🔥 ERROR MESSAGE */}
-      {error && (
-        <p className="text-red-400 mb-4">
-          {error}
-        </p>
-      )}
+    if (!cart) {
+      return res.json({ discountPercent: 0 })
+    }
 
-      {/* 🔥 CHECKOUT BUTTON */}
-      <button
-        onClick={handleCheckout}
-        disabled={loading}
-        className={`px-6 py-2 rounded font-semibold mb-4 ${
-          loading ? "bg-gray-500" : "bg-cyan-500 text-black"
-        }`}
-      >
-        {loading ? "Processing..." : "💳 Go to Checkout"}
-      </button>
+    res.json({
+      discountPercent: cart.discountPercent || 0,
+      code: cart.discountCode || ""
+    })
 
-      {/* CONTINUE SHOPPING */}
-      <button
-        onClick={() => navigate("/store")}
-        className="bg-gray-700 px-6 py-2 rounded text-white"
-      >
-        Continue Shopping
-      </button>
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
 
-      <p className="text-gray-500 mt-6 text-sm">
-        💳 Checkout is securely powered by Square
-      </p>
-    </div>
-  )
-}
+/* ================= MARK RECOVERED ================= */
+router.post("/recovered", async (req, res) => {
+  try {
+    const { email } = req.body
+
+    await Cart.updateMany(
+      { email },
+      { recovered: true }
+    )
+
+    res.json({ success: true })
+
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+export default router
