@@ -64,46 +64,52 @@ export const sendQuoteEmail = async (to, quote) => {
 }
 
 /* =========================================================
-   📦 STATUS EMAIL (PAYMENT LINK FIXED)
+   📦 STATUS EMAIL (🔥 FINAL PAY BUTTON FIX)
 ========================================================= */
 export const sendOrderStatusEmail = async (to, status, id, order) => {
   try {
     const transporter = getTransporter()
     if (!transporter) return
 
+    const CLIENT_URL =
+      process.env.CLIENT_URL ||
+      "https://signavistudio.store"
+
     let subject = "Order Update"
     let html = ""
 
-   const CLIENT_URL = process.env.CLIENT_URL
+    /* 🔥 ALWAYS FALLBACK TO CHECKOUT ROUTE */
+    const paymentLink =
+      order?.paymentUrl ||
+      `${CLIENT_URL}/checkout/${id}`
 
-if (!CLIENT_URL) {
-  console.error("❌ CLIENT_URL MISSING")
-  throw new Error("CLIENT_URL must be set")
-}
-
-
-      
-    const paymentLink = order?.paymentUrl
-
-    if (status === "approved") {
-      subject = "✅ Approved — Complete Payment"
+    if (status === "payment_required" || status === "approved") {
+      subject = "💳 Payment Required — Complete Your Order"
 
       html = wrap(`
-        <p>Your artwork has been approved 🎉</p>
+        <p>Your order is ready for payment 🎉</p>
         <p>Please complete payment to begin production.</p>
 
-        <a href="${paymentLink}"
-          style="
-            display:inline-block;
-            padding:12px 20px;
-            background:#06b6d4;
-            color:black;
-            text-decoration:none;
-            border-radius:6px;
-            font-weight:bold;
-          ">
-          💳 Pay Now
-        </a>
+        <div style="margin-top:20px;">
+          <a href="${paymentLink}"
+            style="
+              display:inline-block;
+              padding:14px 24px;
+              background:#06b6d4;
+              color:#000;
+              text-decoration:none;
+              border-radius:8px;
+              font-weight:bold;
+            ">
+            💳 Pay Now
+          </a>
+        </div>
+
+        <p style="margin-top:15px; font-size:12px; opacity:0.7;">
+          If the button doesn't work, copy this link:
+          <br/>
+          ${paymentLink}
+        </p>
       `)
 
     } else if (status === "denied") {
@@ -141,7 +147,7 @@ if (!CLIENT_URL) {
 }
 
 /* =========================================================
-   🔔 NOTIFICATION EMAIL (FIXES YOUR CRASH)
+   🔔 NOTIFICATION EMAIL
 ========================================================= */
 export const sendNotificationEmail = async (to, subject, message) => {
   try {
@@ -175,8 +181,8 @@ export const sendAbandonedCartEmail = async (cart) => {
     `).join("")
 
     const CLIENT_URL =
-  process.env.CLIENT_URL ||
-  "http://localhost:5173"
+      process.env.CLIENT_URL ||
+      "http://localhost:5173"
 
     const link = cart.discountCode
       ? `${CLIENT_URL}/store?code=${cart.discountCode}&discount=${cart.discountPercent}`
@@ -188,7 +194,6 @@ export const sendAbandonedCartEmail = async (cart) => {
       subject: "🛒 You left items in your cart!",
       html: wrap(`
         <h2>Don't miss out 👀</h2>
-
         <ul>${itemsList}</ul>
 
         <p>
