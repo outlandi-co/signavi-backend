@@ -1,26 +1,8 @@
-import express from "express"
-import { Client, Environment } from "square"
-import Quote from "../models/Quote.js"
-
-const router = express.Router()
-
-const client = new Client({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
-  environment: Environment.Production
-})
-
-/* =========================================================
-   💳 CREATE PAYMENT LINK (FIXED)
-========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
-  console.log("🔥 CREATE PAYMENT HIT")
+  console.log("💳 CREATE PAYMENT:", req.params.id)
 
   try {
     const { id } = req.params
-
-    if (!process.env.SQUARE_ACCESS_TOKEN || !process.env.SQUARE_LOCATION_ID) {
-      throw new Error("Missing Square ENV variables")
-    }
 
     const quote = await Quote.findById(id)
 
@@ -31,9 +13,10 @@ router.post("/create-payment/:id", async (req, res) => {
     let price = Number(quote.price || 25)
     if (!price || price <= 0) price = 25
 
-    const amount = Math.round(price * 100)
+    // 🔥 FIX: Convert to BigInt
+    const amount = BigInt(Math.round(price * 100))
 
-    console.log("💰 AMOUNT:", amount)
+    console.log("💰 AMOUNT (BigInt):", amount.toString())
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
@@ -44,7 +27,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${id}`,
             quantity: "1",
             basePriceMoney: {
-              amount,
+              amount: amount, // ✅ FIXED
               currency: "USD"
             }
           }
@@ -58,7 +41,7 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("No payment URL returned from Square")
     }
 
-    /* 🔥 SAVE LINK TO DB */
+    // 🔥 Save to DB (important for email reuse)
     quote.paymentUrl = url
     await quote.save()
 
@@ -70,12 +53,10 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ CREATE PAYMENT ERROR:", err)
+    console.error("❌ PAYMENT ERROR:", err)
 
     return res.status(500).json({
       message: err.message
     })
   }
 })
-
-export default router

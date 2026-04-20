@@ -1,94 +1,67 @@
-import express from "express"
-import Cart from "../models/Cart.js"
-import { sendAbandonedCartEmail } from "../utils/sendEmail.js"
+import { useNavigate } from "react-router-dom"
+import { useState } from "react"
 
-const router = express.Router()
+export default function Cart() {
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(false)
 
-/* ================= TRACK CART ================= */
-router.post("/track", async (req, res) => {
-  try {
-    const { email, cart } = req.body
+  /* =========================================================
+     💳 GO TO CHECKOUT (SQUARE FLOW)
+  ========================================================= */
+  const handleCheckout = async () => {
+    try {
+      setLoading(true)
 
-    if (!email || !cart?.length) {
-      return res.status(400).json({ message: "Missing data" })
+      // 🔥 If you later store cart/order ID in localStorage
+      const orderId = localStorage.getItem("lastOrderId")
+
+      if (!orderId) {
+        alert("No active order found. Please create a quote first.")
+        return
+      }
+
+      // 🔥 Redirect into your working checkout pipeline
+      navigate(`/checkout/${orderId}`)
+
+    } catch (err) {
+      console.error("❌ CART CHECKOUT ERROR:", err)
+      alert("Failed to start checkout")
+    } finally {
+      setLoading(false)
     }
-
-    let cartDoc = await Cart.findOneAndUpdate(
-      { email, recovered: false },
-      {
-        items: cart.map(i => ({
-          productId: i._id,
-          name: i.name,
-          price: i.price,
-          quantity: i.quantity,
-          image: i.image
-        }))
-      },
-      { new: true, upsert: true }
-    )
-
-    if (!cartDoc.abandonedEmailSent) {
-
-      setTimeout(async () => {
-        const fresh = await Cart.findById(cartDoc._id)
-
-        if (!fresh || fresh.recovered) return
-
-        fresh.discountCode = "SAVE10"
-        fresh.discountPercent = 10
-        fresh.abandonedEmailSent = true
-
-        await fresh.save()
-
-        await sendAbandonedCartEmail(email, fresh)
-
-      }, 1000 * 60 * 10)
-    }
-
-    res.json({ success: true })
-
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ message: err.message })
   }
-})
 
-/* ================= GET DISCOUNT ================= */
-router.post("/discount", async (req, res) => {
-  try {
-    const { email } = req.body
+  return (
+    <div
+      className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center"
+    >
+      <h1 className="text-3xl font-bold mb-4">🛒 Cart</h1>
 
-    const cart = await Cart.findOne({ email, recovered: false })
+      <p className="text-gray-400 mb-6 max-w-md">
+        Your cart has been upgraded to a drawer-based checkout experience.
+        Use the cart icon in the navigation bar to review your items and proceed to payment.
+      </p>
 
-    if (!cart) {
-      return res.json({ discountPercent: 0 })
-    }
+      {/* 🔥 NEW CHECKOUT BUTTON */}
+      <button
+        onClick={handleCheckout}
+        disabled={loading}
+        className="bg-cyan-500 px-6 py-2 rounded text-black font-semibold mb-4"
+      >
+        {loading ? "Processing..." : "💳 Go to Checkout"}
+      </button>
 
-    res.json({
-      discountPercent: cart.discountPercent || 0,
-      code: cart.discountCode || ""
-    })
+      {/* CONTINUE SHOPPING */}
+      <button
+        onClick={() => navigate("/store")}
+        className="bg-gray-700 px-6 py-2 rounded text-white"
+      >
+        Continue Shopping
+      </button>
 
-  } catch (err) {
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= MARK RECOVERED ================= */
-router.post("/recovered", async (req, res) => {
-  try {
-    const { email } = req.body
-
-    await Cart.updateMany(
-      { email },
-      { recovered: true }
-    )
-
-    res.json({ success: true })
-
-  } catch (err) {
-    res.status(500).json({ message: err.message })
-  }
-})
-
-export default router
+      <p className="text-gray-500 mt-6 text-sm">
+        💳 Checkout is handled securely via Square
+      </p>
+    </div>
+  )
+}
