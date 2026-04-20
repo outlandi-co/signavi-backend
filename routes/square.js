@@ -67,12 +67,14 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ PAYMENT ERROR FULL:", err)
+  console.error("❌ PAYMENT ERROR FULL:", err)
+  console.error("❌ STACK:", err.stack)
 
-    return res.status(500).json({
-      message: err.message || "Payment failed"
-    })
-  }
+  return res.status(500).json({
+    message: err.message,
+    stack: err.stack // 👈 TEMP DEBUG
+  })
+}
 })
 
 export default router
