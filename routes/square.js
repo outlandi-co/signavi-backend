@@ -20,7 +20,7 @@ if (!SQUARE_LOCATION_ID) console.warn("⚠️ Missing SQUARE_LOCATION_ID")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN, // 🔥 ONLY USE THIS
+  token: SQUARE_TOKEN,
   environment: SquareEnvironment.Production
 })
 
@@ -57,6 +57,7 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     }
 
+    /* ================= AMOUNT ================= */
     const rawAmount = Number(order.finalPrice || 0)
 
     if (!rawAmount || rawAmount <= 0) {
@@ -64,9 +65,10 @@ router.post("/create-payment/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid amount" })
     }
 
-    const amount = Math.round(rawAmount * 100)
+    // 🔥 ONLY DEFINE BIGINT HERE
+    const amount = BigInt(Math.round(rawAmount * 100))
 
-    console.log("💰 FINAL AMOUNT:", amount)
+    console.log("🧪 TYPE:", typeof amount, amount)
 
     /* ================= CREATE LINK ================= */
     const response = await client.checkout.paymentLinks.create({
@@ -79,9 +81,9 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `Order #${order._id.toString().slice(-6)}`,
             quantity: "1",
             basePriceMoney: {
-  amount: BigInt(amount), // ✅ REQUIRED
-  currency: "USD"
-}
+              amount: amount, // ✅ DO NOT WRAP AGAIN
+              currency: "USD"
+            }
           }
         ]
       },
