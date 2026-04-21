@@ -32,15 +32,15 @@ export const sendOrderStatusEmail = async (
     const CLIENT_URL =
       process.env.CLIENT_URL || "https://signavistudio.store"
 
-    /* 🔥 IMPORTANT FIX: use quote page */
     const paymentLink =
       order?.paymentUrl ||
       `${CLIENT_URL}/quote/${id}`
 
+    console.log("🔗 EMAIL LINK:", paymentLink)
+
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
-    /* ================= STATUS HANDLING ================= */
     if (status === "payment_required") {
       subject = "Your Quote is Approved – Payment Required"
 
@@ -51,18 +51,27 @@ export const sendOrderStatusEmail = async (
 
         <h3>Total: $${order?.price || 0}</h3>
 
-        <a href="${paymentLink}"
-          style="
-            display:inline-block;
-            padding:12px 20px;
-            background:#06b6d4;
-            color:#000;
-            text-decoration:none;
-            border-radius:6px;
-            font-weight:bold;
-          ">
-          💳 Pay Now
-        </a>
+        <!-- BUTTON (EMAIL SAFE) -->
+        <p>
+          <a href="${paymentLink}" target="_blank"
+            style="
+              display:inline-block;
+              padding:14px 24px;
+              background:#06b6d4;
+              color:#000;
+              text-decoration:none;
+              border-radius:6px;
+              font-weight:bold;
+            ">
+            💳 Pay Now
+          </a>
+        </p>
+
+        <!-- FALLBACK LINK (CRITICAL) -->
+        <p>If the button does not work, copy and paste this link:</p>
+        <p style="word-break:break-all;">
+          ${paymentLink}
+        </p>
 
         <p style="margin-top:20px;">
           Thank you,<br/>
@@ -88,7 +97,7 @@ export const sendOrderStatusEmail = async (
 }
 
 /* =========================================================
-   📧 ABANDONED CART (SAFE PLACEHOLDER)
+   📧 ABANDONED CART
 ========================================================= */
 export const sendAbandonedCartEmail = async (email, cart) => {
   try {
