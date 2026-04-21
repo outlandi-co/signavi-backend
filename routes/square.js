@@ -25,21 +25,28 @@ router.post("/create-payment/:id", async (req, res) => {
     const amount = Math.round(Number(quote.price) * 100)
 
     const response = await client.checkout.paymentLinks.create({
-      idempotencyKey: `${id}-${Date.now()}`,
-      order: {
-        locationId: process.env.SQUARE_LOCATION_ID,
-        lineItems: [
-          {
-            name: `Order #${id}`,
-            quantity: "1",
-            basePriceMoney: {
-              amount,
-              currency: "USD"
-            }
-          }
-        ]
+  idempotencyKey: `${quote._id}-${Date.now()}`,
+
+  order: {
+    locationId: process.env.SQUARE_LOCATION_ID,
+
+    /* 🔥 CRITICAL FOR WEBHOOK */
+    metadata: {
+      quoteId: String(quote._id)
+    },
+
+    lineItems: [
+      {
+        name: `Order #${quote._id}`,
+        quantity: "1",
+        basePriceMoney: {
+          amount: Math.round(Number(quote.price) * 100),
+          currency: "USD"
+        }
       }
-    })
+    ]
+  }
+})
 
     const url = response?.result?.paymentLink?.url
 

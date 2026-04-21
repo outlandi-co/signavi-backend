@@ -5,9 +5,10 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
-   💳 CONFIRM PAYMENT (SQUARE FLOW)
-   This is called from:
-   /success/:id page OR Square redirect
+   💳 CONFIRM PAYMENT (MANUAL / REDIRECT FALLBACK)
+   Used if:
+   - Square redirect hits your frontend
+   - OR success page triggers confirmation
 ========================================================= */
 router.post("/confirm/:id", async (req, res) => {
   try {
@@ -22,7 +23,7 @@ router.post("/confirm/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔒 prevent duplicate processing */
+    /* 🔒 PREVENT DUPLICATE */
     if (order.status === "paid") {
       console.log("⚠️ Already paid:", orderId)
       return res.json({ success: true, data: order })
@@ -32,12 +33,14 @@ router.post("/confirm/:id", async (req, res) => {
     if (!order.timeline) order.timeline = []
 
     order.status = "paid"
-    order.productionStatus = "queued"
+
+    /* 🔥 OPTIONAL: move into production automatically */
+    order.productionStatus = order.productionStatus || "queued"
 
     order.timeline.push({
       status: "paid",
       date: new Date(),
-      note: "Payment confirmed via Square"
+      note: "Payment confirmed (manual/redirect fallback)"
     })
 
     await order.save()
@@ -45,9 +48,13 @@ router.post("/confirm/:id", async (req, res) => {
     console.log("✅ ORDER MARKED PAID:", orderId)
 
     /* ================= SOCKET ================= */
-    const io = req.app.get("io")
-    if (io) {
-      io.emit("jobUpdated", order)
+    try {
+      const io = req.app.get("io")
+      if (io) {
+        io.emit("jobUpdated", order)
+      }
+    } catch (err) {
+      console.warn("⚠️ SOCKET ERROR:", err.message)
     }
 
     /* ================= EMAIL ================= */
@@ -59,12 +66,15 @@ router.post("/confirm/:id", async (req, res) => {
           order._id,
           order
         )
+        console.log("📧 PAID EMAIL SENT")
       } catch (err) {
         console.error("⚠️ EMAIL FAILED:", err.message)
       }
+    } else {
+      console.warn("⚠️ NO EMAIL ON ORDER")
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: "Payment confirmed",
       data: order
@@ -72,7 +82,7 @@ router.post("/confirm/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ CONFIRM ERROR:", err)
-    res.status(500).json({ message: err.message })
+    return res.status(500).json({ message: err.message })
   }
 })
 
