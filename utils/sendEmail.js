@@ -18,6 +18,28 @@ const getTransporter = () => {
 }
 
 /* =========================================================
+   🔧 SAFE URL BUILDER (FIXES MISSING https BUG)
+========================================================= */
+const buildSafeUrl = (base, path = "") => {
+  let url = base || "https://signavistudio.store"
+
+  // remove spaces
+  url = url.trim()
+
+  // 🔥 FORCE https if missing
+  if (!url.startsWith("http")) {
+    url = `https://${url}`
+  }
+
+  // remove trailing slash
+  if (url.endsWith("/")) {
+    url = url.slice(0, -1)
+  }
+
+  return `${url}${path}`
+}
+
+/* =========================================================
    📧 SEND ORDER / QUOTE STATUS EMAIL
 ========================================================= */
 export const sendOrderStatusEmail = async (
@@ -32,11 +54,13 @@ export const sendOrderStatusEmail = async (
     const CLIENT_URL =
       process.env.CLIENT_URL || "https://signavistudio.store"
 
-    const paymentLink =
-      order?.paymentUrl ||
-      `${CLIENT_URL}/quote/${id}`
+    /* 🔥 ALWAYS SAFE LINK */
+    const fallbackLink = buildSafeUrl(CLIENT_URL, `/quote/${id}`)
 
-    console.log("🔗 EMAIL LINK:", paymentLink)
+    /* 🔥 PRIORITY: SQUARE LINK IF EXISTS */
+    const paymentLink = order?.paymentUrl || fallbackLink
+
+    console.log("🔗 FINAL EMAIL LINK:", paymentLink)
 
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
@@ -51,7 +75,7 @@ export const sendOrderStatusEmail = async (
 
         <h3>Total: $${order?.price || 0}</h3>
 
-        <!-- BUTTON (EMAIL SAFE) -->
+        <!-- BUTTON -->
         <p>
           <a href="${paymentLink}" target="_blank"
             style="
@@ -67,8 +91,9 @@ export const sendOrderStatusEmail = async (
           </a>
         </p>
 
-        <!-- FALLBACK LINK (CRITICAL) -->
+        <!-- FALLBACK LINK -->
         <p>If the button does not work, copy and paste this link:</p>
+
         <p style="word-break:break-all;">
           ${paymentLink}
         </p>
