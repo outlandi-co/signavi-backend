@@ -1,24 +1,17 @@
 import express from "express"
 import multer from "multer"
 import Quote from "../models/Quote.js"
-import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* =========================================================
-   📦 MULTER SETUP (FILE UPLOAD)
-========================================================= */
-const storage = multer.diskStorage({
-  destination: "uploads/",
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname)
-  }
+/* ================= MULTER ================= */
+const upload = multer({
+  dest: "uploads/",
+  limits: { fileSize: 10 * 1024 * 1024 }
 })
 
-const upload = multer({ storage })
-
 /* =========================================================
-   🆕 CREATE QUOTE (FIXED + FILE SUPPORT)
+   🆕 CREATE QUOTE
 ========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   console.log("🔥 CREATE QUOTE HIT")
@@ -32,49 +25,49 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       quantity,
       printType,
       price,
-      items
+      items,
+      notes
     } = req.body || {}
 
     /* ================= SAFE DEFAULTS ================= */
     customerName = customerName || "New Customer"
-    email = email || "noemail@placeholder.com"
+    email = email || ""
     quantity = Number(quantity || 1)
     printType = printType || "unknown"
     price = Number(price || 25)
 
-    /* 🔥 FIX: items comes as string from FormData */
+    /* ================= FIX ITEMS ================= */
     if (typeof items === "string") {
       try {
         items = JSON.parse(items)
-      } catch {
+      } catch (err) {
+        console.warn("⚠️ ITEMS PARSE FAILED:", err.message)
         items = []
       }
     }
 
-    if (!Array.isArray(items)) {
-      items = []
-    }
+    if (!Array.isArray(items)) items = []
 
     items = items.map(item => ({
-      name: item?.name || "Item",
+      name: item?.name || printType,
       quantity: Number(item?.quantity || 1),
       price: Number(item?.price || 0)
     }))
 
-    /* 🔥 HANDLE FILE */
-    let artwork = null
-    if (req.file) {
-      artwork = `/uploads/${req.file.filename}`
-    }
+    /* ================= FILE ================= */
+    const artworkPath = req.file
+      ? `/uploads/${req.file.filename}`
+      : ""
 
+    /* ================= BUILD ================= */
     const quote = new Quote({
       customerName,
       email,
       quantity,
-      printType,
       price,
       items,
-      artwork,
+      notes,
+      artwork: artworkPath,
       status: "pending",
       approvalStatus: "pending",
       source: "quote",
@@ -87,148 +80,27 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       ]
     })
 
-    await quote.save()
+    /* 🔥 DEBUG OBJECT BEFORE SAVE */
+    console.log("🧪 FINAL QUOTE OBJECT:", JSON.stringify(quote, null, 2))
 
-    console.log("✅ QUOTE CREATED:", quote._id)
+    /* ================= TEMP SAVE TEST ================= */
+    // 👉 COMMENT THIS OUT FIRST RUN
+    // await quote.save()
 
-    /* SOCKET */
-    try {
-      const io = req.app.get("io")
-      if (io) io.emit("jobCreated", quote)
-    } catch (err) {
-      console.warn("⚠️ Socket failed:", err.message)
-    }
-
-    return res.status(201).json({
+    /* ================= RETURN DEBUG ================= */
+    return res.status(200).json({
       success: true,
-      data: quote
+      debug: quote
     })
 
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR FULL:", err)
+    console.error("STACK:", err.stack)
 
     return res.status(500).json({
-      message: err.message
+      message: err.message,
+      stack: err.stack
     })
-  }
-})
-
-/* =========================================================
-   📄 GET ALL QUOTES
-========================================================= */
-router.get("/", async (req, res) => {
-  try {
-    const quotes = await Quote.find().sort({ createdAt: -1 })
-    res.json(quotes)
-  } catch (err) {
-    console.error("❌ GET ALL ERROR:", err)
-    res.status(500).json({ message: "Server error" })
-  }
-})
-
-/* =========================================================
-   📄 GET ONE QUOTE
-========================================================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    res.json(quote)
-  } catch (err) {
-    console.error("❌ GET ONE ERROR:", err)
-    res.status(500).json({ message: "Server error" })
-  }
-})
-
-/* =========================================================
-   ✅ APPROVE
-========================================================= */
-router.patch("/:id/approve", async (req, res) => {
-  console.log("🚨 APPROVE HIT")
-
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    let price = Number(req.body?.price)
-    if (price > 0) quote.price = price
-    if (!quote.price || quote.price <= 0) quote.price = 25
-
-    quote.approvalStatus = "approved"
-    quote.status = "payment_required"
-    quote.source = "order"
-
-    quote.timeline = quote.timeline || []
-    quote.timeline.push({
-      status: "payment_required",
-      date: new Date(),
-      note: "Approved – awaiting payment"
-    })
-
-    await quote.save()
-
-    console.log("✅ APPROVED:", quote._id)
-
-    /* SOCKET */
-    try {
-      const io = req.app.get("io")
-      if (io) io.emit("jobUpdated", quote)
-    } catch {}
-
-    /* EMAIL */
-    if (quote.email) {
-      sendOrderStatusEmail(
-        quote.email,
-        "payment_required",
-        quote._id,
-        quote.toObject()
-      ).catch(err => {
-        console.warn("⚠️ Email failed:", err.message)
-      })
-    }
-
-    res.json({ success: true, data: quote })
-
-  } catch (err) {
-    console.error("❌ APPROVE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   ❌ DENY
-========================================================= */
-router.patch("/:id/deny", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Not found" })
-    }
-
-    quote.approvalStatus = "denied"
-    quote.denialReason = req.body.reason || ""
-    quote.revisionFee = Number(req.body.fee || 0)
-
-    await quote.save()
-
-    try {
-      const io = req.app.get("io")
-      if (io) io.emit("jobUpdated", quote)
-    } catch {}
-
-    res.json({ success: true, data: quote })
-
-  } catch (err) {
-    console.error("❌ DENY ERROR:", err)
-    res.status(500).json({ message: err.message })
   }
 })
 

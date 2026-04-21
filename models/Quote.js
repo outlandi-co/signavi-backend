@@ -1,36 +1,71 @@
-quoteSchema.pre("save", function () {
+import mongoose from "mongoose"
 
-  // Ensure timeline exists
-  if (!this.timeline) this.timeline = []
+const quoteSchema = new mongoose.Schema({
 
-  /* ================= APPROVED ================= */
-  if (this.approvalStatus === "approved") {
+  customerName: { type: String, default: "New Customer" },
+  email: { type: String, default: "" },
+  quantity: { type: Number, default: 1 },
+  price: { type: Number, default: 25 },
 
-    if (this.status !== "payment_required") {
-      this.status = "payment_required"
-      this.source = "order"
-
-      this.timeline.push({
-        status: "payment_required",
-        date: new Date(),
-        note: "Approved – awaiting payment"
-      })
+  items: [
+    {
+      name: String,
+      quantity: Number,
+      price: Number
     }
-  }
+  ],
 
-  /* ================= DENIED ================= */
-  if (this.approvalStatus === "denied") {
+  artwork: String,
+  notes: String,
 
-    if (this.status !== "denied") {
-      this.status = "denied"
-      this.source = "quote"
+  paymentUrl: { type: String, default: null },
 
-      this.timeline.push({
-        status: "denied",
-        date: new Date(),
-        note: this.denialReason || "Quote denied"
-      })
+  approvalStatus: {
+    type: String,
+    enum: ["pending", "approved", "denied"],
+    default: "pending"
+  },
+
+  denialReason: String,
+  revisionFee: { type: Number, default: 0 },
+  adminNotes: String,
+
+  status: {
+    type: String,
+    enum: [
+      "quotes",
+      "pending",
+      "payment_required",
+      "paid",
+      "production",
+      "shipping",
+      "shipped",
+      "delivered",
+      "denied",
+      "archive"
+    ],
+    default: "quotes"
+  },
+
+  source: {
+    type: String,
+    enum: ["quote", "order"],
+    default: "quote"
+  },
+
+  lowQuality: {
+    type: Boolean,
+    default: false
+  },
+
+  timeline: [
+    {
+      status: String,
+      date: Date,
+      note: String
     }
-  }
+  ]
 
-})
+}, { timestamps: true })
+
+export default mongoose.model("Quote", quoteSchema)

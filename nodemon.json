@@ -1,10 +1,7 @@
 {
   "watch": ["server.js", "routes", "models"],
-  "ignore": [
-    "uploads/**",
-    "uploads/**/*",
-    "*.log",
-    "*.tmp",
-    "node_modules/**"
-  ]
+  "ignore": ["uploads", "uploads/*", "*.log", "node_modules"],
+  "ext": "js,json",
+  "exec": "node server.js",
+  "delay": "500"
 }
