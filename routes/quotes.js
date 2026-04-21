@@ -11,7 +11,7 @@ const upload = multer({
 })
 
 /* =========================================================
-   🆕 CREATE QUOTE (FINAL — SAVES TO DB)
+   🆕 CREATE QUOTE
 ========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   console.log("🔥 CREATE QUOTE HIT")
@@ -92,8 +92,6 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR FULL:", err)
-    console.error("STACK:", err.stack)
-
     return res.status(500).json({
       message: err.message
     })
@@ -127,6 +125,53 @@ router.get("/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ GET QUOTE ERROR:", err)
+    return res.status(500).json({
+      message: err.message
+    })
+  }
+})
+
+/* =========================================================
+   ✅ APPROVE QUOTE (🔥 FIXES YOUR ERROR)
+========================================================= */
+router.post("/:id/approve", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    console.log("✅ APPROVE QUOTE:", id)
+
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({
+        message: "Quote not found"
+      })
+    }
+
+    /* 🔥 UPDATE STATUS */
+    quote.approvalStatus = "approved"
+    quote.status = "payment_required"
+    quote.source = "order"
+
+    /* 🔥 TIMELINE UPDATE */
+    quote.timeline.push({
+      status: "payment_required",
+      date: new Date(),
+      note: "Approved – awaiting payment"
+    })
+
+    await quote.save()
+
+    console.log("🔥 QUOTE APPROVED:", quote._id)
+
+    return res.json({
+      success: true,
+      data: quote
+    })
+
+  } catch (err) {
+    console.error("❌ APPROVE ERROR:", err)
+
     return res.status(500).json({
       message: err.message
     })
