@@ -124,18 +124,29 @@ const createPaymentLink = async (quote) => {
     const response = await squareClient.checkout.paymentLinks.create({
       idempotencyKey: `${quote._id}-${Date.now()}`,
       order: {
-        locationId: process.env.SQUARE_LOCATION_ID,
-        lineItems: [
-          {
-            name: `Order #${quote._id}`,
-            quantity: "1",
-            basePriceMoney: {
-              amount,
-              currency: "USD"
-            }
-          }
-        ]
+  locationId: process.env.SQUARE_LOCATION_ID,
+
+  /* 🔥 TAX ENABLED */
+  taxes: [
+    {
+      uid: "sales-tax",
+      name: "Sales Tax",
+      percentage: "8.25", // 👈 change to your local tax rate
+      scope: "ORDER"
+    }
+  ],
+
+  lineItems: [
+    {
+      name: `Order #${quote._id}`,
+      quantity: "1",
+      basePriceMoney: {
+        amount,
+        currency: "USD"
       }
+    }
+  ]
+}
     })
 
     const url = response?.result?.paymentLink?.url
