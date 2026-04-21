@@ -11,7 +11,7 @@ const upload = multer({
 })
 
 /* =========================================================
-   🆕 CREATE QUOTE
+   🆕 CREATE QUOTE (DEBUG MODE — NO SAVE)
 ========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   console.log("🔥 CREATE QUOTE HIT")
@@ -59,7 +59,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       ? `/uploads/${req.file.filename}`
       : ""
 
-    /* ================= BUILD ================= */
+    /* ================= BUILD OBJECT ONLY ================= */
     const quote = new Quote({
       customerName,
       email,
@@ -80,14 +80,9 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       ]
     })
 
-    /* 🔥 DEBUG OBJECT BEFORE SAVE */
-    console.log("🧪 FINAL QUOTE OBJECT:", JSON.stringify(quote, null, 2))
+    console.log("🧪 DEBUG QUOTE:", quote)
 
-    /* ================= TEMP SAVE TEST ================= */
-    // 👉 COMMENT THIS OUT FIRST RUN
-    // await quote.save()
-
-    /* ================= RETURN DEBUG ================= */
+    /* 🚫 NO DATABASE SAVE */
     return res.status(200).json({
       success: true,
       debug: quote
@@ -95,7 +90,6 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR FULL:", err)
-    console.error("STACK:", err.stack)
 
     return res.status(500).json({
       message: err.message,
