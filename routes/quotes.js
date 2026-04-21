@@ -1,11 +1,12 @@
 import express from "express"
 import multer from "multer"
 import Quote from "../models/Quote.js"
-import { sendOrderStatusEmail } from "../utils/sendEmail.js" // ✅ ADD THIS
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
+import { Client, Environment } from "square"
 
 const router = express.Router()
 
-console.log("🚀 QUOTES ROUTE LOADED (EMAIL ENABLED)")
+console.log("🚀 QUOTES ROUTE LOADED (SQUARE + EMAIL ENABLED)")
 
 /* ================= MULTER ================= */
 const upload = multer({
@@ -13,14 +14,16 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }
 })
 
+/* ================= SQUARE CLIENT ================= */
+const squareClient = new Client({
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: Environment.Production // use Sandbox if testing
+})
+
 /* =========================================================
    🆕 CREATE QUOTE
 ========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
-  console.log("🔥 CREATE QUOTE HIT")
-  console.log("📦 BODY:", req.body)
-  console.log("📁 FILE:", req.file)
-
   try {
     let {
       customerName,
@@ -78,8 +81,8 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       ]
     })
 
-    console.log("🔥 SAVING QUOTE...")
     await quote.save()
+
     console.log("✅ QUOTE SAVED:", quote._id)
 
     return res.status(201).json({
@@ -88,10 +91,8 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ CREATE QUOTE ERROR:", err)
-    return res.status(500).json({
-      message: err.message
-    })
+    console.error("❌ CREATE ERROR:", err)
+    return res.status(500).json({ message: err.message })
   }
 })
 
@@ -100,36 +101,57 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
-    const { id } = req.params
-
-    console.log("📡 GET QUOTE:", id)
-
-    const quote = await Quote.findById(id)
+    const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
-      console.warn("⚠️ QUOTE NOT FOUND:", id)
-      return res.status(404).json({
-        message: "Quote not found"
-      })
+      return res.status(404).json({ message: "Quote not found" })
     }
 
-    console.log("✅ QUOTE FOUND:", quote._id)
-
-    return res.json({
-      success: true,
-      data: quote
-    })
+    return res.json({ success: true, data: quote })
 
   } catch (err) {
-    console.error("❌ GET ERROR:", err)
-    return res.status(500).json({
-      message: err.message
-    })
+    return res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   ✅ APPROVE HANDLER (NOW WITH EMAIL)
+   💳 CREATE SQUARE PAYMENT LINK
+========================================================= */
+const createPaymentLink = async (quote) => {
+  try {
+    const amount = Math.round(Number(quote.price) * 100)
+
+    const response = await squareClient.checkout.paymentLinks.create({
+      idempotencyKey: `${quote._id}-${Date.now()}`,
+      order: {
+        locationId: process.env.SQUARE_LOCATION_ID,
+        lineItems: [
+          {
+            name: `Order #${quote._id}`,
+            quantity: "1",
+            basePriceMoney: {
+              amount,
+              currency: "USD"
+            }
+          }
+        ]
+      }
+    })
+
+    const url = response?.result?.paymentLink?.url
+
+    if (!url) throw new Error("No payment link from Square")
+
+    return url
+
+  } catch (err) {
+    console.error("❌ SQUARE LINK ERROR:", err)
+    return null
+  }
+}
+
+/* =========================================================
+   ✅ APPROVE HANDLER (SQUARE + EMAIL)
 ========================================================= */
 async function approveHandler(req, res) {
   try {
@@ -140,9 +162,15 @@ async function approveHandler(req, res) {
     const quote = await Quote.findById(id)
 
     if (!quote) {
-      return res.status(404).json({
-        message: "Quote not found"
-      })
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    /* ================= CREATE PAYMENT LINK ================= */
+    let paymentUrl = await createPaymentLink(quote)
+
+    if (paymentUrl) {
+      quote.paymentUrl = paymentUrl
+      console.log("💳 PAYMENT LINK:", paymentUrl)
     }
 
     /* ================= UPDATE ================= */
@@ -150,7 +178,6 @@ async function approveHandler(req, res) {
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* ================= TIMELINE ================= */
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
@@ -161,18 +188,14 @@ async function approveHandler(req, res) {
 
     console.log("🔥 QUOTE APPROVED:", quote._id)
 
-    /* ================= 📧 SEND EMAIL ================= */
+    /* ================= SEND EMAIL ================= */
     if (quote.email) {
-      console.log("📧 SENDING EMAIL TO:", quote.email)
-
       await sendOrderStatusEmail(
         quote.email,
         "payment_required",
         quote._id,
         quote
       )
-    } else {
-      console.warn("⚠️ NO EMAIL FOUND ON QUOTE")
     }
 
     return res.json({
@@ -182,9 +205,7 @@ async function approveHandler(req, res) {
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
-    return res.status(500).json({
-      message: err.message
-    })
+    return res.status(500).json({ message: err.message })
   }
 }
 
