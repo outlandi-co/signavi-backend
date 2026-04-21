@@ -11,7 +11,7 @@ const upload = multer({
 })
 
 /* =========================================================
-   🆕 CREATE QUOTE (REAL MODE — SAVES TO DB)
+   🆕 CREATE QUOTE (FINAL — SAVES TO DB)
 ========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   console.log("🔥 CREATE QUOTE HIT")
@@ -80,9 +80,9 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       ]
     })
 
-    /* ✅ SAVE TO DATABASE */
+    /* ================= SAVE ================= */
+    console.log("🔥 SAVING QUOTE NOW...")
     await quote.save()
-
     console.log("✅ QUOTE SAVED:", quote._id)
 
     return res.status(201).json({
@@ -92,10 +92,10 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR FULL:", err)
+    console.error("STACK:", err.stack)
 
     return res.status(500).json({
-      message: err.message,
-      stack: err.stack
+      message: err.message
     })
   }
 })
@@ -112,10 +112,13 @@ router.get("/:id", async (req, res) => {
     const quote = await Quote.findById(id)
 
     if (!quote) {
+      console.warn("⚠️ QUOTE NOT FOUND:", id)
       return res.status(404).json({
         message: "Quote not found"
       })
     }
+
+    console.log("✅ QUOTE FOUND:", quote._id)
 
     return res.json({
       success: true,
@@ -124,7 +127,6 @@ router.get("/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ GET QUOTE ERROR:", err)
-
     return res.status(500).json({
       message: err.message
     })
