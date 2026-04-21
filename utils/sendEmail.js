@@ -2,6 +2,7 @@ import nodemailer from "nodemailer"
 
 let transporter
 
+/* ================= CREATE TRANSPORTER ================= */
 const getTransporter = () => {
   if (transporter) return transporter
 
@@ -16,41 +17,83 @@ const getTransporter = () => {
   return transporter
 }
 
-/* ================= STATUS EMAIL ================= */
-export const sendOrderStatusEmail = async (to, status, id, order) => {
+/* =========================================================
+   📧 SEND ORDER / QUOTE STATUS EMAIL
+========================================================= */
+export const sendOrderStatusEmail = async (
+  to,
+  status,
+  id,
+  order = {}
+) => {
   try {
     const transporter = getTransporter()
 
-    const CLIENT_URL = process.env.CLIENT_URL || "https://signavistudio.store"
+    const CLIENT_URL =
+      process.env.CLIENT_URL || "https://signavistudio.store"
 
+    /* 🔥 IMPORTANT FIX: use quote page */
     const paymentLink =
       order?.paymentUrl ||
-      `${CLIENT_URL}/checkout/${id}`
+      `${CLIENT_URL}/quote/${id}`
 
-    let html = `<h2>Signavi Studio</h2><p>Status: ${status}</p>`
+    let subject = "SignaVi Studio Update"
+    let html = `<h2>SignaVi Studio</h2>`
 
+    /* ================= STATUS HANDLING ================= */
     if (status === "payment_required") {
+      subject = "Your Quote is Approved – Payment Required"
+
       html += `
+        <p>Hello ${order?.customerName || "Customer"},</p>
+
+        <p>Your quote has been approved and is ready for payment.</p>
+
+        <h3>Total: $${order?.price || 0}</h3>
+
         <a href="${paymentLink}"
-          style="padding:12px 20px;background:#06b6d4;color:#000;text-decoration:none;">
+          style="
+            display:inline-block;
+            padding:12px 20px;
+            background:#06b6d4;
+            color:#000;
+            text-decoration:none;
+            border-radius:6px;
+            font-weight:bold;
+          ">
           💳 Pay Now
         </a>
+
+        <p style="margin-top:20px;">
+          Thank you,<br/>
+          <strong>SignaVi Studio</strong>
+        </p>
       `
+    } else {
+      html += `<p>Status updated: ${status}</p>`
     }
 
     await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+      from: `"SignaVi Studio" <${process.env.EMAIL_USER}>`,
       to,
-      subject: "Order Update",
+      subject,
       html
     })
 
+    console.log("📧 EMAIL SENT →", to)
+
   } catch (err) {
-    console.error(err)
+    console.error("❌ EMAIL ERROR:", err)
   }
 }
 
-/* ================= FIX THIS (CRITICAL) ================= */
+/* =========================================================
+   📧 ABANDONED CART (SAFE PLACEHOLDER)
+========================================================= */
 export const sendAbandonedCartEmail = async (email, cart) => {
-  console.log("📧 Abandoned cart email sent to:", email)
+  try {
+    console.log("📧 Abandoned cart email sent to:", email)
+  } catch (err) {
+    console.error(err)
+  }
 }

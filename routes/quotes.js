@@ -1,8 +1,11 @@
 import express from "express"
 import multer from "multer"
 import Quote from "../models/Quote.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js" // ✅ ADD THIS
 
 const router = express.Router()
+
+console.log("🚀 QUOTES ROUTE LOADED (EMAIL ENABLED)")
 
 /* ================= MULTER ================= */
 const upload = multer({
@@ -29,14 +32,12 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       notes
     } = req.body || {}
 
-    /* ================= SAFE DEFAULTS ================= */
     customerName = customerName || "New Customer"
     email = email || ""
     quantity = Number(quantity || 1)
     printType = printType || "unknown"
     price = Number(price || 25)
 
-    /* ================= FIX ITEMS ================= */
     if (typeof items === "string") {
       try {
         items = JSON.parse(items)
@@ -53,12 +54,10 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price: Number(item?.price || 0)
     }))
 
-    /* ================= FILE ================= */
     const artworkPath = req.file
       ? `/uploads/${req.file.filename}`
       : ""
 
-    /* ================= BUILD ================= */
     const quote = new Quote({
       customerName,
       email,
@@ -108,10 +107,13 @@ router.get("/:id", async (req, res) => {
     const quote = await Quote.findById(id)
 
     if (!quote) {
+      console.warn("⚠️ QUOTE NOT FOUND:", id)
       return res.status(404).json({
         message: "Quote not found"
       })
     }
+
+    console.log("✅ QUOTE FOUND:", quote._id)
 
     return res.json({
       success: true,
@@ -127,13 +129,13 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   ✅ APPROVE HANDLER (PATCH + POST)
+   ✅ APPROVE HANDLER (NOW WITH EMAIL)
 ========================================================= */
 async function approveHandler(req, res) {
   try {
     const { id } = req.params
 
-    console.log("✅ APPROVE QUOTE:", id)
+    console.log("🔥 APPROVE ROUTE HIT:", id)
 
     const quote = await Quote.findById(id)
 
@@ -143,12 +145,12 @@ async function approveHandler(req, res) {
       })
     }
 
-    /* 🔥 UPDATE */
+    /* ================= UPDATE ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* 🔥 TIMELINE */
+    /* ================= TIMELINE ================= */
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
@@ -158,6 +160,20 @@ async function approveHandler(req, res) {
     await quote.save()
 
     console.log("🔥 QUOTE APPROVED:", quote._id)
+
+    /* ================= 📧 SEND EMAIL ================= */
+    if (quote.email) {
+      console.log("📧 SENDING EMAIL TO:", quote.email)
+
+      await sendOrderStatusEmail(
+        quote.email,
+        "payment_required",
+        quote._id,
+        quote
+      )
+    } else {
+      console.warn("⚠️ NO EMAIL FOUND ON QUOTE")
+    }
 
     return res.json({
       success: true,
@@ -172,7 +188,9 @@ async function approveHandler(req, res) {
   }
 }
 
-/* ================= ROUTES ================= */
+/* =========================================================
+   🔥 ROUTES
+========================================================= */
 router.patch("/:id/approve", approveHandler)
 router.post("/:id/approve", approveHandler)
 
