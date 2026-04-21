@@ -11,7 +11,7 @@ const upload = multer({
 })
 
 /* =========================================================
-   🆕 CREATE QUOTE (DEBUG MODE — NO SAVE)
+   🆕 CREATE QUOTE (REAL MODE — SAVES TO DB)
 ========================================================= */
 router.post("/", upload.single("artwork"), async (req, res) => {
   console.log("🔥 CREATE QUOTE HIT")
@@ -28,37 +28,6 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       items,
       notes
     } = req.body || {}
-
-    /* =========================================================
-   📄 GET SINGLE QUOTE
-========================================================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params
-
-    console.log("📡 GET QUOTE:", id)
-
-    const quote = await Quote.findById(id)
-
-    if (!quote) {
-      return res.status(404).json({
-        message: "Quote not found"
-      })
-    }
-
-    return res.json({
-      success: true,
-      data: quote
-    })
-
-  } catch (err) {
-    console.error("❌ GET QUOTE ERROR:", err)
-
-    return res.status(500).json({
-      message: err.message
-    })
-  }
-})
 
     /* ================= SAFE DEFAULTS ================= */
     customerName = customerName || "New Customer"
@@ -90,7 +59,7 @@ router.get("/:id", async (req, res) => {
       ? `/uploads/${req.file.filename}`
       : ""
 
-    /* ================= BUILD OBJECT ONLY ================= */
+    /* ================= BUILD ================= */
     const quote = new Quote({
       customerName,
       email,
@@ -111,12 +80,14 @@ router.get("/:id", async (req, res) => {
       ]
     })
 
-    console.log("🧪 DEBUG QUOTE:", quote)
+    /* ✅ SAVE TO DATABASE */
+    await quote.save()
 
-    /* 🚫 NO DATABASE SAVE */
-    return res.status(200).json({
+    console.log("✅ QUOTE SAVED:", quote._id)
+
+    return res.status(201).json({
       success: true,
-      debug: quote
+      data: quote
     })
 
   } catch (err) {
@@ -125,6 +96,37 @@ router.get("/:id", async (req, res) => {
     return res.status(500).json({
       message: err.message,
       stack: err.stack
+    })
+  }
+})
+
+/* =========================================================
+   📄 GET SINGLE QUOTE
+========================================================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    console.log("📡 GET QUOTE:", id)
+
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({
+        message: "Quote not found"
+      })
+    }
+
+    return res.json({
+      success: true,
+      data: quote
+    })
+
+  } catch (err) {
+    console.error("❌ GET QUOTE ERROR:", err)
+
+    return res.status(500).json({
+      message: err.message
     })
   }
 })
