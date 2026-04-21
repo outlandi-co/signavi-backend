@@ -29,6 +29,37 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       notes
     } = req.body || {}
 
+    /* =========================================================
+   📄 GET SINGLE QUOTE
+========================================================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    console.log("📡 GET QUOTE:", id)
+
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({
+        message: "Quote not found"
+      })
+    }
+
+    return res.json({
+      success: true,
+      data: quote
+    })
+
+  } catch (err) {
+    console.error("❌ GET QUOTE ERROR:", err)
+
+    return res.status(500).json({
+      message: err.message
+    })
+  }
+})
+
     /* ================= SAFE DEFAULTS ================= */
     customerName = customerName || "New Customer"
     email = email || ""
