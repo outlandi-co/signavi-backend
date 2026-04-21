@@ -40,8 +40,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     if (typeof items === "string") {
       try {
         items = JSON.parse(items)
-      } catch (err) {
-        console.warn("⚠️ ITEMS PARSE FAILED:", err.message)
+      } catch {
         items = []
       }
     }
@@ -80,8 +79,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       ]
     })
 
-    /* ================= SAVE ================= */
-    console.log("🔥 SAVING QUOTE NOW...")
+    console.log("🔥 SAVING QUOTE...")
     await quote.save()
     console.log("✅ QUOTE SAVED:", quote._id)
 
@@ -91,7 +89,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ CREATE QUOTE ERROR FULL:", err)
+    console.error("❌ CREATE QUOTE ERROR:", err)
     return res.status(500).json({
       message: err.message
     })
@@ -110,13 +108,10 @@ router.get("/:id", async (req, res) => {
     const quote = await Quote.findById(id)
 
     if (!quote) {
-      console.warn("⚠️ QUOTE NOT FOUND:", id)
       return res.status(404).json({
         message: "Quote not found"
       })
     }
-
-    console.log("✅ QUOTE FOUND:", quote._id)
 
     return res.json({
       success: true,
@@ -124,7 +119,7 @@ router.get("/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ GET QUOTE ERROR:", err)
+    console.error("❌ GET ERROR:", err)
     return res.status(500).json({
       message: err.message
     })
@@ -132,9 +127,9 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   ✅ APPROVE QUOTE (🔥 FIXES YOUR ERROR)
+   ✅ APPROVE HANDLER (PATCH + POST)
 ========================================================= */
-router.post("/:id/approve", async (req, res) => {
+async function approveHandler(req, res) {
   try {
     const { id } = req.params
 
@@ -148,12 +143,12 @@ router.post("/:id/approve", async (req, res) => {
       })
     }
 
-    /* 🔥 UPDATE STATUS */
+    /* 🔥 UPDATE */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
-    /* 🔥 TIMELINE UPDATE */
+    /* 🔥 TIMELINE */
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
@@ -171,11 +166,14 @@ router.post("/:id/approve", async (req, res) => {
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
-
     return res.status(500).json({
       message: err.message
     })
   }
-})
+}
+
+/* ================= ROUTES ================= */
+router.patch("/:id/approve", approveHandler)
+router.post("/:id/approve", approveHandler)
 
 export default router
