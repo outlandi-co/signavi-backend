@@ -7,11 +7,26 @@ const router = express.Router()
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
-/* ================= CREATE ORDER ================= */
+/* =========================================================
+   🆕 CREATE ORDER (TAX + SAFE TOTAL SUPPORT)
+========================================================= */
 router.post("/", async (req, res) => {
   try {
-    const { customerName, email, items, quantity, printType } = req.body
+    console.log("🛒 CREATE ORDER HIT")
+    console.log("📦 BODY:", req.body)
 
+    let {
+      customerName,
+      email,
+      items,
+      quantity,
+      printType,
+      subtotal,
+      tax,
+      price
+    } = req.body || {}
+
+    /* ================= SAFE ITEMS ================= */
     const safeItems = Array.isArray(items)
       ? items.map(item => ({
           name: item?.name || "Item",
@@ -20,19 +35,40 @@ router.post("/", async (req, res) => {
         }))
       : []
 
-    const totalQuantity = safeItems.reduce((acc, i) => acc + i.quantity, 0)
-    const totalPrice = safeItems.reduce((acc, i) => acc + i.price * i.quantity, 0)
+    /* ================= CALCULATE FALLBACK ================= */
+    const computedSubtotal = safeItems.reduce(
+      (acc, i) => acc + i.price * i.quantity,
+      0
+    )
 
+    subtotal = Number(subtotal ?? computedSubtotal)
+    tax = Number(tax ?? subtotal * 0.08)
+    price = Number(price ?? subtotal + tax)
+
+    const totalQuantity =
+      safeItems.reduce((acc, i) => acc + i.quantity, 0) ||
+      Number(quantity) ||
+      1
+
+    console.log("💰 FINAL:", { subtotal, tax, total: price })
+
+    /* ================= CREATE ORDER ================= */
     const order = await Order.create({
       customerName: customerName || "Guest",
       email: email || "",
       items: safeItems,
-      quantity: totalQuantity || Number(quantity) || 1,
+
+      quantity: totalQuantity,
       printType: printType || "custom",
-      price: totalPrice,
-      finalPrice: totalPrice,
+
+      subtotal,   // ✅ NEW
+      tax,        // ✅ NEW
+      price,      // total
+      finalPrice: price,
+
       source: "store",
       status: "payment_required",
+
       timeline: [
         {
           status: "created",
@@ -42,7 +78,7 @@ router.post("/", async (req, res) => {
       ]
     })
 
-    /* 🔥 SEND EMAIL (optional) */
+    /* ================= EMAIL ================= */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -52,6 +88,7 @@ router.post("/", async (req, res) => {
       )
     }
 
+    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobCreated", order)
 
     res.json({ success: true, data: order })
@@ -62,7 +99,9 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= UPDATE STATUS ================= */
+/* =========================================================
+   🔄 UPDATE STATUS
+========================================================= */
 router.patch("/update-status/:id", async (req, res) => {
   try {
     const { status } = req.body
@@ -90,7 +129,7 @@ router.patch("/update-status/:id", async (req, res) => {
 
     await order.save()
 
-    /* 🔥 EMAIL */
+    /* ================= EMAIL ================= */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -110,7 +149,9 @@ router.patch("/update-status/:id", async (req, res) => {
   }
 })
 
-/* ================= GET ================= */
+/* =========================================================
+   📄 GET
+========================================================= */
 router.get("/", async (req, res) => {
   const orders = await Order.find().sort({ createdAt: -1 })
   res.json({ success: true, data: orders })

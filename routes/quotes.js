@@ -2,7 +2,8 @@ import express from "express"
 import multer from "multer"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
-import { Client, Environment } from "square"
+import pkg from "square"
+const { Client, Environment } = pkg
 
 const router = express.Router()
 
@@ -15,9 +16,8 @@ const upload = multer({
 })
 
 /* ================= SQUARE CLIENT ================= */
-const squareClient = new Client({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
-  environment: Environment.Production // use Sandbox if testing
+const client = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN
 })
 
 /* =========================================================

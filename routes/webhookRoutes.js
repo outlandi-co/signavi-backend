@@ -1,100 +1,159 @@
 import express from "express"
+import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
 /* =========================================================
-   💳 CONFIRM PAYMENT (MANUAL / REDIRECT FALLBACK)
-   Used if:
-   - Square redirect hits your frontend
-   - OR success page triggers confirmation
+   🔥 SQUARE WEBHOOK → AUTO PROCESS (QUOTE + ORDER)
 ========================================================= */
-router.post("/confirm/:id", async (req, res) => {
+router.post("/square", express.json(), async (req, res) => {
   try {
-    const orderId = req.params.id
+    console.log("📡 WEBHOOK RECEIVED")
 
-    console.log("💳 CONFIRM PAYMENT HIT:", orderId)
+    const event = req.body
+    console.log("🧪 EVENT TYPE:", event?.type)
 
-    const order = await Order.findById(orderId)
+    /* =========================================================
+       💳 PAYMENT UPDATED (SUCCESS EVENT)
+    ========================================================= */
+    if (event?.type === "payment.updated") {
+      const payment = event?.data?.object?.payment
 
-    if (!order) {
-      console.warn("❌ Order not found:", orderId)
-      return res.status(404).json({ message: "Order not found" })
-    }
+      console.log("💳 PAYMENT OBJECT:", payment)
 
-    /* 🔒 PREVENT DUPLICATE */
-    if (order.status === "paid") {
-      console.log("⚠️ Already paid:", orderId)
-      return res.json({ success: true, data: order })
-    }
+      /* 🔥 GET METADATA (NEW SYSTEM) */
+      const recordId =
+        payment?.metadata?.recordId ||
+        payment?.metadata?.quoteId || // fallback
+        payment?.orderId
 
-    /* ================= UPDATE ================= */
-    if (!order.timeline) order.timeline = []
+      const type = payment?.metadata?.type || "quote"
 
-    order.status = "paid"
-
-    /* 🔥 OPTIONAL: move into production automatically */
-    order.productionStatus = order.productionStatus || "queued"
-
-    order.timeline.push({
-      status: "paid",
-      date: new Date(),
-      note: "Payment confirmed (manual/redirect fallback)"
-    })
-
-    await order.save()
-
-    console.log("✅ ORDER MARKED PAID:", orderId)
-
-    /* ================= SOCKET ================= */
-    try {
-      const io = req.app.get("io")
-      if (io) {
-        io.emit("jobUpdated", order)
+      if (!recordId) {
+        console.warn("⚠️ No recordId in webhook")
+        return res.sendStatus(200)
       }
-    } catch (err) {
-      console.warn("⚠️ SOCKET ERROR:", err.message)
-    }
 
-    /* ================= EMAIL ================= */
-    if (order.email) {
-      try {
-        await sendOrderStatusEmail(
-          order.email,
-          "paid",
-          order._id,
-          order
-        )
-        console.log("📧 PAID EMAIL SENT")
-      } catch (err) {
-        console.error("⚠️ EMAIL FAILED:", err.message)
+      console.log(`📦 PROCESSING ${type.toUpperCase()}:`, recordId)
+
+      /* =========================================================
+         🟦 CASE 1: QUOTE → CONVERT TO ORDER
+      ========================================================= */
+      if (type === "quote") {
+        const quote = await Quote.findById(recordId)
+
+        if (!quote) {
+          console.warn("⚠️ Quote not found:", recordId)
+          return res.sendStatus(200)
+        }
+
+        if (quote.status === "paid") {
+          console.log("⚠️ Quote already processed")
+          return res.sendStatus(200)
+        }
+
+        /* 🔥 MARK PAID */
+        quote.status = "paid"
+
+        quote.timeline.push({
+          status: "paid",
+          date: new Date(),
+          note: "Payment received via webhook"
+        })
+
+        await quote.save()
+
+        console.log("✅ QUOTE MARKED PAID")
+
+        /* 🔥 CREATE ORDER */
+        const order = new Order({
+          customerName: quote.customerName,
+          email: quote.email,
+          quantity: quote.quantity,
+          price: quote.price,
+          items: quote.items,
+          artwork: quote.artwork,
+          notes: quote.notes,
+
+          status: "paid",
+          productionStatus: "queued",
+          source: "order",
+
+          timeline: [
+            {
+              status: "paid",
+              date: new Date(),
+              note: "Converted from quote (auto)"
+            }
+          ]
+        })
+
+        await order.save()
+
+        console.log("🔥 ORDER CREATED:", order._id)
+
+        /* 🔥 ARCHIVE QUOTE */
+        quote.status = "archive"
+        await quote.save()
+
+        /* 🔌 SOCKET */
+        const io = req.app.get("io")
+        if (io) io.emit("jobCreated", order)
+
+        /* 📧 EMAIL */
+        if (order.email) {
+          await sendOrderStatusEmail(order.email, "paid", order._id, order)
+        }
       }
-    } else {
-      console.warn("⚠️ NO EMAIL ON ORDER")
+
+      /* =========================================================
+         🟩 CASE 2: ORDER → MARK PAID ONLY
+      ========================================================= */
+      if (type === "order") {
+        const order = await Order.findById(recordId)
+
+        if (!order) {
+          console.warn("⚠️ Order not found:", recordId)
+          return res.sendStatus(200)
+        }
+
+        if (order.status === "paid") {
+          console.log("⚠️ Order already processed")
+          return res.sendStatus(200)
+        }
+
+        /* 🔥 MARK PAID */
+        order.status = "paid"
+        order.productionStatus = "queued"
+
+        order.timeline.push({
+          status: "paid",
+          date: new Date(),
+          note: "Payment received via webhook"
+        })
+
+        await order.save()
+
+        console.log("✅ ORDER MARKED PAID:", order._id)
+
+        /* 🔌 SOCKET */
+        const io = req.app.get("io")
+        if (io) io.emit("jobUpdated", order)
+
+        /* 📧 EMAIL */
+        if (order.email) {
+          await sendOrderStatusEmail(order.email, "paid", order._id, order)
+        }
+      }
     }
 
-    return res.json({
-      success: true,
-      message: "Payment confirmed",
-      data: order
-    })
+    return res.sendStatus(200)
 
   } catch (err) {
-    console.error("❌ CONFIRM ERROR:", err)
-    return res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   🧪 TEST ROUTE
-========================================================= */
-router.get("/test/:id", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-    res.json(order)
-  } catch (err) {
-    res.status(500).json({ message: err.message })
+    console.error("❌ WEBHOOK ERROR:", err)
+    return res.sendStatus(500)
   }
 })
 

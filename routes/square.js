@@ -1,70 +1,74 @@
 import express from "express"
-import { Client, Environment } from "square"
+import { SquareClient } from "square"
 import Quote from "../models/Quote.js"
+import Order from "../models/Order.js"
 
 const router = express.Router()
 
-const client = new Client({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
-  environment: Environment.Production // or Sandbox if testing
+const client = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN
 })
 
-/* =========================================================
-   💳 CREATE PAYMENT LINK
-========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
-    const quote = await Quote.findById(id)
+    let record = await Quote.findById(id)
+    let type = "quote"
 
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
+    if (!record) {
+      record = await Order.findById(id)
+      type = "order"
     }
 
-    const amount = Math.round(Number(quote.price) * 100)
+    if (!record) {
+      return res.status(404).json({ message: "Not found" })
+    }
 
-    const response = await client.checkout.paymentLinks.create({
-  idempotencyKey: `${quote._id}-${Date.now()}`,
+    const subtotal = Number(record.subtotal || record.price || 25)
+    const tax = Number(record.tax || 0)
 
-  order: {
-    locationId: process.env.SQUARE_LOCATION_ID,
+    const response = await client.checkout.paymentLinksApi.createPaymentLink({
+      idempotencyKey: `${id}-${Date.now()}`,
+      order: {
+        locationId: process.env.SQUARE_LOCATION_ID,
 
-    /* 🔥 CRITICAL FOR WEBHOOK */
-    metadata: {
-      quoteId: String(quote._id)
-    },
+        metadata: {
+          recordId: String(record._id),
+          type
+        },
 
-    lineItems: [
-      {
-        name: `Order #${quote._id}`,
-        quantity: "1",
-        basePriceMoney: {
-          amount: Math.round(Number(quote.price) * 100),
-          currency: "USD"
-        }
+        lineItems: [
+          {
+            name: "Subtotal",
+            quantity: "1",
+            basePriceMoney: {
+              amount: Math.round(subtotal * 100),
+              currency: "USD"
+            }
+          },
+          {
+            name: "Tax",
+            quantity: "1",
+            basePriceMoney: {
+              amount: Math.round(tax * 100),
+              currency: "USD"
+            }
+          }
+        ]
       }
-    ]
-  }
-})
+    })
 
     const url = response?.result?.paymentLink?.url
 
-    if (!url) {
-      throw new Error("No payment link returned from Square")
-    }
+    record.paymentUrl = url
+    await record.save()
 
-    /* 🔥 SAVE TO DB */
-    quote.paymentUrl = url
-    await quote.save()
-
-    console.log("💳 PAYMENT LINK CREATED:", url)
-
-    return res.json({ success: true, url })
+    res.json({ success: true, url })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR:", err)
-    return res.status(500).json({ message: err.message })
+    console.error(err)
+    res.status(500).json({ message: err.message })
   }
 })
 

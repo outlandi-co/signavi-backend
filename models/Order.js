@@ -12,7 +12,9 @@ const orderSchema = new mongoose.Schema({
   artwork: { type: String, default: null },
 
   /* ================= PRICING ================= */
-  price: { type: Number, default: 0 },
+  subtotal: { type: Number, default: 0 }, // ✅ NEW
+  tax: { type: Number, default: 0 },      // ✅ NEW
+  price: { type: Number, default: 0 },    // total
   finalPrice: { type: Number, default: 0 },
 
   items: [
