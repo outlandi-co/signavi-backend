@@ -25,14 +25,12 @@ router.post("/register", async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10)
 
-    const user = new User({
+    const user = await User.create({
       name: name || "",
       email,
       password: hashedPassword,
       role: role || "customer"
     })
-
-    await user.save()
 
     const token = jwt.sign(
       { id: user._id, email: user.email, role: user.role },
@@ -165,14 +163,12 @@ router.post("/create-admin", async (req, res) => {
 
     const hashedPassword = await bcrypt.hash("123456", 10)
 
-    const admin = new User({
+    const admin = await User.create({
       name: "Admin",
       email: "admin@signavi.com",
       password: hashedPassword,
       role: "admin"
     })
-
-    await admin.save()
 
     res.json({
       message: "Admin created",
