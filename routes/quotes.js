@@ -2,13 +2,11 @@ import express from "express"
 import multer from "multer"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
-import square from "square"
-
-const { SquareClient } = square
+import { SquareClient } from "square"
 
 const router = express.Router()
 
-console.log("🚀 QUOTES ROUTE LOADED (APPROVE + DENY FIXED)")
+console.log("🚀 QUOTES ROUTE LOADED (FINAL STABLE)")
 
 /* ================= MULTER ================= */
 const upload = multer({
@@ -84,8 +82,6 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
     await quote.save()
 
-    console.log("✅ QUOTE SAVED:", quote._id)
-
     return res.status(201).json({
       success: true,
       data: quote
@@ -116,15 +112,13 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK
+   💳 CREATE PAYMENT LINK (SAFE)
 ========================================================= */
 const createPaymentLink = async (quote) => {
   try {
     const subtotal = Number(quote.price || 0)
 
-    if (!subtotal || isNaN(subtotal)) {
-      throw new Error("Invalid subtotal")
-    }
+    if (!subtotal || isNaN(subtotal)) return null
 
     const tax = subtotal * 0.0825
 
@@ -166,7 +160,7 @@ const createPaymentLink = async (quote) => {
 
     let url = response?.paymentLink?.url
 
-    if (!url) throw new Error("No payment URL")
+    if (!url) return null
 
     if (url.startsWith("ttps://")) url = "h" + url
     if (!url.startsWith("http")) url = `https://${url}`
@@ -174,13 +168,13 @@ const createPaymentLink = async (quote) => {
     return url
 
   } catch (err) {
-    console.error("❌ SQUARE LINK ERROR:", err)
+    console.warn("⚠️ Square failed (non-blocking):", err.message)
     return null
   }
 }
 
 /* =========================================================
-   ✅ APPROVE
+   ✅ APPROVE (FIXED — NEVER CRASHES)
 ========================================================= */
 async function approveHandler(req, res) {
   try {
@@ -196,21 +190,26 @@ async function approveHandler(req, res) {
 
     if (!quote.timeline) quote.timeline = []
 
-    const paymentUrl = await createPaymentLink(quote)
+    let paymentUrl = await createPaymentLink(quote)
 
-    if (!paymentUrl) {
-      throw new Error("Payment link creation failed")
-    }
-
-    quote.paymentUrl = paymentUrl
+    /* ================= ALWAYS APPROVE ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
+    if (paymentUrl) {
+      quote.paymentUrl = paymentUrl
+      console.log("💳 PAYMENT LINK:", paymentUrl)
+    } else {
+      console.warn("⚠️ No payment link generated")
+    }
+
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
-      note: "Approved – awaiting payment"
+      note: paymentUrl
+        ? "Approved – awaiting payment"
+        : "Approved – payment link pending"
     })
 
     await quote.save()
@@ -239,8 +238,6 @@ async function denyHandler(req, res) {
   try {
     const { id } = req.params
 
-    console.log("❌ DENY ROUTE HIT:", id)
-
     const quote = await Quote.findById(id)
 
     if (!quote) {
@@ -268,9 +265,7 @@ async function denyHandler(req, res) {
   }
 }
 
-/* =========================================================
-   ROUTES
-========================================================= */
+/* ================= ROUTES ================= */
 router.patch("/:id/approve", approveHandler)
 router.post("/:id/approve", approveHandler)
 
