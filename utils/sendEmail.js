@@ -20,14 +20,14 @@ const getTransporter = () => {
 }
 
 /* =========================================================
-   🔗 BULLETPROOF URL BUILDER
+   🔗 SAFE URL BUILDER (FORCE VALID HTTPS)
 ========================================================= */
 const buildSafeUrl = (base, path = "") => {
   let url = base || "signavistudio.store"
 
   url = url.trim()
 
-  // 🔥 REMOVE ANY BROKEN PROTOCOLS
+  // 🔥 REMOVE ANY PROTOCOL (good or bad)
   url = url.replace(/^(https?:)?\/?\//i, "")
   url = url.replace(/^ttps?:?\/?\/?/i, "")
 
@@ -43,7 +43,7 @@ const buildSafeUrl = (base, path = "") => {
 }
 
 /* =========================================================
-   🔧 FINAL LINK SANITIZER (LAST LINE OF DEFENSE)
+   🔧 FINAL LINK SANITIZER
 ========================================================= */
 const sanitizeLink = (link, fallback) => {
   let finalLink = link || fallback
@@ -52,17 +52,17 @@ const sanitizeLink = (link, fallback) => {
 
   finalLink = finalLink.trim()
 
-  // 🔥 FIX: "ttps://"
+  // 🔥 Fix missing "h"
   if (finalLink.startsWith("ttps://")) {
     finalLink = "h" + finalLink
   }
 
-  // 🔥 FIX: "https//"
+  // 🔥 Fix missing colon
   if (finalLink.startsWith("https//")) {
     finalLink = finalLink.replace("https//", "https://")
   }
 
-  // 🔥 STILL BAD? rebuild it
+  // 🔥 If still invalid → rebuild
   if (!finalLink.startsWith("http")) {
     finalLink = buildSafeUrl(finalLink)
   }
@@ -87,7 +87,6 @@ export const sendOrderStatusEmail = async (
 
     const fallbackLink = buildSafeUrl(CLIENT_URL, `/quote/${id}`)
 
-    /* 🔥 PRIORITY: ALWAYS USE VALID LINK */
     const paymentLink = sanitizeLink(order?.paymentUrl, fallbackLink)
 
     console.log("🔗 FINAL EMAIL LINK:", paymentLink)
@@ -150,13 +149,13 @@ export const sendOrderStatusEmail = async (
 }
 
 /* =========================================================
-   📧 ABANDONED CART
+   📧 ABANDONED CART (SAFE PLACEHOLDER)
 ========================================================= */
 export const sendAbandonedCartEmail = async (email, cart = []) => {
   try {
     console.log("📧 Abandoned cart →", email)
     console.log("🛒 Cart:", cart)
   } catch (err) {
-    console.error(err)
+    console.error("❌ Abandoned cart error:", err)
   }
 }
