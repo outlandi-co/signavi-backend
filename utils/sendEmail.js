@@ -2,9 +2,7 @@ import nodemailer from "nodemailer"
 
 let transporter
 
-/* =========================================================
-   📦 CREATE TRANSPORTER
-========================================================= */
+/* ================= TRANSPORT ================= */
 const getTransporter = () => {
   if (transporter) return transporter
 
@@ -19,21 +17,16 @@ const getTransporter = () => {
   return transporter
 }
 
-/* =========================================================
-   🔗 SAFE URL BUILDER (FIXES https BUG)
-========================================================= */
+/* ================= SAFE URL ================= */
 const buildSafeUrl = (base, path = "") => {
   let url = base || "https://signavistudio.store"
 
-  // remove spaces
   url = url.trim()
 
-  // force https if missing
   if (!url.startsWith("http")) {
     url = `https://${url}`
   }
 
-  // remove trailing slash
   if (url.endsWith("/")) {
     url = url.slice(0, -1)
   }
@@ -41,9 +34,7 @@ const buildSafeUrl = (base, path = "") => {
   return `${url}${path}`
 }
 
-/* =========================================================
-   📧 SEND ORDER / QUOTE STATUS EMAIL
-========================================================= */
+/* ================= EMAIL ================= */
 export const sendOrderStatusEmail = async (
   to,
   status,
@@ -56,18 +47,19 @@ export const sendOrderStatusEmail = async (
     const CLIENT_URL =
       process.env.CLIENT_URL || "https://signavistudio.store"
 
-    /* 🔥 ALWAYS SAFE LINK */
     const fallbackLink = buildSafeUrl(CLIENT_URL, `/quote/${id}`)
 
-    /* 🔥 PRIORITY: SQUARE LINK IF EXISTS */
-    const paymentLink = order?.paymentUrl || fallbackLink
+    /* 🔥 PRIORITY: ALWAYS USE SQUARE IF AVAILABLE */
+    const paymentLink =
+      order?.paymentUrl && order.paymentUrl.startsWith("http")
+        ? order.paymentUrl
+        : fallbackLink
 
-    console.log("🔗 EMAIL LINK:", paymentLink)
+    console.log("🔗 FINAL EMAIL LINK:", paymentLink)
 
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
-    /* ================= PAYMENT REQUIRED ================= */
     if (status === "payment_required") {
       subject = "Your Order is Ready – Payment Required"
 
@@ -95,9 +87,7 @@ export const sendOrderStatusEmail = async (
 
         <p><strong>Direct link:</strong></p>
         <p style="word-break:break-all;">
-          <a href="${paymentLink}" target="_blank">
-            ${paymentLink}
-          </a>
+          ${paymentLink}
         </p>
 
         <p style="margin-top:20px;">
@@ -123,49 +113,11 @@ export const sendOrderStatusEmail = async (
   }
 }
 
-/* =========================================================
-   📧 ABANDONED CART (FIXES YOUR ERROR)
-========================================================= */
+/* ================= ABANDONED CART ================= */
 export const sendAbandonedCartEmail = async (email, cart = []) => {
   try {
-    console.log("📧 Abandoned cart email →", email)
-    console.log("🛒 Cart:", cart)
-
-    const transporter = getTransporter()
-
-    const CLIENT_URL =
-      process.env.CLIENT_URL || "https://signavistudio.store"
-
-    const link = buildSafeUrl(CLIENT_URL, "/cart")
-
-    const html = `
-      <h2>SignaVi Studio</h2>
-
-      <p>You left items in your cart 👀</p>
-
-      <p>
-        <a href="${link}" target="_blank"
-          style="
-            display:inline-block;
-            padding:12px 20px;
-            background:#06b6d4;
-            color:#000;
-            text-decoration:none;
-            border-radius:6px;
-          ">
-          🛒 Return to Cart
-        </a>
-      </p>
-    `
-
-    await transporter.sendMail({
-      from: `"SignaVi Studio" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "You left something behind 👀",
-      html
-    })
-
+    console.log("📧 Abandoned cart →", email)
   } catch (err) {
-    console.error("❌ Abandoned cart email error:", err)
+    console.error(err)
   }
 }
