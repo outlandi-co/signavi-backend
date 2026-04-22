@@ -50,10 +50,16 @@ export const sendOrderStatusEmail = async (
     const fallbackLink = buildSafeUrl(CLIENT_URL, `/quote/${id}`)
 
     /* 🔥 PRIORITY: ALWAYS USE SQUARE IF AVAILABLE */
-    const paymentLink =
-      order?.paymentUrl && order.paymentUrl.startsWith("http")
-        ? order.paymentUrl
-        : fallbackLink
+    let paymentLink = order?.paymentUrl || fallbackLink
+
+// 🔥 FORCE FIX BROKEN LINKS
+if (paymentLink.startsWith("ttps://")) {
+  paymentLink = "h" + paymentLink
+}
+
+if (!paymentLink.startsWith("http")) {
+  paymentLink = buildSafeUrl(paymentLink)
+}
 
     console.log("🔗 FINAL EMAIL LINK:", paymentLink)
 
