@@ -8,12 +8,12 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (FINAL FIX)")
+console.log("💳 SQUARE ROUTE LOADED (FINAL FIX — CORRECT SDK)")
 
 /* ================= CLIENT ================= */
 const client = new Client({
   accessToken: process.env.SQUARE_ACCESS_TOKEN,
-  environment: "production" // change to "sandbox" if testing
+  environment: "production" // use "sandbox" if testing
 })
 
 /* =========================================================
@@ -38,6 +38,8 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("Record not found")
     }
 
+    console.log("📦 TYPE:", type)
+
     /* ================= PRICE ================= */
     const subtotal = Number(record.subtotal || record.price || 0)
 
@@ -50,8 +52,8 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("💰 SUBTOTAL:", subtotal)
     console.log("💰 TAX:", tax)
 
-    /* ================= CREATE LINK ================= */
-    const response = await client.checkoutApi.createPaymentLink({
+    /* ================= CREATE LINK (CORRECT METHOD) ================= */
+    const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
 
       order: {
@@ -89,12 +91,12 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧪 FULL RESPONSE:", JSON.stringify(response, null, 2))
+    console.log("🧪 RESPONSE:", response)
 
-    const url = response?.result?.paymentLink?.url
+    const url = response?.paymentLink?.url
 
     if (!url) {
-      throw new Error("No payment URL returned from Square")
+      throw new Error("No payment URL returned")
     }
 
     /* 🔥 SAFETY FIX */
@@ -120,7 +122,7 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR FULL:", err)
+    console.error("❌ SQUARE ERROR:", err)
 
     return res.status(500).json({
       message: err.message
