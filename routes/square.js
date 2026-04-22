@@ -5,7 +5,7 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (BIGINT FIX)")
+console.log("💳 SQUARE ROUTE LOADED (FINAL HARDENED)")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
@@ -13,13 +13,24 @@ const client = new SquareClient({
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (FIXED BIGINT)
+   💳 CREATE PAYMENT LINK (STABLE + DEBUG)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
     console.log("💳 CREATE PAYMENT:", id)
+
+    /* ================= ENV CHECK ================= */
+    if (!process.env.SQUARE_ACCESS_TOKEN) {
+      throw new Error("Missing SQUARE_ACCESS_TOKEN")
+    }
+
+    if (!process.env.SQUARE_LOCATION_ID) {
+      throw new Error("Missing SQUARE_LOCATION_ID")
+    }
+
+    console.log("🔍 ENV OK")
 
     /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
@@ -31,7 +42,7 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     if (!record) {
-      return res.status(404).json({ message: "Not found" })
+      throw new Error("Record not found")
     }
 
     console.log("📦 TYPE:", type)
@@ -48,9 +59,14 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("💰 SUBTOTAL:", subtotal)
     console.log("💰 TAX:", tax)
 
-    /* 🔥 FIX: MUST USE BIGINT */
+    /* 🔥 FIX: BIGINT REQUIRED */
     const subtotalCents = BigInt(Math.round(subtotal * 100))
     const taxCents = BigInt(Math.round(tax * 100))
+
+    console.log("💰 CENTS:", {
+      subtotalCents: subtotalCents.toString(),
+      taxCents: taxCents.toString()
+    })
 
     /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
@@ -69,7 +85,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: "Subtotal",
             quantity: "1",
             basePriceMoney: {
-              amount: subtotalCents, // ✅ FIXED
+              amount: subtotalCents, // ✅ BIGINT
               currency: "USD"
             }
           },
@@ -77,7 +93,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: "Tax",
             quantity: "1",
             basePriceMoney: {
-              amount: taxCents, // ✅ FIXED
+              amount: taxCents, // ✅ BIGINT
               currency: "USD"
             }
           }
@@ -91,12 +107,12 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧪 RESPONSE:", response)
+    console.log("🧪 SQUARE RESPONSE RECEIVED")
 
     let url = response?.paymentLink?.url
 
     if (!url) {
-      throw new Error("No payment URL returned")
+      throw new Error("No payment URL returned from Square")
     }
 
     /* ================= SANITIZE ================= */
@@ -123,7 +139,8 @@ router.post("/create-payment/:id", async (req, res) => {
     console.error("❌ SQUARE ERROR FULL:", err)
 
     return res.status(500).json({
-      message: err.message
+      message: err.message,
+      details: err?.errors || null
     })
   }
 })
