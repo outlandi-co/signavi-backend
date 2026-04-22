@@ -34,10 +34,10 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       notes
     } = req.body || {}
 
-    customerName = customerName || "New Customer"
+    customerName = customerName || "Customer"
     email = email || ""
     quantity = Number(quantity || 1)
-    printType = printType || "unknown"
+    printType = printType || "custom"
     price = Number(price || 25)
 
     if (typeof items === "string") {
@@ -56,9 +56,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price: Number(item?.price || 0)
     }))
 
-    const artworkPath = req.file
-      ? `/uploads/${req.file.filename}`
-      : ""
+    const artwork = req.file ? `/uploads/${req.file.filename}` : ""
 
     const quote = new Quote({
       customerName,
@@ -67,7 +65,7 @@ router.post("/", upload.single("artwork"), async (req, res) => {
       price,
       items,
       notes,
-      artwork: artworkPath,
+      artwork,
       status: "pending",
       approvalStatus: "pending",
       source: "quote",
@@ -82,49 +80,43 @@ router.post("/", upload.single("artwork"), async (req, res) => {
 
     await quote.save()
 
-    return res.status(201).json({
-      success: true,
-      data: quote
-    })
+    return res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ CREATE ERROR:", err)
-    return res.status(500).json({ message: err.message })
+    res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   📄 GET SINGLE QUOTE
+   📄 GET QUOTE
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    return res.json({ success: true, data: quote })
-
+    res.json({ success: true, data: quote })
   } catch (err) {
-    return res.status(500).json({ message: err.message })
+    res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (SAFE)
+   💳 SAFE PAYMENT LINK (NON-BLOCKING)
 ========================================================= */
 const createPaymentLink = async (quote) => {
   try {
-    const subtotal = Number(quote.price || 0)
+    if (!process.env.SQUARE_ACCESS_TOKEN || !process.env.SQUARE_LOCATION_ID) {
+      console.warn("⚠️ Missing Square env")
+      return null
+    }
 
-    if (!subtotal || isNaN(subtotal)) return null
+    const subtotal = Number(quote.price || 0)
+    if (!subtotal) return null
 
     const tax = subtotal * 0.0825
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${quote._id}-${Date.now()}`,
-
       order: {
         locationId: process.env.SQUARE_LOCATION_ID,
         metadata: {
@@ -150,39 +142,30 @@ const createPaymentLink = async (quote) => {
           }
         ]
       },
-
       checkoutOptions: {
-        redirectUrl: `${
-          process.env.CLIENT_URL || "https://signavistudio.store"
-        }/success/${quote._id}`
+        redirectUrl: `${process.env.CLIENT_URL}/success/${quote._id}`
       }
     })
 
     let url = response?.paymentLink?.url
-
     if (!url) return null
 
     if (url.startsWith("ttps://")) url = "h" + url
-    if (!url.startsWith("http")) url = `https://${url}`
 
     return url
 
   } catch (err) {
-    console.warn("⚠️ Square failed (non-blocking):", err.message)
+    console.warn("⚠️ Square failed:", err.message)
     return null
   }
 }
 
 /* =========================================================
-   ✅ APPROVE (FIXED — NEVER CRASHES)
+   ✅ APPROVE (NEVER CRASHES)
 ========================================================= */
-async function approveHandler(req, res) {
+router.patch("/:id/approve", async (req, res) => {
   try {
-    const { id } = req.params
-
-    console.log("🔥 APPROVE ROUTE HIT:", id)
-
-    const quote = await Quote.findById(id)
+    const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
       return res.status(404).json({ message: "Quote not found" })
@@ -192,24 +175,18 @@ async function approveHandler(req, res) {
 
     let paymentUrl = await createPaymentLink(quote)
 
-    /* ================= ALWAYS APPROVE ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
 
     if (paymentUrl) {
       quote.paymentUrl = paymentUrl
-      console.log("💳 PAYMENT LINK:", paymentUrl)
-    } else {
-      console.warn("⚠️ No payment link generated")
     }
 
     quote.timeline.push({
       status: "payment_required",
       date: new Date(),
-      note: paymentUrl
-        ? "Approved – awaiting payment"
-        : "Approved – payment link pending"
+      note: "Approved"
     })
 
     await quote.save()
@@ -223,22 +200,20 @@ async function approveHandler(req, res) {
       )
     }
 
-    return res.json({ success: true, data: quote })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
-    return res.status(500).json({ message: err.message })
+    res.status(500).json({ message: err.message })
   }
-}
+})
 
 /* =========================================================
    ❌ DENY
 ========================================================= */
-async function denyHandler(req, res) {
+router.patch("/:id/deny", async (req, res) => {
   try {
-    const { id } = req.params
-
-    const quote = await Quote.findById(id)
+    const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
       return res.status(404).json({ message: "Quote not found" })
@@ -251,25 +226,17 @@ async function denyHandler(req, res) {
 
     quote.timeline.push({
       status: "denied",
-      date: new Date(),
-      note: "Quote denied"
+      date: new Date()
     })
 
     await quote.save()
 
-    return res.json({ success: true, data: quote })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ DENY ERROR:", err)
-    return res.status(500).json({ message: err.message })
+    res.status(500).json({ message: err.message })
   }
-}
-
-/* ================= ROUTES ================= */
-router.patch("/:id/approve", approveHandler)
-router.post("/:id/approve", approveHandler)
-
-router.patch("/:id/deny", denyHandler)
-router.post("/:id/deny", denyHandler)
+})
 
 export default router

@@ -1,12 +1,11 @@
 import express from "express"
 import { SquareClient } from "square"
-
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (FINAL STABLE VERSION)")
+console.log("💳 SQUARE ROUTE LOADED (BIGINT FIX)")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
@@ -14,22 +13,13 @@ const client = new SquareClient({
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK
+   💳 CREATE PAYMENT LINK (FIXED BIGINT)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
     console.log("💳 CREATE PAYMENT:", id)
-
-    /* ================= ENV CHECK ================= */
-    if (!process.env.SQUARE_ACCESS_TOKEN) {
-      throw new Error("Missing SQUARE_ACCESS_TOKEN")
-    }
-
-    if (!process.env.SQUARE_LOCATION_ID) {
-      throw new Error("Missing SQUARE_LOCATION_ID")
-    }
 
     /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
@@ -41,27 +31,28 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     if (!record) {
-      throw new Error("Record not found")
+      return res.status(404).json({ message: "Not found" })
     }
 
     console.log("📦 TYPE:", type)
 
     /* ================= PRICE ================= */
-    const subtotal = Number(record.subtotal || record.price || 0)
+    const subtotal = Number(record.price || 0)
 
     if (!subtotal || isNaN(subtotal)) {
       throw new Error("Invalid subtotal")
     }
 
-    const taxRate = 0.0825
-    const tax = subtotal * taxRate
+    const tax = subtotal * 0.0825
 
     console.log("💰 SUBTOTAL:", subtotal)
     console.log("💰 TAX:", tax)
 
-    /* =========================================================
-       🔥 CORRECT SDK CALL (THIS IS THE FIX)
-    ========================================================= */
+    /* 🔥 FIX: MUST USE BIGINT */
+    const subtotalCents = BigInt(Math.round(subtotal * 100))
+    const taxCents = BigInt(Math.round(tax * 100))
+
+    /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
 
@@ -78,7 +69,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: "Subtotal",
             quantity: "1",
             basePriceMoney: {
-              amount: Math.round(subtotal * 100),
+              amount: subtotalCents, // ✅ FIXED
               currency: "USD"
             }
           },
@@ -86,7 +77,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: "Tax",
             quantity: "1",
             basePriceMoney: {
-              amount: Math.round(tax * 100),
+              amount: taxCents, // ✅ FIXED
               currency: "USD"
             }
           }
@@ -100,13 +91,12 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧪 FULL RESPONSE:", JSON.stringify(response, null, 2))
+    console.log("🧪 RESPONSE:", response)
 
-    /* ================= GET URL ================= */
     let url = response?.paymentLink?.url
 
     if (!url) {
-      throw new Error("No payment URL returned from Square")
+      throw new Error("No payment URL returned")
     }
 
     /* ================= SANITIZE ================= */
