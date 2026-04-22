@@ -2,6 +2,7 @@ import express from "express"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import User from "../models/User.js"
+import { requireAuth } from "../middleware/requireAuth.js"
 
 const router = express.Router()
 
@@ -98,19 +99,10 @@ router.post("/login", async (req, res) => {
   }
 })
 
-/* ================= PROFILE (PROTECTED) ================= */
-router.get("/profile", async (req, res) => {
+/* ================= PROFILE ================= */
+router.get("/profile", requireAuth, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization
-
-    if (!authHeader) {
-      return res.status(401).json({ error: "No token provided" })
-    }
-
-    const token = authHeader.split(" ")[1]
-    const decoded = jwt.verify(token, process.env.JWT_SECRET)
-
-    const user = await User.findById(decoded.id).select("-password")
+    const user = await User.findById(req.user.id).select("-password")
 
     if (!user) {
       return res.status(404).json({ error: "User not found" })
@@ -120,7 +112,45 @@ router.get("/profile", async (req, res) => {
 
   } catch (error) {
     console.error("❌ PROFILE ERROR:", error)
-    res.status(401).json({ error: "Invalid token" })
+    res.status(500).json({ error: "Failed to load profile" })
+  }
+})
+
+/* ================= CHANGE PASSWORD ================= */
+router.post("/change-password", requireAuth, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        error: "Current and new password required"
+      })
+    }
+
+    const user = await User.findById(req.user.id)
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" })
+    }
+
+    const valid = await bcrypt.compare(currentPassword, user.password)
+
+    if (!valid) {
+      return res.status(400).json({
+        error: "Incorrect current password"
+      })
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10)
+    await user.save()
+
+    console.log("🔐 PASSWORD UPDATED:", user.email)
+
+    res.json({ success: true })
+
+  } catch (err) {
+    console.error("❌ CHANGE PASSWORD ERROR:", err)
+    res.status(500).json({ error: "Password update failed" })
   }
 })
 
