@@ -14,7 +14,7 @@ import { fileURLToPath } from "url"
 /* ================= ROUTES ================= */
 import productRoutes from "./routes/products.js"
 import orderRoutes from "./routes/orders.js"
-import authRoutes from "./routes/authRoutes.js"
+import authRoutes from "./routes/authRoutes.js" // ✅ FIXED HERE
 import logoutRoutes from "./routes/logout.js"
 import cartRoutes from "./routes/cart.js"
 import productionRoutes from "./routes/production.js"
@@ -73,7 +73,7 @@ app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true }))
 app.use(cookieParser())
 
-/* ================= STATIC (UPLOADS) ================= */
+/* ================= STATIC ================= */
 const uploadsPath = path.join(__dirname, "uploads")
 
 if (!fs.existsSync(uploadsPath)) {
@@ -95,7 +95,7 @@ app.get("/api/health", (req, res) => {
 })
 
 /* =========================================================
-   🔥 APPROVE SAFETY (NEVER CRASH ON BAD BODY)
+   🔥 APPROVE SAFETY
 ========================================================= */
 app.use("/api/quotes/:id/approve", (req, res, next) => {
   try {
@@ -122,7 +122,7 @@ console.log("📦 Mounting routes...")
 
 app.use("/api/products", productRoutes)
 app.use("/api/orders", orderRoutes)
-app.use("/api/auth", authRoutes)
+app.use("/api/auth", authRoutes) // ✅ THIS IS THE FIX
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
@@ -134,7 +134,7 @@ app.use("/api/square", squareRoutes)
 
 console.log("✅ All routes mounted")
 
-/* ================= 404 HANDLER ================= */
+/* ================= 404 ================= */
 app.use((req, res) => {
   console.warn("❌ 404 HIT:", req.originalUrl)
   res.status(404).json({
@@ -142,7 +142,7 @@ app.use((req, res) => {
   })
 })
 
-/* ================= GLOBAL ERROR HANDLER ================= */
+/* ================= ERROR ================= */
 app.use((err, req, res, next) => {
   console.error("💥 GLOBAL ERROR:", err)
 
@@ -154,9 +154,7 @@ app.use((err, req, res, next) => {
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
-  cors: {
-    origin: "*"
-  }
+  cors: { origin: "*" }
 })
 
 app.set("io", io)
@@ -165,7 +163,7 @@ io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
 })
 
-/* ================= START SERVER ================= */
+/* ================= START ================= */
 async function startServer() {
   try {
     if (!process.env.MONGO_URI) {
