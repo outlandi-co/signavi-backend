@@ -6,7 +6,7 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (FINAL FIXED)")
+console.log("💳 SQUARE ROUTE LOADED (FINAL STABLE VERSION)")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
@@ -21,6 +21,15 @@ router.post("/create-payment/:id", async (req, res) => {
     const { id } = req.params
 
     console.log("💳 CREATE PAYMENT:", id)
+
+    /* ================= ENV CHECK ================= */
+    if (!process.env.SQUARE_ACCESS_TOKEN) {
+      throw new Error("Missing SQUARE_ACCESS_TOKEN")
+    }
+
+    if (!process.env.SQUARE_LOCATION_ID) {
+      throw new Error("Missing SQUARE_LOCATION_ID")
+    }
 
     /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
@@ -44,12 +53,15 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("Invalid subtotal")
     }
 
-    const tax = subtotal * 0.0825
+    const taxRate = 0.0825
+    const tax = subtotal * taxRate
 
     console.log("💰 SUBTOTAL:", subtotal)
     console.log("💰 TAX:", tax)
 
-    /* ================= FIXED METHOD ================= */
+    /* =========================================================
+       🔥 CORRECT SDK CALL (THIS IS THE FIX)
+    ========================================================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
 
@@ -88,34 +100,33 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧪 RESPONSE:", response)
+    console.log("🧪 FULL RESPONSE:", JSON.stringify(response, null, 2))
 
-    const url = response?.paymentLink?.url
+    /* ================= GET URL ================= */
+    let url = response?.paymentLink?.url
 
     if (!url) {
-      throw new Error("No payment URL returned")
+      throw new Error("No payment URL returned from Square")
     }
 
-    /* 🔥 SANITIZE */
-    let safeUrl = url
-
-    if (safeUrl.startsWith("ttps://")) {
-      safeUrl = "h" + safeUrl
+    /* ================= SANITIZE ================= */
+    if (url.startsWith("ttps://")) {
+      url = "h" + url
     }
 
-    if (!safeUrl.startsWith("http")) {
-      safeUrl = `https://${safeUrl}`
+    if (!url.startsWith("http")) {
+      url = `https://${url}`
     }
 
     /* ================= SAVE ================= */
-    record.paymentUrl = safeUrl
+    record.paymentUrl = url
     await record.save()
 
-    console.log("✅ PAYMENT LINK:", safeUrl)
+    console.log("✅ PAYMENT LINK:", url)
 
     return res.json({
       success: true,
-      url: safeUrl
+      url
     })
 
   } catch (err) {

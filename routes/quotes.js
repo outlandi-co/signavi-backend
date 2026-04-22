@@ -8,7 +8,7 @@ const { SquareClient } = square
 
 const router = express.Router()
 
-console.log("🚀 QUOTES ROUTE LOADED (FINAL FIXED)")
+console.log("🚀 QUOTES ROUTE LOADED (APPROVE + DENY FIXED)")
 
 /* ================= MULTER ================= */
 const upload = multer({
@@ -116,7 +116,7 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   💳 CREATE SQUARE PAYMENT LINK (FIXED SDK)
+   💳 CREATE PAYMENT LINK
 ========================================================= */
 const createPaymentLink = async (quote) => {
   try {
@@ -126,23 +126,17 @@ const createPaymentLink = async (quote) => {
       throw new Error("Invalid subtotal")
     }
 
-    const taxRate = 0.0825
-    const tax = subtotal * taxRate
-
-    console.log("💰 SUBTOTAL:", subtotal)
-    console.log("💰 TAX:", tax)
+    const tax = subtotal * 0.0825
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${quote._id}-${Date.now()}`,
 
       order: {
         locationId: process.env.SQUARE_LOCATION_ID,
-
         metadata: {
           recordId: String(quote._id),
           type: "quote"
         },
-
         lineItems: [
           {
             name: "Subtotal",
@@ -170,20 +164,12 @@ const createPaymentLink = async (quote) => {
       }
     })
 
-    console.log("🧪 SQUARE RESPONSE:", response)
-
     let url = response?.paymentLink?.url
 
-    if (!url) throw new Error("No payment URL from Square")
+    if (!url) throw new Error("No payment URL")
 
-    /* 🔥 SAFETY FIX */
-    if (url.startsWith("ttps://")) {
-      url = "h" + url
-    }
-
-    if (!url.startsWith("http")) {
-      url = `https://${url}`
-    }
+    if (url.startsWith("ttps://")) url = "h" + url
+    if (!url.startsWith("http")) url = `https://${url}`
 
     return url
 
@@ -194,7 +180,7 @@ const createPaymentLink = async (quote) => {
 }
 
 /* =========================================================
-   ✅ APPROVE HANDLER (CORRECT FLOW)
+   ✅ APPROVE
 ========================================================= */
 async function approveHandler(req, res) {
   try {
@@ -208,7 +194,8 @@ async function approveHandler(req, res) {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    /* ================= CREATE PAYMENT FIRST ================= */
+    if (!quote.timeline) quote.timeline = []
+
     const paymentUrl = await createPaymentLink(quote)
 
     if (!paymentUrl) {
@@ -216,10 +203,6 @@ async function approveHandler(req, res) {
     }
 
     quote.paymentUrl = paymentUrl
-
-    console.log("💳 PAYMENT LINK:", paymentUrl)
-
-    /* ================= UPDATE ================= */
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
     quote.source = "order"
@@ -232,9 +215,6 @@ async function approveHandler(req, res) {
 
     await quote.save()
 
-    console.log("🔥 QUOTE APPROVED:", quote._id)
-
-    /* ================= EMAIL ================= */
     if (quote.email) {
       await sendOrderStatusEmail(
         quote.email,
@@ -244,10 +224,7 @@ async function approveHandler(req, res) {
       )
     }
 
-    return res.json({
-      success: true,
-      data: quote
-    })
+    return res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
@@ -256,9 +233,48 @@ async function approveHandler(req, res) {
 }
 
 /* =========================================================
-   🔥 ROUTES
+   ❌ DENY
+========================================================= */
+async function denyHandler(req, res) {
+  try {
+    const { id } = req.params
+
+    console.log("❌ DENY ROUTE HIT:", id)
+
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    if (!quote.timeline) quote.timeline = []
+
+    quote.status = "denied"
+    quote.approvalStatus = "denied"
+
+    quote.timeline.push({
+      status: "denied",
+      date: new Date(),
+      note: "Quote denied"
+    })
+
+    await quote.save()
+
+    return res.json({ success: true, data: quote })
+
+  } catch (err) {
+    console.error("❌ DENY ERROR:", err)
+    return res.status(500).json({ message: err.message })
+  }
+}
+
+/* =========================================================
+   ROUTES
 ========================================================= */
 router.patch("/:id/approve", approveHandler)
 router.post("/:id/approve", approveHandler)
+
+router.patch("/:id/deny", denyHandler)
+router.post("/:id/deny", denyHandler)
 
 export default router
