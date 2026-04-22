@@ -2,6 +2,11 @@ import mongoose from "mongoose"
 
 const userSchema = new mongoose.Schema({
 
+  name: {
+    type: String,
+    default: ""
+  },
+
   email: {
     type: String,
     required: true,
@@ -15,7 +20,8 @@ const userSchema = new mongoose.Schema({
 
   role: {
     type: String,
-    default: "user"
+    enum: ["admin", "customer"],
+    default: "customer"
   }
 
 }, { timestamps: true })

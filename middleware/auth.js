@@ -4,12 +4,12 @@ export const requireAuth = (req, res, next) => {
   try {
     let token = null
 
-    /* ---------- 1. Check Cookie ---------- */
+    /* ================= 1. CHECK COOKIE ================= */
     if (req.cookies?.token) {
       token = req.cookies.token
     }
 
-    /* ---------- 2. Check Authorization Header ---------- */
+    /* ================= 2. CHECK HEADER ================= */
     if (!token && req.headers.authorization) {
       const authHeader = req.headers.authorization
 
@@ -18,35 +18,41 @@ export const requireAuth = (req, res, next) => {
       }
     }
 
-    /* ---------- 3. No Token ---------- */
+    /* ================= 3. NO TOKEN ================= */
     if (!token) {
       return res.status(401).json({
-        error: "Unauthorized: No token provided"
+        message: "Unauthorized: No token provided"
       })
     }
 
-    /* ---------- 4. Validate Secret ---------- */
+    /* ================= 4. VERIFY SECRET ================= */
     if (!process.env.JWT_SECRET) {
       console.error("❌ JWT_SECRET missing")
       return res.status(500).json({
-        error: "Server configuration error"
+        message: "Server configuration error"
       })
     }
 
-    /* ---------- 5. Verify Token ---------- */
+    /* ================= 5. VERIFY TOKEN ================= */
     const decoded = jwt.verify(token, process.env.JWT_SECRET)
 
-    /* ---------- 6. Attach User ---------- */
-    req.user = decoded
+    /* ================= 6. ATTACH CLEAN USER ================= */
+    req.user = {
+      id: decoded.id,
+      role: decoded.role,
+      email: decoded.email
+    }
+
+    /* ================= DEBUG ================= */
+    console.log("🔐 AUTH USER:", req.user.id)
 
     next()
 
   } catch (err) {
-    /* ---------- 7. Clean Error Handling ---------- */
     console.error("❌ AUTH ERROR:", err.message)
 
     return res.status(401).json({
-      error: "Unauthorized: Invalid or expired token"
+      message: "Unauthorized: Invalid or expired token"
     })
   }
 }

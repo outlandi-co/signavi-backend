@@ -2,6 +2,14 @@ import mongoose from "mongoose"
 
 const orderSchema = new mongoose.Schema({
 
+  /* ================= USER ================= */
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    required: false, // allow guest orders if needed
+    index: true
+  },
+
   /* ================= CUSTOMER ================= */
   customerName: { type: String, default: "Unknown" },
   email: { type: String, default: "" },
@@ -12,9 +20,9 @@ const orderSchema = new mongoose.Schema({
   artwork: { type: String, default: null },
 
   /* ================= PRICING ================= */
-  subtotal: { type: Number, default: 0 }, // ✅ NEW
-  tax: { type: Number, default: 0 },      // ✅ NEW
-  price: { type: Number, default: 0 },    // total
+  subtotal: { type: Number, default: 0 },
+  tax: { type: Number, default: 0 },
+  price: { type: Number, default: 0 }, // total
   finalPrice: { type: Number, default: 0 },
 
   items: [
@@ -71,10 +79,12 @@ const orderSchema = new mongoose.Schema({
     }
   ],
 
-  /* ================= STRIPE ================= */
+  /* ================= PAYMENT ================= */
   stripePaymentIntentId: { type: String, default: "" },
   stripeSessionId: { type: String, default: "" },
   stripeChargeId: { type: String, default: "" },
+
+  paymentUrl: { type: String, default: "" }, // 🔥 important for Square
 
   /* ================= FINANCE ================= */
   currency: { type: String, default: "usd" },
