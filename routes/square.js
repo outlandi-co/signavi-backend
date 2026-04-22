@@ -1,14 +1,18 @@
 import express from "express"
-import { SquareClient } from "square"
+import pkg from "square"
+
+const { Client } = pkg
+
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (FIXED)")
+console.log("💳 SQUARE ROUTE LOADED (FINAL WORKING VERSION)")
 
-const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN
+const client = new Client({
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment: "production" // or "sandbox"
 })
 
 router.post("/create-payment/:id", async (req, res) => {
@@ -17,7 +21,6 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("💳 CREATE PAYMENT:", id)
 
-    /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
     let type = "quote"
 
@@ -27,24 +30,21 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     if (!record) {
-      return res.status(404).json({ message: "Not found" })
+      throw new Error("Record not found")
     }
 
-    console.log("📦 TYPE:", type)
-
-    /* ================= PRICE ================= */
     const subtotal = Number(record.subtotal || record.price || 0)
-    const tax = Number(record.tax || 0)
 
-    if (!subtotal || subtotal <= 0) {
+    if (!subtotal || isNaN(subtotal)) {
       throw new Error("Invalid subtotal")
     }
+
+    const tax = subtotal * 0.0825
 
     console.log("💰 SUBTOTAL:", subtotal)
     console.log("💰 TAX:", tax)
 
-    /* ================= CREATE PAYMENT ================= */
-    const response = await client.checkout.paymentLinksApi.createPaymentLink({
+    const response = await client.checkoutApi.createPaymentLink({
       idempotencyKey: `${id}-${Date.now()}`,
 
       order: {
@@ -75,7 +75,6 @@ router.post("/create-payment/:id", async (req, res) => {
         ]
       },
 
-      /* 🔥 REQUIRED — THIS FIXES 500 + REDIRECT */
       checkoutOptions: {
         redirectUrl: `${
           process.env.CLIENT_URL || "https://signavistudio.store"
@@ -83,17 +82,19 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧪 SQUARE RESPONSE:", JSON.stringify(response, null, 2))
+    console.log("🧪 FULL RESPONSE:", response)
 
-    const url =
-      response?.result?.paymentLink?.url ||
-      response?.paymentLink?.url
+    let url = response?.result?.paymentLink?.url
 
     if (!url) {
-      throw new Error("Square did not return a payment URL")
+      throw new Error("No payment URL returned")
     }
 
-    /* ================= SAVE ================= */
+    // 🔥 FIX BAD URL IF EVER PRESENT
+    if (url.startsWith("ttps://")) {
+      url = "h" + url
+    }
+
     record.paymentUrl = url
     await record.save()
 
