@@ -2,8 +2,9 @@ import express from "express"
 import multer from "multer"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
-import pkg from "square"
-const { Client, Environment } = pkg
+import square from "square" // ✅ FIX
+
+const { SquareClient } = square // ✅ FIX
 
 const router = express.Router()
 
@@ -121,32 +122,45 @@ const createPaymentLink = async (quote) => {
   try {
     const amount = Math.round(Number(quote.price) * 100)
 
-    const response = await squareClient.checkout.paymentLinks.create({
+    const response = await client.checkout.paymentLinksApi.createPaymentLink({
       idempotencyKey: `${quote._id}-${Date.now()}`,
+
       order: {
-  locationId: process.env.SQUARE_LOCATION_ID,
+        locationId: process.env.SQUARE_LOCATION_ID,
 
-  /* 🔥 TAX ENABLED */
-  taxes: [
-    {
-      uid: "sales-tax",
-      name: "Sales Tax",
-      percentage: "8.25", // 👈 change to your local tax rate
-      scope: "ORDER"
-    }
-  ],
+        /* 🔥 METADATA FOR WEBHOOK */
+        metadata: {
+          recordId: String(quote._id),
+          type: "quote"
+        },
 
-  lineItems: [
-    {
-      name: `Order #${quote._id}`,
-      quantity: "1",
-      basePriceMoney: {
-        amount,
-        currency: "USD"
+        /* 🔥 TAX + ITEM */
+        lineItems: [
+          {
+            name: `Order #${quote._id}`,
+            quantity: "1",
+            basePriceMoney: {
+              amount,
+              currency: "USD"
+            }
+          }
+        ],
+
+        taxes: [
+          {
+            uid: "sales-tax",
+            name: "Sales Tax",
+            percentage: "8.25",
+            scope: "ORDER"
+          }
+        ]
+      },
+
+      checkoutOptions: {
+        redirectUrl: `${
+          process.env.CLIENT_URL || "https://signavistudio.store"
+        }/success/${quote._id}`
       }
-    }
-  ]
-}
     })
 
     const url = response?.result?.paymentLink?.url
@@ -162,7 +176,7 @@ const createPaymentLink = async (quote) => {
 }
 
 /* =========================================================
-   ✅ APPROVE HANDLER (SQUARE + EMAIL)
+   ✅ APPROVE HANDLER
 ========================================================= */
 async function approveHandler(req, res) {
   try {
@@ -176,8 +190,8 @@ async function approveHandler(req, res) {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    /* ================= CREATE PAYMENT LINK ================= */
-    let paymentUrl = await createPaymentLink(quote)
+    /* ================= CREATE PAYMENT ================= */
+    const paymentUrl = await createPaymentLink(quote)
 
     if (paymentUrl) {
       quote.paymentUrl = paymentUrl
@@ -199,7 +213,7 @@ async function approveHandler(req, res) {
 
     console.log("🔥 QUOTE APPROVED:", quote._id)
 
-    /* ================= SEND EMAIL ================= */
+    /* ================= EMAIL ================= */
     if (quote.email) {
       await sendOrderStatusEmail(
         quote.email,
