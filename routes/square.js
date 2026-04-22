@@ -5,7 +5,7 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (FINAL HARDENED)")
+console.log("💳 SQUARE ROUTE LOADED (TAX FIXED VERSION)")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
@@ -13,7 +13,7 @@ const client = new SquareClient({
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (STABLE + DEBUG)
+   💳 CREATE PAYMENT LINK (WITH REAL TAX)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -54,18 +54,13 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("Invalid subtotal")
     }
 
-    const tax = subtotal * 0.0825
-
     console.log("💰 SUBTOTAL:", subtotal)
-    console.log("💰 TAX:", tax)
 
-    /* 🔥 FIX: BIGINT REQUIRED */
+    /* 🔥 BIGINT REQUIRED */
     const subtotalCents = BigInt(Math.round(subtotal * 100))
-    const taxCents = BigInt(Math.round(tax * 100))
 
     console.log("💰 CENTS:", {
-      subtotalCents: subtotalCents.toString(),
-      taxCents: taxCents.toString()
+      subtotalCents: subtotalCents.toString()
     })
 
     /* ================= CREATE PAYMENT ================= */
@@ -80,22 +75,24 @@ router.post("/create-payment/:id", async (req, res) => {
           type
         },
 
+        /* ✅ ONLY SUBTOTAL AS ITEM */
         lineItems: [
           {
-            name: "Subtotal",
+            name: `${type.toUpperCase()} Order`,
             quantity: "1",
             basePriceMoney: {
-              amount: subtotalCents, // ✅ BIGINT
+              amount: subtotalCents,
               currency: "USD"
             }
-          },
+          }
+        ],
+
+        /* 🔥 REAL TAX SYSTEM */
+        taxes: [
           {
-            name: "Tax",
-            quantity: "1",
-            basePriceMoney: {
-              amount: taxCents, // ✅ BIGINT
-              currency: "USD"
-            }
+            name: "Sales Tax",
+            percentage: "8.25", // 🔥 STRING REQUIRED
+            scope: "ORDER"
           }
         ]
       },
