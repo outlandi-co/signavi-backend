@@ -1,19 +1,16 @@
 import express from "express"
-import pkg from "square"
-
-const { Client } = pkg
+import { SquareClient } from "square"
 
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (FINAL FIX — CORRECT SDK)")
+console.log("💳 SQUARE ROUTE LOADED (CORRECT FINAL VERSION)")
 
 /* ================= CLIENT ================= */
-const client = new Client({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
-  environment: "production" // use "sandbox" if testing
+const client = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN
 })
 
 /* =========================================================
@@ -52,7 +49,7 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("💰 SUBTOTAL:", subtotal)
     console.log("💰 TAX:", tax)
 
-    /* ================= CREATE LINK (CORRECT METHOD) ================= */
+    /* ================= CREATE LINK ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
 
@@ -99,7 +96,7 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("No payment URL returned")
     }
 
-    /* 🔥 SAFETY FIX */
+    /* 🔥 FIX BAD URL */
     let safeUrl = url
 
     if (safeUrl.startsWith("ttps://")) {
