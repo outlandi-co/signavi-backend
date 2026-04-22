@@ -2,13 +2,13 @@ import express from "express"
 import multer from "multer"
 import Quote from "../models/Quote.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
-import square from "square" // ✅ FIX
+import square from "square"
 
-const { SquareClient } = square // ✅ FIX
+const { SquareClient } = square
 
 const router = express.Router()
 
-console.log("🚀 QUOTES ROUTE LOADED (SQUARE + EMAIL ENABLED)")
+console.log("🚀 QUOTES ROUTE LOADED (FINAL FIXED)")
 
 /* ================= MULTER ================= */
 const upload = multer({
@@ -116,42 +116,49 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   💳 CREATE SQUARE PAYMENT LINK
+   💳 CREATE SQUARE PAYMENT LINK (FIXED SDK)
 ========================================================= */
 const createPaymentLink = async (quote) => {
   try {
-    const amount = Math.round(Number(quote.price) * 100)
+    const subtotal = Number(quote.price || 0)
 
-    const response = await client.checkout.paymentLinksApi.createPaymentLink({
+    if (!subtotal || isNaN(subtotal)) {
+      throw new Error("Invalid subtotal")
+    }
+
+    const taxRate = 0.0825
+    const tax = subtotal * taxRate
+
+    console.log("💰 SUBTOTAL:", subtotal)
+    console.log("💰 TAX:", tax)
+
+    const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${quote._id}-${Date.now()}`,
 
       order: {
         locationId: process.env.SQUARE_LOCATION_ID,
 
-        /* 🔥 METADATA FOR WEBHOOK */
         metadata: {
           recordId: String(quote._id),
           type: "quote"
         },
 
-        /* 🔥 TAX + ITEM */
         lineItems: [
           {
-            name: `Order #${quote._id}`,
+            name: "Subtotal",
             quantity: "1",
             basePriceMoney: {
-              amount,
+              amount: Math.round(subtotal * 100),
               currency: "USD"
             }
-          }
-        ],
-
-        taxes: [
+          },
           {
-            uid: "sales-tax",
-            name: "Sales Tax",
-            percentage: "8.25",
-            scope: "ORDER"
+            name: "Tax",
+            quantity: "1",
+            basePriceMoney: {
+              amount: Math.round(tax * 100),
+              currency: "USD"
+            }
           }
         ]
       },
@@ -163,9 +170,20 @@ const createPaymentLink = async (quote) => {
       }
     })
 
-    const url = response?.result?.paymentLink?.url
+    console.log("🧪 SQUARE RESPONSE:", response)
 
-    if (!url) throw new Error("No payment link from Square")
+    let url = response?.paymentLink?.url
+
+    if (!url) throw new Error("No payment URL from Square")
+
+    /* 🔥 SAFETY FIX */
+    if (url.startsWith("ttps://")) {
+      url = "h" + url
+    }
+
+    if (!url.startsWith("http")) {
+      url = `https://${url}`
+    }
 
     return url
 
@@ -176,7 +194,7 @@ const createPaymentLink = async (quote) => {
 }
 
 /* =========================================================
-   ✅ APPROVE HANDLER
+   ✅ APPROVE HANDLER (CORRECT FLOW)
 ========================================================= */
 async function approveHandler(req, res) {
   try {
@@ -190,13 +208,16 @@ async function approveHandler(req, res) {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    /* ================= CREATE PAYMENT ================= */
+    /* ================= CREATE PAYMENT FIRST ================= */
     const paymentUrl = await createPaymentLink(quote)
 
-    if (paymentUrl) {
-      quote.paymentUrl = paymentUrl
-      console.log("💳 PAYMENT LINK:", paymentUrl)
+    if (!paymentUrl) {
+      throw new Error("Payment link creation failed")
     }
+
+    quote.paymentUrl = paymentUrl
+
+    console.log("💳 PAYMENT LINK:", paymentUrl)
 
     /* ================= UPDATE ================= */
     quote.approvalStatus = "approved"
