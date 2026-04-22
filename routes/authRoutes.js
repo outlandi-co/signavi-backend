@@ -5,6 +5,8 @@ import User from "../models/User.js"
 
 const router = express.Router()
 
+console.log("🔐 AUTH ROUTES LOADED")
+
 /* ================= REGISTER ================= */
 router.post("/register", async (req, res) => {
   try {
@@ -48,7 +50,7 @@ router.post("/register", async (req, res) => {
     })
 
   } catch (error) {
-    console.error("REGISTER ERROR:", error)
+    console.error("❌ REGISTER ERROR:", error)
     res.status(500).json({ error: "Registration failed" })
   }
 })
@@ -91,12 +93,12 @@ router.post("/login", async (req, res) => {
     })
 
   } catch (error) {
-    console.error("LOGIN ERROR:", error)
+    console.error("❌ LOGIN ERROR:", error)
     res.status(500).json({ error: "Login failed" })
   }
 })
 
-/* ================= PROFILE ================= */
+/* ================= PROFILE (PROTECTED) ================= */
 router.get("/profile", async (req, res) => {
   try {
     const authHeader = req.headers.authorization
@@ -117,15 +119,14 @@ router.get("/profile", async (req, res) => {
     res.json({ user })
 
   } catch (error) {
-    console.error("PROFILE ERROR:", error)
+    console.error("❌ PROFILE ERROR:", error)
     res.status(401).json({ error: "Invalid token" })
   }
 })
 
-/* ================= CREATE ADMIN (DEV ONLY) ================= */
+/* ================= CREATE ADMIN ================= */
 router.post("/create-admin", async (req, res) => {
   try {
-
     const existing = await User.findOne({ email: "admin@signavi.com" })
 
     if (existing) {
@@ -149,7 +150,7 @@ router.post("/create-admin", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("CREATE ADMIN ERROR:", err)
+    console.error("❌ CREATE ADMIN ERROR:", err)
     res.status(500).json({ error: err.message })
   }
 })
