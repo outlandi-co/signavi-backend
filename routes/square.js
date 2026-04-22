@@ -6,7 +6,7 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (FINAL STABLE VERSION)")
+console.log("💳 SQUARE ROUTE LOADED (FINAL FIXED)")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
@@ -14,7 +14,7 @@ const client = new SquareClient({
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (CORRECT METHOD)
+   💳 CREATE PAYMENT LINK
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -49,10 +49,8 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("💰 SUBTOTAL:", subtotal)
     console.log("💰 TAX:", tax)
 
-    /* =========================================================
-       🔥 THIS IS THE CORRECT CALL FOR YOUR VERSION
-    ========================================================= */
-    const response = await client.checkout.paymentLinksApi.createPaymentLink({
+    /* ================= FIXED METHOD ================= */
+    const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
 
       order: {
@@ -90,11 +88,9 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧪 FULL RESPONSE:", JSON.stringify(response, null, 2))
+    console.log("🧪 RESPONSE:", response)
 
-    const url =
-      response?.result?.paymentLink?.url ||
-      response?.paymentLink?.url
+    const url = response?.paymentLink?.url
 
     if (!url) {
       throw new Error("No payment URL returned")
@@ -123,7 +119,7 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR:", err)
+    console.error("❌ SQUARE ERROR FULL:", err)
 
     return res.status(500).json({
       message: err.message
