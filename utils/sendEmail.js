@@ -2,7 +2,9 @@ import nodemailer from "nodemailer"
 
 let transporter
 
-/* ================= TRANSPORT ================= */
+/* =========================================================
+   📦 CREATE TRANSPORTER
+========================================================= */
 const getTransporter = () => {
   if (transporter) return transporter
 
@@ -17,16 +19,22 @@ const getTransporter = () => {
   return transporter
 }
 
-/* ================= SAFE URL ================= */
+/* =========================================================
+   🔗 BULLETPROOF URL BUILDER
+========================================================= */
 const buildSafeUrl = (base, path = "") => {
-  let url = base || "https://signavistudio.store"
+  let url = base || "signavistudio.store"
 
   url = url.trim()
 
-  if (!url.startsWith("http")) {
-    url = `https://${url}`
-  }
+  // 🔥 REMOVE ANY BROKEN PROTOCOLS
+  url = url.replace(/^(https?:)?\/?\//i, "")
+  url = url.replace(/^ttps?:?\/?\/?/i, "")
 
+  // 🔥 FORCE CLEAN HTTPS
+  url = `https://${url}`
+
+  // remove trailing slash
   if (url.endsWith("/")) {
     url = url.slice(0, -1)
   }
@@ -34,7 +42,37 @@ const buildSafeUrl = (base, path = "") => {
   return `${url}${path}`
 }
 
-/* ================= EMAIL ================= */
+/* =========================================================
+   🔧 FINAL LINK SANITIZER (LAST LINE OF DEFENSE)
+========================================================= */
+const sanitizeLink = (link, fallback) => {
+  let finalLink = link || fallback
+
+  if (!finalLink) return fallback
+
+  finalLink = finalLink.trim()
+
+  // 🔥 FIX: "ttps://"
+  if (finalLink.startsWith("ttps://")) {
+    finalLink = "h" + finalLink
+  }
+
+  // 🔥 FIX: "https//"
+  if (finalLink.startsWith("https//")) {
+    finalLink = finalLink.replace("https//", "https://")
+  }
+
+  // 🔥 STILL BAD? rebuild it
+  if (!finalLink.startsWith("http")) {
+    finalLink = buildSafeUrl(finalLink)
+  }
+
+  return finalLink
+}
+
+/* =========================================================
+   📧 SEND ORDER / QUOTE STATUS EMAIL
+========================================================= */
 export const sendOrderStatusEmail = async (
   to,
   status,
@@ -49,17 +87,8 @@ export const sendOrderStatusEmail = async (
 
     const fallbackLink = buildSafeUrl(CLIENT_URL, `/quote/${id}`)
 
-    /* 🔥 PRIORITY: ALWAYS USE SQUARE IF AVAILABLE */
-    let paymentLink = order?.paymentUrl || fallbackLink
-
-// 🔥 FORCE FIX BROKEN LINKS
-if (paymentLink.startsWith("ttps://")) {
-  paymentLink = "h" + paymentLink
-}
-
-if (!paymentLink.startsWith("http")) {
-  paymentLink = buildSafeUrl(paymentLink)
-}
+    /* 🔥 PRIORITY: ALWAYS USE VALID LINK */
+    const paymentLink = sanitizeLink(order?.paymentUrl, fallbackLink)
 
     console.log("🔗 FINAL EMAIL LINK:", paymentLink)
 
@@ -92,6 +121,7 @@ if (!paymentLink.startsWith("http")) {
         </p>
 
         <p><strong>Direct link:</strong></p>
+
         <p style="word-break:break-all;">
           ${paymentLink}
         </p>
@@ -119,10 +149,13 @@ if (!paymentLink.startsWith("http")) {
   }
 }
 
-/* ================= ABANDONED CART ================= */
+/* =========================================================
+   📧 ABANDONED CART
+========================================================= */
 export const sendAbandonedCartEmail = async (email, cart = []) => {
   try {
     console.log("📧 Abandoned cart →", email)
+    console.log("🛒 Cart:", cart)
   } catch (err) {
     console.error(err)
   }
