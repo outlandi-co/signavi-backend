@@ -55,7 +55,7 @@ router.post("/", requireAuth, async (req, res) => {
 
     /* ================= CREATE ORDER ================= */
     const order = await Order.create({
-      userId: req.user.id, // 🔥 KEY LINE
+      user: req.user.id, // 🔥 FIXED (standardized)
 
       customerName: customerName || "Guest",
       email: email || "",
@@ -103,6 +103,23 @@ router.post("/", requireAuth, async (req, res) => {
 })
 
 /* =========================================================
+   🔐 GET MY ORDERS (CLEAN ROUTE)
+========================================================= */
+router.get("/my-orders", requireAuth, async (req, res) => {
+  try {
+    const orders = await Order.find({
+      user: req.user.id
+    }).sort({ createdAt: -1 })
+
+    res.json({ success: true, data: orders })
+
+  } catch (err) {
+    console.error("❌ MY ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
    🔄 UPDATE STATUS (ADMIN OR OWNER)
 ========================================================= */
 router.patch("/update-status/:id", requireAuth, async (req, res) => {
@@ -121,7 +138,7 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
 
     /* 🔐 SECURITY CHECK */
     if (
-      order.userId?.toString() !== req.user.id &&
+      order.user?.toString() !== req.user.id &&
       req.user.role !== "admin"
     ) {
       return res.status(403).json({ message: "Forbidden" })
@@ -142,7 +159,6 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
 
     await order.save()
 
-    /* ================= EMAIL ================= */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -163,14 +179,14 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
 })
 
 /* =========================================================
-   📄 GET ALL (ONLY USER'S ORDERS)
+   📄 GET ALL (ADMIN OR OWN)
 ========================================================= */
 router.get("/", requireAuth, async (req, res) => {
   try {
     const query =
       req.user.role === "admin"
-        ? {} // admin sees all
-        : { userId: req.user.id } // user sees own
+        ? {}
+        : { user: req.user.id }
 
     const orders = await Order.find(query).sort({ createdAt: -1 })
 
@@ -201,7 +217,7 @@ router.get("/:id", requireAuth, async (req, res) => {
 
     /* 🔐 SECURITY CHECK */
     if (
-      order.userId?.toString() !== req.user.id &&
+      order.user?.toString() !== req.user.id &&
       req.user.role !== "admin"
     ) {
       return res.status(403).json({ message: "Forbidden" })

@@ -3,33 +3,85 @@ import mongoose from "mongoose"
 const orderSchema = new mongoose.Schema({
 
   /* ================= USER ================= */
-  userId: {
+  user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: false, // allow guest orders if needed
+    default: null, // allow guest orders
     index: true
   },
 
   /* ================= CUSTOMER ================= */
-  customerName: { type: String, default: "Unknown" },
-  email: { type: String, default: "" },
+  customerName: {
+    type: String,
+    default: "Unknown",
+    trim: true
+  },
+
+  email: {
+    type: String,
+    default: "",
+    lowercase: true,
+    trim: true
+  },
 
   /* ================= ORDER ================= */
-  quantity: { type: Number, default: 1 },
-  printType: { type: String, default: "screenprint" },
-  artwork: { type: String, default: null },
+  quantity: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+
+  printType: {
+    type: String,
+    default: "screenprint"
+  },
+
+  artwork: {
+    type: String,
+    default: null
+  },
 
   /* ================= PRICING ================= */
-  subtotal: { type: Number, default: 0 },
-  tax: { type: Number, default: 0 },
-  price: { type: Number, default: 0 }, // total
-  finalPrice: { type: Number, default: 0 },
+  subtotal: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  tax: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  price: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  finalPrice: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
 
   items: [
     {
-      name: { type: String, default: "" },
-      quantity: { type: Number, default: 1 },
-      price: { type: Number, default: 0 }
+      name: {
+        type: String,
+        default: ""
+      },
+      quantity: {
+        type: Number,
+        default: 1,
+        min: 1
+      },
+      price: {
+        type: Number,
+        default: 0,
+        min: 0
+      }
     }
   ],
 
@@ -54,7 +106,8 @@ const orderSchema = new mongoose.Schema({
       "archive",
       "denied"
     ],
-    default: "pending"
+    default: "pending",
+    index: true
   },
 
   /* ================= SHIPPING ================= */
@@ -74,7 +127,10 @@ const orderSchema = new mongoose.Schema({
   timeline: [
     {
       status: String,
-      date: { type: Date, default: Date.now },
+      date: {
+        type: Date,
+        default: Date.now
+      },
       note: String
     }
   ],
@@ -84,16 +140,25 @@ const orderSchema = new mongoose.Schema({
   stripeSessionId: { type: String, default: "" },
   stripeChargeId: { type: String, default: "" },
 
-  paymentUrl: { type: String, default: "" }, // 🔥 important for Square
+  paymentUrl: {
+    type: String,
+    default: ""
+  },
 
   /* ================= FINANCE ================= */
-  currency: { type: String, default: "usd" },
+  currency: {
+    type: String,
+    default: "usd"
+  },
+
   amountReceived: { type: Number, default: 0 },
   amountRefunded: { type: Number, default: 0 },
   stripeFee: { type: Number, default: 0 },
   netAmount: { type: Number, default: 0 },
   cogs: { type: Number, default: 0 }
 
-}, { timestamps: true })
+}, {
+  timestamps: true
+})
 
 export default mongoose.model("Order", orderSchema)
