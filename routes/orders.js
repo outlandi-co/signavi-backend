@@ -3,18 +3,34 @@ import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 import { requireAuth } from "../middleware/auth.js"
+import jwt from "jsonwebtoken"
 
 const router = express.Router()
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 /* =========================================================
-   🆕 CREATE ORDER (SECURE + USER LINKED)
+   🆕 CREATE ORDER (GUEST + USER SUPPORT)
 ========================================================= */
-router.post("/", requireAuth, async (req, res) => {
+router.post("/", async (req, res) => {
   try {
     console.log("🛒 CREATE ORDER HIT")
-    console.log("👤 USER:", req.user.id)
+
+    let userId = null
+
+    /* 🔐 OPTIONAL TOKEN */
+    const authHeader = req.headers.authorization
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        const token = authHeader.split(" ")[1]
+        const decoded = jwt.verify(token, process.env.JWT_SECRET)
+        userId = decoded.id
+        console.log("👤 AUTH USER:", userId)
+      } catch (err) {
+        console.log("⚠️ Guest checkout (invalid token)")
+      }
+    }
 
     let {
       customerName,
@@ -27,6 +43,7 @@ router.post("/", requireAuth, async (req, res) => {
       price
     } = req.body || {}
 
+    /* ================= SAFE ITEMS ================= */
     const safeItems = Array.isArray(items)
       ? items.map(item => ({
           name: item?.name || "Item",
@@ -35,6 +52,12 @@ router.post("/", requireAuth, async (req, res) => {
         }))
       : []
 
+    if (!safeItems.length) {
+      console.error("❌ No items in order")
+      return res.status(400).json({ message: "No items provided" })
+    }
+
+    /* ================= PRICING ================= */
     const computedSubtotal = safeItems.reduce(
       (acc, i) => acc + i.price * i.quantity,
       0
@@ -49,8 +72,9 @@ router.post("/", requireAuth, async (req, res) => {
       Number(quantity) ||
       1
 
+    /* ================= CREATE ================= */
     const order = await Order.create({
-      user: req.user.id,
+      user: userId,
       customerName: customerName || "Guest",
       email: email || "",
       items: safeItems,
@@ -71,6 +95,9 @@ router.post("/", requireAuth, async (req, res) => {
       ]
     })
 
+    console.log("✅ ORDER CREATED:", order._id)
+
+    /* ================= EMAIL ================= */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -80,19 +107,23 @@ router.post("/", requireAuth, async (req, res) => {
       )
     }
 
+    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobCreated", order)
 
-    // ✅ RETURN CLEAN OBJECT
-    res.json(order)
+    /* ================= RESPONSE ================= */
+    return res.status(201).json(order) // 🔥 IMPORTANT
 
   } catch (err) {
     console.error("❌ ORDER CREATE ERROR:", err)
-    res.status(500).json({ message: err.message })
+    return res.status(500).json({
+      message: "Order creation failed",
+      error: err.message
+    })
   }
 })
 
 /* =========================================================
-   🔐 GET MY ORDERS (FIXED)
+   🔐 GET MY ORDERS
 ========================================================= */
 router.get("/my-orders", requireAuth, async (req, res) => {
   try {
@@ -100,9 +131,7 @@ router.get("/my-orders", requireAuth, async (req, res) => {
       user: req.user.id
     }).sort({ createdAt: -1 })
 
-    // ✅ RETURN ARRAY ONLY (CRITICAL FIX)
     res.json(orders)
-
   } catch (err) {
     console.error("❌ MY ORDERS ERROR:", err)
     res.status(500).json([])
@@ -159,7 +188,6 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
 
     req.app.get("io")?.emit("jobUpdated", order)
 
-    // ✅ RETURN CLEAN OBJECT
     res.json(order)
 
   } catch (err) {
@@ -169,7 +197,7 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
 })
 
 /* =========================================================
-   📄 GET ALL
+   🔐 GET ALL
 ========================================================= */
 router.get("/", requireAuth, async (req, res) => {
   try {
@@ -180,9 +208,7 @@ router.get("/", requireAuth, async (req, res) => {
 
     const orders = await Order.find(query).sort({ createdAt: -1 })
 
-    // ✅ RETURN ARRAY
     res.json(orders)
-
   } catch (err) {
     console.error("❌ GET ORDERS ERROR:", err)
     res.status(500).json([])
@@ -190,7 +216,7 @@ router.get("/", requireAuth, async (req, res) => {
 })
 
 /* =========================================================
-   📄 GET ONE
+   🔐 GET ONE
 ========================================================= */
 router.get("/:id", requireAuth, async (req, res) => {
   try {
@@ -213,7 +239,6 @@ router.get("/:id", requireAuth, async (req, res) => {
       return res.status(403).json({ message: "Forbidden" })
     }
 
-    // ✅ RETURN OBJECT
     res.json(order)
 
   } catch (err) {
