@@ -1,19 +1,27 @@
 import express from "express"
-import { SquareClient } from "square"
+import { SquareClient, SquareEnvironment } from "square"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (PRO VERSION)")
+/* ================= ENV MODE ================= */
+const isProd = process.env.NODE_ENV === "production"
+
+console.log(
+  `💳 SQUARE ROUTE LOADED → ${isProd ? "PRODUCTION" : "SANDBOX"} MODE`
+)
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: isProd
+    ? SquareEnvironment.Production
+    : SquareEnvironment.Sandbox
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (FINAL VERSION)
+   💳 CREATE PAYMENT LINK (SANDBOX + PROD READY)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -31,7 +39,7 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     const CLIENT_URL =
-      process.env.CLIENT_URL || "https://signavistudio.store"
+      process.env.CLIENT_URL || "http://localhost:5173"
 
     /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
@@ -75,7 +83,7 @@ router.post("/create-payment/:id", async (req, res) => {
           type
         },
 
-        /* 🔥 SINGLE FINAL PRICE ITEM (NO DOUBLE TAX) */
+        /* 🔥 SINGLE FINAL PRICE ITEM */
         lineItems: [
           {
             name: `${type.toUpperCase()} #${record._id}`,
@@ -110,11 +118,16 @@ router.post("/create-payment/:id", async (req, res) => {
       url = `https://${url}`
     }
 
+    console.log(
+      "🌐 PAYMENT URL:",
+      url.includes("sandbox") ? "SANDBOX LINK" : "PRODUCTION LINK"
+    )
+
     /* ================= SAVE ================= */
     record.paymentUrl = url
     await record.save()
 
-    console.log("✅ PAYMENT LINK:", url)
+    console.log("✅ PAYMENT LINK SAVED")
 
     return res.json({
       success: true,
