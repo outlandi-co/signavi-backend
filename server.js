@@ -35,6 +35,7 @@ app.use(cookieParser())
 app.use(cors({
   origin: [
     "http://localhost:5173",
+    "http://192.168.4.57:5173",
     "https://signavistudio.store"
   ],
   credentials: true
