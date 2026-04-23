@@ -28,23 +28,21 @@ const server = http.createServer(app)
 /* ================= LOG ================= */
 console.log("\n🔥 SERVER READY 🚀\n")
 
+/* ================= CORS (FIRST!) ================= */
+app.use(cors({
+  origin: true, // 🔥 allow dynamic origins (BEST FOR DEV)
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+}))
+
 /* ================= MIDDLEWARE ================= */
 app.use(express.json())
 app.use(cookieParser())
 
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://192.168.4.57:5173",
-    "https://signavistudio.store"
-  ],
-  credentials: true
-}))
-
 /* ================= ROUTES ================= */
 app.use("/api/products", productRoutes)
 app.use("/api/orders", orderRoutes)
-app.use("/api/auth", authRoutes) // ✅ THIS ENABLES /auth/change-password
+app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
 app.use("/api/production", productionRoutes)
@@ -55,7 +53,12 @@ app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 
 /* ================= SOCKET ================= */
-const io = new Server(server, { cors: { origin: "*" } })
+const io = new Server(server, {
+  cors: {
+    origin: true
+  }
+})
+
 app.set("io", io)
 
 io.on("connection", (socket) => {
