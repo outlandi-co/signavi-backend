@@ -6,7 +6,7 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
-   🔥 SQUARE WEBHOOK → AUTO PROCESS (SAFE VERSION)
+   🔥 SQUARE WEBHOOK → AUTO PROCESS (FINAL VERSION)
 ========================================================= */
 router.post("/square", express.json(), async (req, res) => {
   try {
@@ -16,7 +16,7 @@ router.post("/square", express.json(), async (req, res) => {
     console.log("🧪 EVENT TYPE:", event?.type)
 
     /* =========================================================
-       💳 VALIDATE PAYMENT OBJECT
+       💳 VALIDATE PAYMENT
     ========================================================= */
     const payment = event?.data?.object?.payment
 
@@ -25,7 +25,6 @@ router.post("/square", express.json(), async (req, res) => {
       return res.sendStatus(200)
     }
 
-    /* 🔥 ONLY PROCESS COMPLETED */
     if (payment.status !== "COMPLETED") {
       console.log("⏭️ Skipping status:", payment.status)
       return res.sendStatus(200)
@@ -34,7 +33,7 @@ router.post("/square", express.json(), async (req, res) => {
     console.log("💳 PAYMENT:", payment.id)
 
     /* =========================================================
-       🔥 METADATA EXTRACTION (SAFE)
+       🔥 METADATA
     ========================================================= */
     const metadata = payment?.metadata || {}
 
@@ -47,14 +46,24 @@ router.post("/square", express.json(), async (req, res) => {
     const type = metadata.type || "order"
 
     if (!recordId) {
-      console.warn("⚠️ Missing recordId in webhook")
+      console.warn("⚠️ Missing recordId")
       return res.sendStatus(200)
     }
 
     console.log(`📦 PROCESSING ${type.toUpperCase()}:`, recordId)
 
     /* =========================================================
-       🟦 QUOTE → CONVERT TO ORDER
+       🔥 EXTRACT EMAIL FROM SQUARE
+    ========================================================= */
+    const buyerEmail =
+      payment?.buyerEmailAddress ||
+      payment?.billingAddress?.email ||
+      null
+
+    console.log("📧 SQUARE EMAIL:", buyerEmail)
+
+    /* =========================================================
+       🟦 QUOTE → ORDER
     ========================================================= */
     if (type === "quote") {
       const quote = await Quote.findById(recordId)
@@ -64,7 +73,6 @@ router.post("/square", express.json(), async (req, res) => {
         return res.sendStatus(200)
       }
 
-      /* 🔥 IDP SAFE */
       if (quote.status === "paid" || quote.status === "archive") {
         console.log("⚠️ Quote already processed")
         return res.sendStatus(200)
@@ -84,10 +92,9 @@ router.post("/square", express.json(), async (req, res) => {
 
       console.log("✅ QUOTE MARKED PAID")
 
-      /* 🔥 CREATE ORDER */
       const order = new Order({
         customerName: quote.customerName,
-        email: quote.email,
+        email: buyerEmail || quote.email, // 🔥 FIXED
         quantity: quote.quantity,
         price: quote.price,
         finalPrice: quote.price,
@@ -112,22 +119,19 @@ router.post("/square", express.json(), async (req, res) => {
 
       console.log("🔥 ORDER CREATED:", order._id)
 
-      /* 🔥 ARCHIVE QUOTE */
       quote.status = "archive"
       await quote.save()
 
-      /* 🔌 SOCKET */
       const io = req.app.get("io")
       if (io) io.emit("jobCreated", order)
 
-      /* 📧 EMAIL */
       if (order.email) {
         await sendOrderStatusEmail(order.email, "paid", order._id, order)
       }
     }
 
     /* =========================================================
-       🟩 ORDER → MARK PAID
+       🟩 ORDER → MARK PAID + SYNC EMAIL
     ========================================================= */
     if (type === "order") {
       const order = await Order.findById(recordId)
@@ -137,10 +141,15 @@ router.post("/square", express.json(), async (req, res) => {
         return res.sendStatus(200)
       }
 
-      /* 🔥 PREVENT DOUBLE RUN */
       if (order.status === "paid") {
         console.log("⚠️ Order already processed")
         return res.sendStatus(200)
+      }
+
+      /* 🔥 UPDATE EMAIL FROM SQUARE */
+      if (buyerEmail && !order.email) {
+        order.email = buyerEmail
+        console.log("✅ ORDER EMAIL UPDATED")
       }
 
       order.status = "paid"
@@ -158,13 +167,14 @@ router.post("/square", express.json(), async (req, res) => {
 
       console.log("✅ ORDER MARKED PAID:", order._id)
 
-      /* 🔌 SOCKET */
       const io = req.app.get("io")
       if (io) io.emit("jobUpdated", order)
 
-      /* 📧 EMAIL */
       if (order.email) {
         await sendOrderStatusEmail(order.email, "paid", order._id, order)
+        console.log("📧 EMAIL SENT")
+      } else {
+        console.warn("⚠️ No email available")
       }
     }
 
