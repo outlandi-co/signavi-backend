@@ -1,12 +1,47 @@
 import mongoose from "mongoose"
 
+/* ================= ITEM SCHEMA ================= */
+const itemSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    default: ""
+  },
+
+  quantity: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+
+  price: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  /* 🔥 VARIANT (CRITICAL FIX) */
+  variant: {
+    color: {
+      type: String,
+      default: ""
+    },
+    size: {
+      type: String,
+      default: ""
+    }
+  }
+
+}, { _id: false })
+
+
+/* ================= ORDER SCHEMA ================= */
 const orderSchema = new mongoose.Schema({
 
   /* ================= USER ================= */
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    default: null, // allow guest orders
+    default: null,
     index: true
   },
 
@@ -66,24 +101,11 @@ const orderSchema = new mongoose.Schema({
     min: 0
   },
 
-  items: [
-    {
-      name: {
-        type: String,
-        default: ""
-      },
-      quantity: {
-        type: Number,
-        default: 1,
-        min: 1
-      },
-      price: {
-        type: Number,
-        default: 0,
-        min: 0
-      }
-    }
-  ],
+  /* 🔥 ITEMS WITH VARIANTS */
+  items: {
+    type: [itemSchema],
+    default: []
+  },
 
   /* ================= SOURCE ================= */
   source: {
