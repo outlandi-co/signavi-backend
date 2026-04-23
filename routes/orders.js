@@ -1,46 +1,14 @@
 import express from "express"
 import mongoose from "mongoose"
-import Order from "../models/Order.js"
-import { sendOrderStatusEmail } from "../utils/sendEmail.js"
-import { requireAuth } from "../middleware/auth.js"
 import jwt from "jsonwebtoken"
-import fs from "fs"
-import PDFDocument from "pdfkit"
+import Order from "../models/Order.js"
+import Product from "../models/Product.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
-
 /* =========================================================
-   📄 GENERATE INVOICE (SIMPLE BUILT-IN)
-========================================================= */
-const generateInvoice = (order) => {
-  const filePath = `uploads/invoice-${order._id}.pdf`
-
-  const doc = new PDFDocument()
-  doc.pipe(fs.createWriteStream(filePath))
-
-  doc.fontSize(20).text("Invoice", { align: "center" })
-  doc.moveDown()
-
-  doc.text(`Order ID: ${order._id}`)
-  doc.text(`Customer: ${order.customerName}`)
-  doc.text(`Email: ${order.email}`)
-  doc.text(`Total: $${order.finalPrice}`)
-
-  doc.moveDown()
-
-  order.items.forEach(item => {
-    doc.text(`${item.name} - ${item.quantity} x $${item.price}`)
-  })
-
-  doc.end()
-
-  return filePath
-}
-
-/* =========================================================
-   🆕 CREATE ORDER (GUEST + USER)
+   🛒 CREATE ORDER (VARIANT + INVENTORY SAFE)
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
@@ -49,7 +17,7 @@ router.post("/", async (req, res) => {
     let userId = null
     const authHeader = req.headers.authorization
 
-    if (authHeader && authHeader.startsWith("Bearer ")) {
+    if (authHeader?.startsWith("Bearer ")) {
       try {
         const token = authHeader.split(" ")[1]
         const decoded = jwt.verify(token, process.env.JWT_SECRET)
@@ -59,45 +27,74 @@ router.post("/", async (req, res) => {
       }
     }
 
-    let { customerName, email, items, quantity, printType, subtotal, tax, price } = req.body || {}
+    const { customerName, email, items } = req.body
 
-    const safeItems = Array.isArray(items)
-      ? items.map(item => ({
-          name: item?.name || "Item",
-          quantity: Number(item?.quantity) || 1,
-          price: Number(item?.price) || 0
-        }))
-      : []
-
-    if (!safeItems.length) {
+    if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "No items provided" })
     }
 
-    const computedSubtotal = safeItems.reduce(
-      (acc, i) => acc + i.price * i.quantity,
-      0
-    )
+    let total = 0
+    let totalQuantity = 0
+    const processedItems = []
 
-    subtotal = Number(subtotal ?? computedSubtotal)
-    tax = Number(tax ?? subtotal * 0.0825)
-    price = Number(price ?? subtotal + tax)
+    /* ================= INVENTORY LOOP ================= */
+    for (const item of items) {
 
-    const totalQuantity =
-      safeItems.reduce((acc, i) => acc + i.quantity, 0) ||
-      Number(quantity) ||
-      1
+      const product = await Product.findById(item._id)
 
+      if (!product) {
+        throw new Error("Product not found")
+      }
+
+      const variant = product.variants.find(
+        v => String(v._id) === String(item.selectedVariant?._id)
+      )
+
+      if (!variant) {
+        throw new Error("Variant not found")
+      }
+
+      const qty = Number(item.quantity) || 1
+
+      /* 🔥 STOCK CHECK */
+      if (variant.stock < qty) {
+        throw new Error(
+          `${product.name} (${variant.size}) only has ${variant.stock} left`
+        )
+      }
+
+      /* 🔥 DEDUCT STOCK */
+      variant.stock -= qty
+      await product.save()
+
+      /* 🔥 SECURE PRICE */
+      const lineTotal = variant.price * qty
+
+      total += lineTotal
+      totalQuantity += qty
+
+      processedItems.push({
+        name: product.name,
+        quantity: qty,
+        price: variant.price,
+        variant: {
+          color: variant.color,
+          size: variant.size
+        }
+      })
+    }
+
+    /* ================= CREATE ORDER ================= */
     const order = await Order.create({
       user: userId,
       customerName: customerName || "Guest",
       email: email || "",
-      items: safeItems,
+      items: processedItems,
       quantity: totalQuantity,
-      printType: printType || "custom",
-      subtotal,
-      tax,
-      price,
-      finalPrice: price,
+      subtotal: total,
+      tax: total * 0.0825,
+      price: total * 1.0825,
+      finalPrice: total * 1.0825,
       source: "store",
       status: "payment_required",
       timeline: [
@@ -112,7 +109,12 @@ router.post("/", async (req, res) => {
     console.log("✅ ORDER CREATED:", order._id)
 
     if (order.email) {
-      await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
+      await sendOrderStatusEmail(
+        order.email,
+        "payment_required",
+        order._id,
+        order
+      )
     }
 
     req.app.get("io")?.emit("jobCreated", order)
@@ -120,107 +122,12 @@ router.post("/", async (req, res) => {
     return res.status(201).json(order)
 
   } catch (err) {
-    console.error("❌ ORDER CREATE ERROR:", err)
-    return res.status(500).json({ message: "Order creation failed", error: err.message })
-  }
-})
+    console.error("❌ ORDER ERROR:", err.message)
 
-/* =========================================================
-   🚚 SHIP ORDER (NEW)
-========================================================= */
-router.patch("/ship/:id", requireAuth, async (req, res) => {
-  try {
-    const { trackingNumber, carrier, trackingLink } = req.body
-    const id = req.params.id
-
-    if (!isValidId(id)) {
-      return res.status(400).json({ message: "Invalid ID" })
-    }
-
-    const order = await Order.findById(id)
-    if (!order) return res.status(404).json({ message: "Not found" })
-
-    order.status = "shipped"
-    order.trackingNumber = trackingNumber || ""
-    order.trackingLink = trackingLink || ""
-    order.carrier = carrier || "USPS"
-
-    order.timeline.push({
-      status: "shipped",
-      date: new Date(),
-      note: "Order shipped"
+    return res.status(500).json({
+      message: err.message
     })
-
-    await order.save()
-
-    if (order.email) {
-      await sendOrderStatusEmail(order.email, "shipped", order._id, order)
-    }
-
-    req.app.get("io")?.emit("jobUpdated", order)
-
-    res.json(order)
-
-  } catch (err) {
-    console.error("❌ SHIP ERROR:", err)
-    res.status(500).json({ message: err.message })
   }
-})
-
-/* =========================================================
-   💳 MARK PAID + GENERATE INVOICE (NEW)
-========================================================= */
-router.patch("/mark-paid/:id", requireAuth, async (req, res) => {
-  try {
-    const id = req.params.id
-
-    const order = await Order.findById(id)
-    if (!order) return res.status(404).json({ message: "Not found" })
-
-    order.status = "paid"
-
-    const invoicePath = generateInvoice(order)
-    order.invoice = invoicePath
-
-    order.timeline.push({
-      status: "paid",
-      date: new Date(),
-      note: "Payment confirmed"
-    })
-
-    await order.save()
-
-    if (order.email) {
-      await sendOrderStatusEmail(order.email, "paid", order._id, order)
-    }
-
-    req.app.get("io")?.emit("jobUpdated", order)
-
-    res.json(order)
-
-  } catch (err) {
-    console.error("❌ PAYMENT ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   🔐 EXISTING ROUTES (UNCHANGED)
-========================================================= */
-router.get("/my-orders", requireAuth, async (req, res) => {
-  const orders = await Order.find({ user: req.user.id }).sort({ createdAt: -1 })
-  res.json(orders)
-})
-
-router.get("/", requireAuth, async (req, res) => {
-  const query = req.user.role === "admin" ? {} : { user: req.user.id }
-  const orders = await Order.find(query).sort({ createdAt: -1 })
-  res.json(orders)
-})
-
-router.get("/:id", requireAuth, async (req, res) => {
-  const order = await Order.findById(req.params.id)
-  res.json(order)
 })
 
 export default router

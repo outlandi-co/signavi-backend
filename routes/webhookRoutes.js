@@ -6,7 +6,7 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
-   🔥 SQUARE WEBHOOK → AUTO PROCESS (QUOTE + ORDER)
+   🔥 SQUARE WEBHOOK → AUTO PROCESS (SAFE VERSION)
 ========================================================= */
 router.post("/square", express.json(), async (req, res) => {
   try {
@@ -16,7 +16,7 @@ router.post("/square", express.json(), async (req, res) => {
     console.log("🧪 EVENT TYPE:", event?.type)
 
     /* =========================================================
-       💳 ONLY PROCESS COMPLETED PAYMENTS
+       💳 VALIDATE PAYMENT OBJECT
     ========================================================= */
     const payment = event?.data?.object?.payment
 
@@ -25,33 +25,36 @@ router.post("/square", express.json(), async (req, res) => {
       return res.sendStatus(200)
     }
 
-    // 🔥 ONLY process COMPLETED payments (CRITICAL)
+    /* 🔥 ONLY PROCESS COMPLETED */
     if (payment.status !== "COMPLETED") {
-      console.log("⏭️ Ignoring non-completed payment:", payment.status)
+      console.log("⏭️ Skipping status:", payment.status)
       return res.sendStatus(200)
     }
 
     console.log("💳 PAYMENT:", payment.id)
 
     /* =========================================================
-       🔥 GET METADATA
+       🔥 METADATA EXTRACTION (SAFE)
     ========================================================= */
+    const metadata = payment?.metadata || {}
+
     const recordId =
-      payment?.metadata?.recordId ||
-      payment?.metadata?.quoteId ||
+      metadata.recordId ||
+      metadata.quoteId ||
+      metadata.orderId ||
       payment?.orderId
 
-    const type = payment?.metadata?.type || "quote"
+    const type = metadata.type || "order"
 
     if (!recordId) {
-      console.warn("⚠️ No recordId in webhook")
+      console.warn("⚠️ Missing recordId in webhook")
       return res.sendStatus(200)
     }
 
     console.log(`📦 PROCESSING ${type.toUpperCase()}:`, recordId)
 
     /* =========================================================
-       🟦 CASE 1: QUOTE → CONVERT TO ORDER
+       🟦 QUOTE → CONVERT TO ORDER
     ========================================================= */
     if (type === "quote") {
       const quote = await Quote.findById(recordId)
@@ -61,13 +64,12 @@ router.post("/square", express.json(), async (req, res) => {
         return res.sendStatus(200)
       }
 
-      // 🔥 PREVENT DOUBLE PROCESSING
+      /* 🔥 IDP SAFE */
       if (quote.status === "paid" || quote.status === "archive") {
         console.log("⚠️ Quote already processed")
         return res.sendStatus(200)
       }
 
-      /* 🔥 MARK PAID */
       quote.status = "paid"
 
       if (!quote.timeline) quote.timeline = []
@@ -75,7 +77,7 @@ router.post("/square", express.json(), async (req, res) => {
       quote.timeline.push({
         status: "paid",
         date: new Date(),
-        note: "Payment received via Square webhook"
+        note: "Payment received via webhook"
       })
 
       await quote.save()
@@ -88,6 +90,7 @@ router.post("/square", express.json(), async (req, res) => {
         email: quote.email,
         quantity: quote.quantity,
         price: quote.price,
+        finalPrice: quote.price,
         items: quote.items,
         artwork: quote.artwork,
         notes: quote.notes,
@@ -100,7 +103,7 @@ router.post("/square", express.json(), async (req, res) => {
           {
             status: "paid",
             date: new Date(),
-            note: "Converted from quote (auto)"
+            note: "Converted from quote (webhook)"
           }
         ]
       })
@@ -124,7 +127,7 @@ router.post("/square", express.json(), async (req, res) => {
     }
 
     /* =========================================================
-       🟩 CASE 2: ORDER → MARK PAID ONLY
+       🟩 ORDER → MARK PAID
     ========================================================= */
     if (type === "order") {
       const order = await Order.findById(recordId)
@@ -134,13 +137,12 @@ router.post("/square", express.json(), async (req, res) => {
         return res.sendStatus(200)
       }
 
-      // 🔥 PREVENT DOUBLE PROCESSING
+      /* 🔥 PREVENT DOUBLE RUN */
       if (order.status === "paid") {
         console.log("⚠️ Order already processed")
         return res.sendStatus(200)
       }
 
-      /* 🔥 MARK PAID */
       order.status = "paid"
       order.productionStatus = "queued"
 
@@ -149,7 +151,7 @@ router.post("/square", express.json(), async (req, res) => {
       order.timeline.push({
         status: "paid",
         date: new Date(),
-        note: "Payment received via Square webhook"
+        note: "Payment received via webhook"
       })
 
       await order.save()
