@@ -14,14 +14,22 @@ console.log(
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
+  token: isProd
+    ? process.env.SQUARE_PROD_ACCESS_TOKEN
+    : process.env.SQUARE_SANDBOX_ACCESS_TOKEN,
+
   environment: isProd
     ? SquareEnvironment.Production
     : SquareEnvironment.Sandbox
 })
 
+/* ================= LOCATION ================= */
+const LOCATION_ID = isProd
+  ? process.env.SQUARE_PROD_LOCATION_ID
+  : process.env.SQUARE_SANDBOX_LOCATION_ID
+
 /* =========================================================
-   💳 CREATE PAYMENT LINK (SANDBOX + PROD READY)
+   💳 CREATE PAYMENT LINK (FINAL SAFE VERSION)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -30,12 +38,15 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("💳 CREATE PAYMENT:", id)
 
     /* ================= ENV CHECK ================= */
-    if (!process.env.SQUARE_ACCESS_TOKEN) {
-      throw new Error("Missing SQUARE_ACCESS_TOKEN")
+    if (
+      !process.env.SQUARE_PROD_ACCESS_TOKEN ||
+      !process.env.SQUARE_SANDBOX_ACCESS_TOKEN
+    ) {
+      throw new Error("Missing Square tokens")
     }
 
-    if (!process.env.SQUARE_LOCATION_ID) {
-      throw new Error("Missing SQUARE_LOCATION_ID")
+    if (!LOCATION_ID) {
+      throw new Error("Missing Square location ID")
     }
 
     const CLIENT_URL =
@@ -68,7 +79,7 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("💰 FINAL PRICE:", amountValue)
 
-    /* 🔥 BigInt required */
+    /* 🔥 Convert to cents */
     const amountCents = BigInt(Math.round(amountValue * 100))
 
     /* ================= CREATE PAYMENT ================= */
@@ -76,14 +87,13 @@ router.post("/create-payment/:id", async (req, res) => {
       idempotencyKey: `${id}-${Date.now()}`,
 
       order: {
-        locationId: process.env.SQUARE_LOCATION_ID,
+        locationId: LOCATION_ID,
 
         metadata: {
           recordId: String(record._id),
           type
         },
 
-        /* 🔥 SINGLE FINAL PRICE ITEM */
         lineItems: [
           {
             name: `${type.toUpperCase()} #${record._id}`,
@@ -120,7 +130,9 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log(
       "🌐 PAYMENT URL:",
-      url.includes("sandbox") ? "SANDBOX LINK" : "PRODUCTION LINK"
+      url.includes("sandbox")
+        ? "🧪 SANDBOX LINK"
+        : "💳 PRODUCTION LINK"
     )
 
     /* ================= SAVE ================= */
