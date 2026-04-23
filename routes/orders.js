@@ -27,7 +27,6 @@ router.post("/", requireAuth, async (req, res) => {
       price
     } = req.body || {}
 
-    /* ================= SAFE ITEMS ================= */
     const safeItems = Array.isArray(items)
       ? items.map(item => ({
           name: item?.name || "Item",
@@ -36,7 +35,6 @@ router.post("/", requireAuth, async (req, res) => {
         }))
       : []
 
-    /* ================= CALCULATE ================= */
     const computedSubtotal = safeItems.reduce(
       (acc, i) => acc + i.price * i.quantity,
       0
@@ -51,27 +49,19 @@ router.post("/", requireAuth, async (req, res) => {
       Number(quantity) ||
       1
 
-    console.log("💰 FINAL:", { subtotal, tax, total: price })
-
-    /* ================= CREATE ORDER ================= */
     const order = await Order.create({
-      user: req.user.id, // 🔥 FIXED (standardized)
-
+      user: req.user.id,
       customerName: customerName || "Guest",
       email: email || "",
       items: safeItems,
-
       quantity: totalQuantity,
       printType: printType || "custom",
-
       subtotal,
       tax,
       price,
       finalPrice: price,
-
       source: "store",
       status: "payment_required",
-
       timeline: [
         {
           status: "created",
@@ -81,7 +71,6 @@ router.post("/", requireAuth, async (req, res) => {
       ]
     })
 
-    /* ================= EMAIL ================= */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -91,10 +80,10 @@ router.post("/", requireAuth, async (req, res) => {
       )
     }
 
-    /* ================= SOCKET ================= */
     req.app.get("io")?.emit("jobCreated", order)
 
-    res.json({ success: true, data: order })
+    // ✅ RETURN CLEAN OBJECT
+    res.json(order)
 
   } catch (err) {
     console.error("❌ ORDER CREATE ERROR:", err)
@@ -103,7 +92,7 @@ router.post("/", requireAuth, async (req, res) => {
 })
 
 /* =========================================================
-   🔐 GET MY ORDERS (CLEAN ROUTE)
+   🔐 GET MY ORDERS (FIXED)
 ========================================================= */
 router.get("/my-orders", requireAuth, async (req, res) => {
   try {
@@ -111,16 +100,17 @@ router.get("/my-orders", requireAuth, async (req, res) => {
       user: req.user.id
     }).sort({ createdAt: -1 })
 
-    res.json({ success: true, data: orders })
+    // ✅ RETURN ARRAY ONLY (CRITICAL FIX)
+    res.json(orders)
 
   } catch (err) {
     console.error("❌ MY ORDERS ERROR:", err)
-    res.status(500).json({ message: err.message })
+    res.status(500).json([])
   }
 })
 
 /* =========================================================
-   🔄 UPDATE STATUS (ADMIN OR OWNER)
+   🔄 UPDATE STATUS
 ========================================================= */
 router.patch("/update-status/:id", requireAuth, async (req, res) => {
   try {
@@ -136,7 +126,6 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔐 SECURITY CHECK */
     if (
       order.user?.toString() !== req.user.id &&
       req.user.role !== "admin"
@@ -170,7 +159,8 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
 
     req.app.get("io")?.emit("jobUpdated", order)
 
-    res.json({ success: true, data: order })
+    // ✅ RETURN CLEAN OBJECT
+    res.json(order)
 
   } catch (err) {
     console.error("❌ STATUS ERROR:", err)
@@ -179,7 +169,7 @@ router.patch("/update-status/:id", requireAuth, async (req, res) => {
 })
 
 /* =========================================================
-   📄 GET ALL (ADMIN OR OWN)
+   📄 GET ALL
 ========================================================= */
 router.get("/", requireAuth, async (req, res) => {
   try {
@@ -190,16 +180,17 @@ router.get("/", requireAuth, async (req, res) => {
 
     const orders = await Order.find(query).sort({ createdAt: -1 })
 
-    res.json({ success: true, data: orders })
+    // ✅ RETURN ARRAY
+    res.json(orders)
 
   } catch (err) {
     console.error("❌ GET ORDERS ERROR:", err)
-    res.status(500).json({ message: err.message })
+    res.status(500).json([])
   }
 })
 
 /* =========================================================
-   📄 GET ONE (SECURE)
+   📄 GET ONE
 ========================================================= */
 router.get("/:id", requireAuth, async (req, res) => {
   try {
@@ -215,7 +206,6 @@ router.get("/:id", requireAuth, async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔐 SECURITY CHECK */
     if (
       order.user?.toString() !== req.user.id &&
       req.user.role !== "admin"
@@ -223,7 +213,8 @@ router.get("/:id", requireAuth, async (req, res) => {
       return res.status(403).json({ message: "Forbidden" })
     }
 
-    res.json({ success: true, data: order })
+    // ✅ RETURN OBJECT
+    res.json(order)
 
   } catch (err) {
     console.error("❌ GET ORDER ERROR:", err)
