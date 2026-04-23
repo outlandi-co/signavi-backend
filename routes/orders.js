@@ -1,5 +1,4 @@
 import express from "express"
-import mongoose from "mongoose"
 import jwt from "jsonwebtoken"
 import Order from "../models/Order.js"
 import Product from "../models/Product.js"
@@ -8,7 +7,7 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
-   🛒 CREATE ORDER (VARIANT + INVENTORY SAFE)
+   🛒 CREATE ORDER (FIXED + SAFE + VARIANT READY)
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
@@ -40,17 +39,25 @@ router.post("/", async (req, res) => {
     /* ================= INVENTORY LOOP ================= */
     for (const item of items) {
 
-      const product = await Product.findById(item._id)
+      /* 🔥 FIXED: use productId */
+      const product = await Product.findById(item.productId)
 
       if (!product) {
+        console.error("❌ Product lookup failed:", item.productId)
         throw new Error("Product not found")
       }
 
+      if (!item.selectedVariant?._id) {
+        console.error("❌ Missing variant:", item)
+        throw new Error("Variant missing")
+      }
+
       const variant = product.variants.find(
-        v => String(v._id) === String(item.selectedVariant?._id)
+        v => String(v._id) === String(item.selectedVariant._id)
       )
 
       if (!variant) {
+        console.error("❌ Variant not found:", item.selectedVariant)
         throw new Error("Variant not found")
       }
 
@@ -78,6 +85,7 @@ router.post("/", async (req, res) => {
         quantity: qty,
         price: variant.price,
         variant: {
+          _id: variant._id,
           color: variant.color,
           size: variant.size
         }
@@ -108,6 +116,7 @@ router.post("/", async (req, res) => {
 
     console.log("✅ ORDER CREATED:", order._id)
 
+    /* 🔥 EMAIL */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -117,6 +126,7 @@ router.post("/", async (req, res) => {
       )
     }
 
+    /* 🔌 SOCKET */
     req.app.get("io")?.emit("jobCreated", order)
 
     return res.status(201).json(order)
