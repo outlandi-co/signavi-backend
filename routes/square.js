@@ -5,31 +5,19 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-/* ================= ENV MODE ================= */
-const isProd = process.env.NODE_ENV === "production"
+console.log("💳 SQUARE ROUTE LOADED → SANDBOX MODE")
 
-console.log(
-  `💳 SQUARE ROUTE LOADED → ${isProd ? "PRODUCTION" : "SANDBOX"} MODE`
-)
-
-/* ================= CLIENT ================= */
+/* ================= CLIENT (SANDBOX ONLY) ================= */
 const client = new SquareClient({
-  token: isProd
-    ? process.env.SQUARE_PROD_ACCESS_TOKEN
-    : process.env.SQUARE_SANDBOX_ACCESS_TOKEN,
-
-  environment: isProd
-    ? SquareEnvironment.Production
-    : SquareEnvironment.Sandbox
+  token: process.env.SQUARE_SANDBOX_ACCESS_TOKEN,
+  environment: SquareEnvironment.Sandbox
 })
 
 /* ================= LOCATION ================= */
-const LOCATION_ID = isProd
-  ? process.env.SQUARE_PROD_LOCATION_ID
-  : process.env.SQUARE_SANDBOX_LOCATION_ID
+const LOCATION_ID = process.env.SQUARE_SANDBOX_LOCATION_ID
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (FINAL SAFE VERSION)
+   💳 CREATE PAYMENT LINK (SANDBOX ONLY)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -38,15 +26,12 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("💳 CREATE PAYMENT:", id)
 
     /* ================= ENV CHECK ================= */
-    if (
-      !process.env.SQUARE_PROD_ACCESS_TOKEN ||
-      !process.env.SQUARE_SANDBOX_ACCESS_TOKEN
-    ) {
-      throw new Error("Missing Square tokens")
+    if (!process.env.SQUARE_SANDBOX_ACCESS_TOKEN) {
+      throw new Error("Missing sandbox access token")
     }
 
     if (!LOCATION_ID) {
-      throw new Error("Missing Square location ID")
+      throw new Error("Missing sandbox location ID")
     }
 
     const CLIENT_URL =
@@ -128,12 +113,7 @@ router.post("/create-payment/:id", async (req, res) => {
       url = `https://${url}`
     }
 
-    console.log(
-      "🌐 PAYMENT URL:",
-      url.includes("sandbox")
-        ? "🧪 SANDBOX LINK"
-        : "💳 PRODUCTION LINK"
-    )
+    console.log("🌐 PAYMENT URL: 🧪 SANDBOX LINK")
 
     /* ================= SAVE ================= */
     record.paymentUrl = url
