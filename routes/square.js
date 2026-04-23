@@ -5,7 +5,7 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED (TAX FIXED VERSION)")
+console.log("💳 SQUARE ROUTE LOADED (PRO VERSION)")
 
 /* ================= CLIENT ================= */
 const client = new SquareClient({
@@ -13,7 +13,7 @@ const client = new SquareClient({
 })
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (WITH REAL TAX)
+   💳 CREATE PAYMENT LINK (FINAL VERSION)
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -30,7 +30,8 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("Missing SQUARE_LOCATION_ID")
     }
 
-    console.log("🔍 ENV OK")
+    const CLIENT_URL =
+      process.env.CLIENT_URL || "https://signavistudio.store"
 
     /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
@@ -48,20 +49,19 @@ router.post("/create-payment/:id", async (req, res) => {
     console.log("📦 TYPE:", type)
 
     /* ================= PRICE ================= */
-    const subtotal = Number(record.price || 0)
+    const amountValue =
+      Number(record.finalPrice) ||
+      Number(record.price) ||
+      0
 
-    if (!subtotal || isNaN(subtotal)) {
-      throw new Error("Invalid subtotal")
+    if (!amountValue || isNaN(amountValue)) {
+      throw new Error("Invalid price")
     }
 
-    console.log("💰 SUBTOTAL:", subtotal)
+    console.log("💰 FINAL PRICE:", amountValue)
 
-    /* 🔥 BIGINT REQUIRED */
-    const subtotalCents = BigInt(Math.round(subtotal * 100))
-
-    console.log("💰 CENTS:", {
-      subtotalCents: subtotalCents.toString()
-    })
+    /* 🔥 BigInt required */
+    const amountCents = BigInt(Math.round(amountValue * 100))
 
     /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
@@ -75,32 +75,21 @@ router.post("/create-payment/:id", async (req, res) => {
           type
         },
 
-        /* ✅ ONLY SUBTOTAL AS ITEM */
+        /* 🔥 SINGLE FINAL PRICE ITEM (NO DOUBLE TAX) */
         lineItems: [
           {
-            name: `${type.toUpperCase()} Order`,
+            name: `${type.toUpperCase()} #${record._id}`,
             quantity: "1",
             basePriceMoney: {
-              amount: subtotalCents,
+              amount: amountCents,
               currency: "USD"
             }
-          }
-        ],
-
-        /* 🔥 REAL TAX SYSTEM */
-        taxes: [
-          {
-            name: "Sales Tax",
-            percentage: "8.25", // 🔥 STRING REQUIRED
-            scope: "ORDER"
           }
         ]
       },
 
       checkoutOptions: {
-        redirectUrl: `${
-          process.env.CLIENT_URL || "https://signavistudio.store"
-        }/success/${id}`
+        redirectUrl: `${CLIENT_URL}/success/${id}`
       }
     })
 
@@ -129,7 +118,8 @@ router.post("/create-payment/:id", async (req, res) => {
 
     return res.json({
       success: true,
-      url
+      url,
+      orderId: record._id
     })
 
   } catch (err) {

@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer"
+import fs from "fs"
 
 let transporter
 
@@ -20,21 +21,17 @@ const getTransporter = () => {
 }
 
 /* =========================================================
-   🔗 SAFE URL BUILDER (FORCE VALID HTTPS)
+   🔗 SAFE URL BUILDER
 ========================================================= */
 const buildSafeUrl = (base, path = "") => {
   let url = base || "signavistudio.store"
 
   url = url.trim()
-
-  // 🔥 REMOVE ANY PROTOCOL (good or bad)
   url = url.replace(/^(https?:)?\/?\//i, "")
   url = url.replace(/^ttps?:?\/?\/?/i, "")
 
-  // 🔥 FORCE CLEAN HTTPS
   url = `https://${url}`
 
-  // remove trailing slash
   if (url.endsWith("/")) {
     url = url.slice(0, -1)
   }
@@ -43,7 +40,7 @@ const buildSafeUrl = (base, path = "") => {
 }
 
 /* =========================================================
-   🔧 FINAL LINK SANITIZER
+   🔧 LINK SANITIZER
 ========================================================= */
 const sanitizeLink = (link, fallback) => {
   let finalLink = link || fallback
@@ -52,17 +49,14 @@ const sanitizeLink = (link, fallback) => {
 
   finalLink = finalLink.trim()
 
-  // 🔥 Fix missing "h"
   if (finalLink.startsWith("ttps://")) {
     finalLink = "h" + finalLink
   }
 
-  // 🔥 Fix missing colon
   if (finalLink.startsWith("https//")) {
     finalLink = finalLink.replace("https//", "https://")
   }
 
-  // 🔥 If still invalid → rebuild
   if (!finalLink.startsWith("http")) {
     finalLink = buildSafeUrl(finalLink)
   }
@@ -71,7 +65,7 @@ const sanitizeLink = (link, fallback) => {
 }
 
 /* =========================================================
-   📧 SEND ORDER / QUOTE STATUS EMAIL
+   📧 SEND ORDER STATUS EMAIL
 ========================================================= */
 export const sendOrderStatusEmail = async (
   to,
@@ -85,15 +79,17 @@ export const sendOrderStatusEmail = async (
     const CLIENT_URL =
       process.env.CLIENT_URL || "https://signavistudio.store"
 
-    const fallbackLink = buildSafeUrl(CLIENT_URL, `/quote/${id}`)
+    const successLink = buildSafeUrl(CLIENT_URL, `/success/${id}`)
+    const paymentFallback = buildSafeUrl(CLIENT_URL, `/checkout/${id}`)
 
-    const paymentLink = sanitizeLink(order?.paymentUrl, fallbackLink)
-
-    console.log("🔗 FINAL EMAIL LINK:", paymentLink)
+    const paymentLink = sanitizeLink(order?.paymentUrl, paymentFallback)
 
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
+    let attachments = []
+
+    /* ================= PAYMENT REQUIRED ================= */
     if (status === "payment_required") {
       subject = "Your Order is Ready – Payment Required"
 
@@ -102,7 +98,7 @@ export const sendOrderStatusEmail = async (
 
         <p>Your order is ready for payment.</p>
 
-        <h3>Total: $${order?.price || 0}</h3>
+        <h3>Total: $${order?.finalPrice || order?.price || 0}</h3>
 
         <p>
           <a href="${paymentLink}" target="_blank"
@@ -118,27 +114,74 @@ export const sendOrderStatusEmail = async (
             💳 Pay Now
           </a>
         </p>
+      `
+    }
 
-        <p><strong>Direct link:</strong></p>
+    /* ================= PAYMENT SUCCESS ================= */
+    else if (status === "paid") {
+      subject = "Payment Received – Order Confirmed"
 
-        <p style="word-break:break-all;">
-          ${paymentLink}
-        </p>
+      html += `
+        <p>Hi ${order?.customerName || "Customer"},</p>
 
-        <p style="margin-top:20px;">
-          Thank you,<br/>
-          <strong>SignaVi Studio</strong>
+        <p>We’ve received your payment 🎉</p>
+
+        <h3>Total Paid: $${order?.finalPrice || order?.price || 0}</h3>
+
+        <p>
+          <a href="${successLink}" target="_blank">
+            View Order Status →
+          </a>
         </p>
       `
-    } else {
+
+      /* 📄 ATTACH INVOICE */
+      if (order.invoice && fs.existsSync(order.invoice)) {
+        attachments.push({
+          filename: `invoice-${id}.pdf`,
+          path: order.invoice
+        })
+      }
+    }
+
+    /* ================= SHIPPED ================= */
+    else if (status === "shipped") {
+      subject = "Your Order Has Shipped 📦"
+
+      html += `
+        <p>Hi ${order?.customerName || "Customer"},</p>
+
+        <p>Your order is on the way!</p>
+
+        <p><strong>Tracking Number:</strong> ${order.trackingNumber || "N/A"}</p>
+
+        ${
+          order.trackingLink
+            ? `<p><a href="${order.trackingLink}" target="_blank">Track Package →</a></p>`
+            : ""
+        }
+      `
+    }
+
+    /* ================= DEFAULT ================= */
+    else {
       html += `<p>Status updated: ${status}</p>`
     }
+
+    /* ================= FOOTER ================= */
+    html += `
+      <p style="margin-top:20px;">
+        Thank you,<br/>
+        <strong>SignaVi Studio</strong>
+      </p>
+    `
 
     await transporter.sendMail({
       from: `"SignaVi Studio" <${process.env.EMAIL_USER}>`,
       to,
       subject,
-      html
+      html,
+      attachments
     })
 
     console.log("📧 EMAIL SENT →", to)
@@ -149,7 +192,7 @@ export const sendOrderStatusEmail = async (
 }
 
 /* =========================================================
-   📧 ABANDONED CART (SAFE PLACEHOLDER)
+   📧 ABANDONED CART (PLACEHOLDER)
 ========================================================= */
 export const sendAbandonedCartEmail = async (email, cart = []) => {
   try {
