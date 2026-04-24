@@ -7,7 +7,7 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
-   🛒 CREATE ORDER (FINAL FIX - VARIANT SAFE)
+   🛒 CREATE ORDER (FINAL STABLE VERSION)
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
@@ -28,7 +28,7 @@ router.post("/", async (req, res) => {
 
     const { customerName, email, items } = req.body
 
-    console.log("🧪 ITEMS:", items)
+    console.log("🧪 ITEMS RECEIVED:", items)
 
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "No items provided" })
@@ -41,6 +41,16 @@ router.post("/", async (req, res) => {
     /* ================= LOOP ================= */
     for (const item of items) {
 
+      /* 🔒 VALIDATION */
+      if (!item.productId) {
+        throw new Error("Missing productId")
+      }
+
+      if (!item.selectedVariant?.color || !item.selectedVariant?.size) {
+        throw new Error("Invalid variant data")
+      }
+
+      /* 🔍 FIND PRODUCT */
       const product = await Product.findById(item.productId)
 
       if (!product) {
@@ -48,12 +58,25 @@ router.post("/", async (req, res) => {
         throw new Error("Product not found")
       }
 
-      /* 🔥 FIX: MATCH BY COLOR + SIZE */
-      const variant = product.variants.find(
-        v =>
-          v.color?.toLowerCase() === item.selectedVariant?.color?.toLowerCase() &&
-          v.size === item.selectedVariant?.size
-      )
+      /* 🔥 SAFE MATCH (CASE + TRIM SAFE) */
+      const incomingColor = String(item.selectedVariant.color || "")
+        .trim()
+        .toLowerCase()
+
+      const incomingSize = String(item.selectedVariant.size || "")
+        .trim()
+
+      console.log("🧪 MATCHING:", {
+        incoming: item.selectedVariant,
+        variants: product.variants
+      })
+
+      const variant = product.variants.find(v => {
+        const dbColor = String(v.color || "").trim().toLowerCase()
+        const dbSize = String(v.size || "").trim()
+
+        return dbColor === incomingColor && dbSize === incomingSize
+      })
 
       if (!variant) {
         console.error("❌ Variant not found:", item.selectedVariant)
@@ -62,14 +85,15 @@ router.post("/", async (req, res) => {
 
       const qty = Number(item.quantity) || 1
 
-      /* 🔥 STOCK CHECK ONLY (NO DEDUCT HERE) */
+      /* 🔒 STOCK CHECK ONLY (NO DEDUCT HERE) */
       if (variant.stock < qty) {
         throw new Error(
           `${product.name} (${variant.size}) only has ${variant.stock} left`
         )
       }
 
-      const lineTotal = variant.price * qty
+      /* 💰 PRICE */
+      const lineTotal = Number(variant.price) * qty
 
       total += lineTotal
       totalQuantity += qty
