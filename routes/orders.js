@@ -6,9 +6,6 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* =========================================================
-   🛒 CREATE ORDER (FINAL STABLE VERSION)
-========================================================= */
 router.post("/", async (req, res) => {
   try {
     console.log("🛒 CREATE ORDER HIT")
@@ -38,62 +35,66 @@ router.post("/", async (req, res) => {
     let totalQuantity = 0
     const processedItems = []
 
-    /* ================= LOOP ================= */
     for (const item of items) {
 
       /* 🔒 VALIDATION */
       if (!item.productId) {
-        throw new Error("Missing productId")
+        return res.status(400).json({ message: "Missing productId" })
       }
 
       if (!item.selectedVariant?.color || !item.selectedVariant?.size) {
-        throw new Error("Invalid variant data")
+        return res.status(400).json({ message: "Invalid variant data" })
       }
 
-      /* 🔍 FIND PRODUCT */
       const product = await Product.findById(item.productId)
 
       if (!product) {
-        console.error("❌ Product not found:", item.productId)
-        throw new Error("Product not found")
+        return res.status(400).json({ message: "Product not found" })
       }
 
-      /* 🔥 SAFE MATCH (CASE + TRIM SAFE) */
-      const incomingColor = String(item.selectedVariant.color || "")
-        .trim()
-        .toLowerCase()
+      /* 🔥 SAFE GUARD */
+      if (!Array.isArray(product.variants) || product.variants.length === 0) {
+        console.error("❌ NO VARIANTS ON PRODUCT:", product._id)
+        return res.status(400).json({
+          message: `${product.name} has no variants configured`
+        })
+      }
 
-      const incomingSize = String(item.selectedVariant.size || "")
-        .trim()
+      const incomingColor = String(item.selectedVariant.color).trim().toLowerCase()
+      const incomingSize = String(item.selectedVariant.size).trim().toUpperCase()
 
       console.log("🧪 MATCHING:", {
-        incoming: item.selectedVariant,
-        variants: product.variants
+        incoming: { incomingColor, incomingSize },
+        db: product.variants
       })
 
       const variant = product.variants.find(v => {
         const dbColor = String(v.color || "").trim().toLowerCase()
-        const dbSize = String(v.size || "").trim()
+        const dbSize = String(v.size || "").trim().toUpperCase()
 
         return dbColor === incomingColor && dbSize === incomingSize
       })
 
       if (!variant) {
-        console.error("❌ Variant not found:", item.selectedVariant)
-        throw new Error("Variant not found")
+        console.error("❌ VARIANT NOT FOUND", {
+          incoming: item.selectedVariant,
+          available: product.variants
+        })
+
+        return res.status(400).json({
+          message: `Variant not found: ${item.selectedVariant.color} / ${item.selectedVariant.size}`
+        })
       }
 
       const qty = Number(item.quantity) || 1
 
-      /* 🔒 STOCK CHECK ONLY (NO DEDUCT HERE) */
       if (variant.stock < qty) {
-        throw new Error(
-          `${product.name} (${variant.size}) only has ${variant.stock} left`
-        )
+        return res.status(400).json({
+          message: `${product.name} (${variant.size}) only has ${variant.stock} left`
+        })
       }
 
-      /* 💰 PRICE */
-      const lineTotal = Number(variant.price) * qty
+      const lineTotal = Number(variant.price || 0) * qty
 
       total += lineTotal
       totalQuantity += qty
@@ -109,23 +110,18 @@ router.post("/", async (req, res) => {
       })
     }
 
-    /* ================= CREATE ORDER ================= */
     const order = await Order.create({
       user: userId,
       customerName: customerName || "Guest",
       email: email || "",
-
       items: processedItems,
       quantity: totalQuantity,
-
       subtotal: total,
       tax: total * 0.0825,
       price: total * 1.0825,
       finalPrice: total * 1.0825,
-
       source: "store",
       status: "payment_required",
-
       timeline: [
         {
           status: "created",
@@ -137,7 +133,6 @@ router.post("/", async (req, res) => {
 
     console.log("✅ ORDER CREATED:", order._id)
 
-    /* 📧 EMAIL */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -147,7 +142,6 @@ router.post("/", async (req, res) => {
       )
     }
 
-    /* 🔌 SOCKET */
     req.app.get("io")?.emit("jobCreated", order)
 
     return res.status(201).json(order)
@@ -156,7 +150,7 @@ router.post("/", async (req, res) => {
     console.error("❌ ORDER ERROR FULL:", err)
 
     return res.status(500).json({
-      message: err.message
+      message: err.message || "Server error during order creation"
     })
   }
 })
