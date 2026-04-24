@@ -6,6 +6,9 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
+/* =========================================================
+   🛒 CREATE ORDER
+========================================================= */
 router.post("/", async (req, res) => {
   try {
     console.log("🛒 CREATE ORDER HIT")
@@ -25,8 +28,6 @@ router.post("/", async (req, res) => {
 
     const { customerName, email, items } = req.body
 
-    console.log("🧪 ITEMS RECEIVED:", items)
-
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "No items provided" })
     }
@@ -37,41 +38,26 @@ router.post("/", async (req, res) => {
 
     for (const item of items) {
 
-      /* ================= PRODUCT ID SAFE ================= */
       const productId = item.productId || item._id
 
       if (!productId) {
-        console.error("❌ Missing productId:", item)
         return res.status(400).json({ message: "Missing productId" })
       }
 
       const product = await Product.findById(productId)
 
       if (!product) {
-        console.error("❌ Product not found:", productId)
         return res.status(400).json({ message: "Product not found" })
       }
 
-      /* ================= VARIANT SAFE ================= */
       const selectedVariant = item.selectedVariant || {}
 
       if (!selectedVariant.color || !selectedVariant.size) {
-        console.error("❌ Invalid variant:", item)
         return res.status(400).json({ message: "Invalid variant data" })
-      }
-
-      if (!Array.isArray(product.variants) || product.variants.length === 0) {
-        console.error("❌ No variants on product:", productId)
-        return res.status(400).json({ message: "Product has no variants" })
       }
 
       const incomingColor = String(selectedVariant.color).trim().toLowerCase()
       const incomingSize = String(selectedVariant.size).trim().toUpperCase()
-
-      console.log("🧪 MATCHING:", {
-        incoming: { incomingColor, incomingSize },
-        db: product.variants
-      })
 
       const variant = product.variants.find(v => {
         const dbColor = String(v.color || "").trim().toLowerCase()
@@ -80,11 +66,6 @@ router.post("/", async (req, res) => {
       })
 
       if (!variant) {
-        console.error("❌ Variant not found:", {
-          incoming: selectedVariant,
-          db: product.variants
-        })
-
         return res.status(400).json({
           message: `Variant not found: ${selectedVariant.color} / ${selectedVariant.size}`
         })
@@ -98,7 +79,6 @@ router.post("/", async (req, res) => {
         })
       }
 
-      /* ================= PRICE ================= */
       const price = Number(variant.price || 0)
       const lineTotal = price * qty
 
@@ -116,7 +96,6 @@ router.post("/", async (req, res) => {
       })
     }
 
-    /* ================= CREATE ORDER ================= */
     const order = await Order.create({
       user: userId,
       customerName: customerName || "Guest",
@@ -141,12 +120,7 @@ router.post("/", async (req, res) => {
     console.log("✅ ORDER CREATED:", order._id)
 
     if (order.email) {
-      await sendOrderStatusEmail(
-        order.email,
-        "payment_required",
-        order._id,
-        order
-      )
+      await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
     }
 
     req.app.get("io")?.emit("jobCreated", order)
@@ -154,11 +128,72 @@ router.post("/", async (req, res) => {
     return res.status(201).json(order)
 
   } catch (err) {
-    console.error("❌ ORDER ERROR FULL:", err)
-
+    console.error("❌ ORDER ERROR:", err)
     return res.status(500).json({
-      message: err.message || "Server error during order creation"
+      message: err.message || "Server error"
     })
+  }
+})
+
+/* =========================================================
+   📦 GET ORDER (TRACKING PAGE)
+========================================================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    res.json(order)
+
+  } catch (err) {
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+/* =========================================================
+   🚚 UPDATE SHIPPING (ADMIN UI)
+========================================================= */
+router.patch("/update-shipping/:id", async (req, res) => {
+  try {
+    const { trackingNumber, trackingLink, carrier } = req.body
+
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.trackingNumber = trackingNumber
+    order.trackingLink = trackingLink
+    order.carrier = carrier
+
+    order.status = "shipped"
+
+    order.timeline = order.timeline || []
+    order.timeline.push({
+      status: "shipped",
+      date: new Date(),
+      note: "Order shipped"
+    })
+
+    await order.save()
+
+    /* 🔥 SOCKET UPDATE */
+    req.app.get("io")?.emit("jobUpdated", order)
+
+    /* 📧 OPTIONAL EMAIL */
+    if (order.email) {
+      await sendOrderStatusEmail(order.email, "shipped", order._id, order)
+    }
+
+    res.json(order)
+
+  } catch (err) {
+    console.error("❌ SHIPPING ERROR:", err)
+    res.status(500).json({ message: "Error updating shipping" })
   }
 })
 
