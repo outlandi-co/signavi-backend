@@ -37,31 +37,36 @@ router.post("/", async (req, res) => {
 
     for (const item of items) {
 
-      /* 🔒 VALIDATION */
-      if (!item.productId) {
+      /* ================= PRODUCT ID SAFE ================= */
+      const productId = item.productId || item._id
+
+      if (!productId) {
+        console.error("❌ Missing productId:", item)
         return res.status(400).json({ message: "Missing productId" })
       }
 
-      if (!item.selectedVariant?.color || !item.selectedVariant?.size) {
-        return res.status(400).json({ message: "Invalid variant data" })
-      }
-
-      const product = await Product.findById(item.productId)
+      const product = await Product.findById(productId)
 
       if (!product) {
+        console.error("❌ Product not found:", productId)
         return res.status(400).json({ message: "Product not found" })
       }
 
-      /* 🔥 SAFE GUARD */
-      if (!Array.isArray(product.variants) || product.variants.length === 0) {
-        console.error("❌ NO VARIANTS ON PRODUCT:", product._id)
-        return res.status(400).json({
-          message: `${product.name} has no variants configured`
-        })
+      /* ================= VARIANT SAFE ================= */
+      const selectedVariant = item.selectedVariant || {}
+
+      if (!selectedVariant.color || !selectedVariant.size) {
+        console.error("❌ Invalid variant:", item)
+        return res.status(400).json({ message: "Invalid variant data" })
       }
 
-      const incomingColor = String(item.selectedVariant.color).trim().toLowerCase()
-      const incomingSize = String(item.selectedVariant.size).trim().toUpperCase()
+      if (!Array.isArray(product.variants) || product.variants.length === 0) {
+        console.error("❌ No variants on product:", productId)
+        return res.status(400).json({ message: "Product has no variants" })
+      }
+
+      const incomingColor = String(selectedVariant.color).trim().toLowerCase()
+      const incomingSize = String(selectedVariant.size).trim().toUpperCase()
 
       console.log("🧪 MATCHING:", {
         incoming: { incomingColor, incomingSize },
@@ -71,18 +76,17 @@ router.post("/", async (req, res) => {
       const variant = product.variants.find(v => {
         const dbColor = String(v.color || "").trim().toLowerCase()
         const dbSize = String(v.size || "").trim().toUpperCase()
-
         return dbColor === incomingColor && dbSize === incomingSize
       })
 
       if (!variant) {
-        console.error("❌ VARIANT NOT FOUND", {
-          incoming: item.selectedVariant,
-          available: product.variants
+        console.error("❌ Variant not found:", {
+          incoming: selectedVariant,
+          db: product.variants
         })
 
         return res.status(400).json({
-          message: `Variant not found: ${item.selectedVariant.color} / ${item.selectedVariant.size}`
+          message: `Variant not found: ${selectedVariant.color} / ${selectedVariant.size}`
         })
       }
 
@@ -94,7 +98,9 @@ router.post("/", async (req, res) => {
         })
       }
 
-      const lineTotal = Number(variant.price || 0) * qty
+      /* ================= PRICE ================= */
+      const price = Number(variant.price || 0)
+      const lineTotal = price * qty
 
       total += lineTotal
       totalQuantity += qty
@@ -102,7 +108,7 @@ router.post("/", async (req, res) => {
       processedItems.push({
         name: product.name,
         quantity: qty,
-        price: variant.price,
+        price,
         variant: {
           color: variant.color,
           size: variant.size
@@ -110,6 +116,7 @@ router.post("/", async (req, res) => {
       })
     }
 
+    /* ================= CREATE ORDER ================= */
     const order = await Order.create({
       user: userId,
       customerName: customerName || "Guest",
