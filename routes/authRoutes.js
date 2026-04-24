@@ -14,13 +14,17 @@ router.post("/register", async (req, res) => {
     const { name, email, password, role } = req.body || {}
 
     if (!email || !password) {
-      return res.status(400).json({ error: "Email and password required" })
+      return res.status(400).json({ message: "Email and password required" })
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ message: "Password must be at least 6 characters" })
     }
 
     const existingUser = await User.findOne({ email })
 
     if (existingUser) {
-      return res.status(400).json({ error: "User already exists" })
+      return res.status(400).json({ message: "User already exists" })
     }
 
     const hashedPassword = await bcrypt.hash(password, 10)
@@ -50,7 +54,7 @@ router.post("/register", async (req, res) => {
 
   } catch (error) {
     console.error("❌ REGISTER ERROR:", error)
-    res.status(500).json({ error: "Registration failed" })
+    res.status(500).json({ message: "Registration failed" })
   }
 })
 
@@ -60,19 +64,19 @@ router.post("/login", async (req, res) => {
     const { email, password } = req.body || {}
 
     if (!email || !password) {
-      return res.status(400).json({ error: "Missing credentials" })
+      return res.status(400).json({ message: "Missing credentials" })
     }
 
     const user = await User.findOne({ email })
 
     if (!user) {
-      return res.status(400).json({ error: "User not found" })
+      return res.status(400).json({ message: "User not found" })
     }
 
     const validPassword = await bcrypt.compare(password, user.password)
 
     if (!validPassword) {
-      return res.status(400).json({ error: "Invalid password" })
+      return res.status(400).json({ message: "Invalid password" })
     }
 
     const token = jwt.sign(
@@ -93,7 +97,7 @@ router.post("/login", async (req, res) => {
 
   } catch (error) {
     console.error("❌ LOGIN ERROR:", error)
-    res.status(500).json({ error: "Login failed" })
+    res.status(500).json({ message: "Login failed" })
   }
 })
 
@@ -103,39 +107,45 @@ router.get("/profile", requireAuth, async (req, res) => {
     const user = await User.findById(req.user.id).select("-password")
 
     if (!user) {
-      return res.status(404).json({ error: "User not found" })
+      return res.status(404).json({ message: "User not found" })
     }
 
     res.json({ user })
 
   } catch (error) {
     console.error("❌ PROFILE ERROR:", error)
-    res.status(500).json({ error: "Failed to load profile" })
+    res.status(500).json({ message: "Failed to load profile" })
   }
 })
 
 /* ================= CHANGE PASSWORD ================= */
 router.post("/change-password", requireAuth, async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body
+    const { currentPassword, newPassword } = req.body || {}
 
     if (!currentPassword || !newPassword) {
       return res.status(400).json({
-        error: "Current and new password required"
+        message: "Current and new password required"
+      })
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        message: "New password must be at least 6 characters"
       })
     }
 
     const user = await User.findById(req.user.id)
 
     if (!user) {
-      return res.status(404).json({ error: "User not found" })
+      return res.status(404).json({ message: "User not found" })
     }
 
     const valid = await bcrypt.compare(currentPassword, user.password)
 
     if (!valid) {
       return res.status(400).json({
-        error: "Incorrect current password"
+        message: "Incorrect current password"
       })
     }
 
@@ -144,11 +154,13 @@ router.post("/change-password", requireAuth, async (req, res) => {
 
     console.log("🔐 PASSWORD UPDATED:", user.email)
 
-    res.json({ success: true })
+    res.json({
+      message: "Password updated successfully"
+    })
 
   } catch (err) {
     console.error("❌ CHANGE PASSWORD ERROR:", err)
-    res.status(500).json({ error: "Password update failed" })
+    res.status(500).json({ message: "Password update failed" })
   }
 })
 
@@ -177,7 +189,7 @@ router.post("/create-admin", async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE ADMIN ERROR:", err)
-    res.status(500).json({ error: err.message })
+    res.status(500).json({ message: err.message })
   }
 })
 
