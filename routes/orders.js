@@ -7,7 +7,7 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
-   🛒 CREATE ORDER (FINAL FIXED VERSION)
+   🛒 CREATE ORDER (FIXED + SAFE + VARIANT READY)
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
@@ -28,8 +28,6 @@ router.post("/", async (req, res) => {
 
     const { customerName, email, items } = req.body
 
-    console.log("🧪 ITEMS RECEIVED:", items)
-
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "No items provided" })
     }
@@ -38,22 +36,24 @@ router.post("/", async (req, res) => {
     let totalQuantity = 0
     const processedItems = []
 
-    /* ================= LOOP ================= */
+    /* ================= INVENTORY LOOP ================= */
     for (const item of items) {
 
-      /* 🔥 FIX: USE productId */
+      /* 🔥 FIXED: use productId */
       const product = await Product.findById(item.productId)
 
       if (!product) {
-        console.error("❌ Product not found:", item.productId)
+        console.error("❌ Product lookup failed:", item.productId)
         throw new Error("Product not found")
       }
 
-      /* 🔥 FIX: NO _id — use color + size */
+      if (!item.selectedVariant?._id) {
+        console.error("❌ Missing variant:", item)
+        throw new Error("Variant missing")
+      }
+
       const variant = product.variants.find(
-        v =>
-          v.color === item.selectedVariant?.color &&
-          v.size === item.selectedVariant?.size
+        v => String(v._id) === String(item.selectedVariant._id)
       )
 
       if (!variant) {
@@ -63,12 +63,16 @@ router.post("/", async (req, res) => {
 
       const qty = Number(item.quantity) || 1
 
-      /* 🔥 STOCK CHECK ONLY (DO NOT DEDUCT HERE) */
+      /* 🔥 STOCK CHECK */
       if (variant.stock < qty) {
         throw new Error(
           `${product.name} (${variant.size}) only has ${variant.stock} left`
         )
       }
+
+      /* 🔥 DEDUCT STOCK */
+      variant.stock -= qty
+      await product.save()
 
       /* 🔥 SECURE PRICE */
       const lineTotal = variant.price * qty
@@ -80,9 +84,8 @@ router.post("/", async (req, res) => {
         name: product.name,
         quantity: qty,
         price: variant.price,
-
-        /* 🔥 STORE VARIANT CLEANLY */
         variant: {
+          _id: variant._id,
           color: variant.color,
           size: variant.size
         }
@@ -94,18 +97,14 @@ router.post("/", async (req, res) => {
       user: userId,
       customerName: customerName || "Guest",
       email: email || "",
-
       items: processedItems,
       quantity: totalQuantity,
-
       subtotal: total,
       tax: total * 0.0825,
       price: total * 1.0825,
       finalPrice: total * 1.0825,
-
       source: "store",
       status: "payment_required",
-
       timeline: [
         {
           status: "created",
@@ -117,7 +116,7 @@ router.post("/", async (req, res) => {
 
     console.log("✅ ORDER CREATED:", order._id)
 
-    /* 📧 EMAIL */
+    /* 🔥 EMAIL */
     if (order.email) {
       await sendOrderStatusEmail(
         order.email,
@@ -133,7 +132,7 @@ router.post("/", async (req, res) => {
     return res.status(201).json(order)
 
   } catch (err) {
-    console.error("❌ ORDER ERROR FULL:", err)
+    console.error("❌ ORDER ERROR:", err.message)
 
     return res.status(500).json({
       message: err.message
