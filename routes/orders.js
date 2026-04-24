@@ -129,15 +129,12 @@ router.post("/", async (req, res) => {
 
   } catch (err) {
     console.error("❌ ORDER ERROR:", err)
-    return res.status(500).json({
-      message: err.message || "Server error"
-    })
+    return res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   👤 GET MY ORDERS (FIXED)
-   ⚠️ MUST BE ABOVE /:id ROUTE
+   👤 GET MY ORDERS (BULLETPROOF)
 ========================================================= */
 router.get("/my-orders", async (req, res) => {
   try {
@@ -145,25 +142,45 @@ router.get("/my-orders", async (req, res) => {
 
     const authHeader = req.headers.authorization
 
-    if (!authHeader?.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "No token provided" })
+    if (!authHeader) {
+      console.log("⚠️ No auth header")
+      return res.json([]) // return empty instead of crash
     }
 
     const token = authHeader.split(" ")[1]
 
+    if (!token) {
+      console.log("⚠️ No token")
+      return res.json([])
+    }
+
     let decoded
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET)
     } catch (err) {
-      console.error("❌ TOKEN ERROR:", err.message)
-      return res.status(401).json({ message: "Invalid token" })
+      console.error("❌ TOKEN INVALID:", err.message)
+      return res.json([])
+    }
+
+    console.log("🔑 USER:", decoded)
+
+    const query = []
+
+    if (decoded.id) {
+      query.push({ user: decoded.id })
+    }
+
+    if (decoded.email) {
+      query.push({ email: decoded.email })
+    }
+
+    if (query.length === 0) {
+      return res.json([])
     }
 
     const orders = await Order.find({
-      $or: [
-        { user: decoded.id },
-        { email: decoded.email || "" }
-      ]
+      $or: query
     }).sort({ createdAt: -1 })
 
     console.log("📦 ORDERS FOUND:", orders.length)
@@ -172,9 +189,7 @@ router.get("/my-orders", async (req, res) => {
 
   } catch (err) {
     console.error("❌ MY ORDERS ERROR:", err)
-    return res.status(500).json({
-      message: "Server error fetching orders"
-    })
+    return res.status(500).json({ message: "Server error" })
   }
 })
 
