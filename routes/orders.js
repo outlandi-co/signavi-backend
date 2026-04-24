@@ -40,8 +40,8 @@ router.post("/", async (req, res) => {
     const processedItems = []
 
     for (const item of items) {
-
       const productId = item.productId || item._id
+
       if (!productId) {
         return res.status(400).json({ message: "Missing productId" })
       }
@@ -52,6 +52,7 @@ router.post("/", async (req, res) => {
       }
 
       const selectedVariant = item.selectedVariant || {}
+
       if (!selectedVariant.color || !selectedVariant.size) {
         return res.status(400).json({ message: "Invalid variant data" })
       }
@@ -97,7 +98,7 @@ router.post("/", async (req, res) => {
     }
 
     const order = await Order.create({
-      user: userId,
+      user: userId, // 🔥 CRITICAL FIX
       customerName: customerName || "Guest",
       email: email || userEmail || "",
       items: processedItems,
@@ -125,7 +126,10 @@ router.post("/", async (req, res) => {
 
     req.app.get("io")?.emit("jobCreated", order)
 
-    return res.status(201).json(order)
+    return res.status(201).json({
+      success: true,
+      data: order
+    })
 
   } catch (err) {
     console.error("❌ ORDER ERROR:", err)
@@ -134,7 +138,7 @@ router.post("/", async (req, res) => {
 })
 
 /* =========================================================
-   👤 GET MY ORDERS (BULLETPROOF)
+   👤 GET MY ORDERS (🔥 FIXED)
 ========================================================= */
 router.get("/my-orders", async (req, res) => {
   try {
@@ -142,41 +146,30 @@ router.get("/my-orders", async (req, res) => {
 
     const authHeader = req.headers.authorization
 
-    if (!authHeader) {
+    if (!authHeader?.startsWith("Bearer ")) {
       console.log("⚠️ No auth header")
-      return res.json([]) // return empty instead of crash
+      return res.json({ success: true, data: [] })
     }
 
     const token = authHeader.split(" ")[1]
 
-    if (!token) {
-      console.log("⚠️ No token")
-      return res.json([])
-    }
-
     let decoded
-
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET)
     } catch (err) {
       console.error("❌ TOKEN INVALID:", err.message)
-      return res.json([])
+      return res.json({ success: true, data: [] })
     }
 
     console.log("🔑 USER:", decoded)
 
     const query = []
 
-    if (decoded.id) {
-      query.push({ user: decoded.id })
-    }
-
-    if (decoded.email) {
-      query.push({ email: decoded.email })
-    }
+    if (decoded.id) query.push({ user: decoded.id })
+    if (decoded.email) query.push({ email: decoded.email })
 
     if (query.length === 0) {
-      return res.json([])
+      return res.json({ success: true, data: [] })
     }
 
     const orders = await Order.find({
@@ -185,7 +178,10 @@ router.get("/my-orders", async (req, res) => {
 
     console.log("📦 ORDERS FOUND:", orders.length)
 
-    return res.json(orders)
+    return res.json({
+      success: true,
+      data: orders
+    })
 
   } catch (err) {
     console.error("❌ MY ORDERS ERROR:", err)

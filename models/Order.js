@@ -4,7 +4,8 @@ import mongoose from "mongoose"
 const itemSchema = new mongoose.Schema({
   name: {
     type: String,
-    default: ""
+    default: "",
+    trim: true
   },
 
   quantity: {
@@ -19,15 +20,19 @@ const itemSchema = new mongoose.Schema({
     min: 0
   },
 
-  /* 🔥 VARIANT (CRITICAL FIX) */
+  /* 🔥 VARIANT */
   variant: {
     color: {
       type: String,
-      default: ""
+      default: "",
+      lowercase: true,
+      trim: true
     },
     size: {
       type: String,
-      default: ""
+      default: "",
+      uppercase: true,
+      trim: true
     }
   }
 
@@ -56,7 +61,8 @@ const orderSchema = new mongoose.Schema({
     type: String,
     default: "",
     lowercase: true,
-    trim: true
+    trim: true,
+    index: true // 🔥 IMPORTANT FOR FAST LOOKUP
   },
 
   /* ================= ORDER ================= */
@@ -101,7 +107,7 @@ const orderSchema = new mongoose.Schema({
     min: 0
   },
 
-  /* 🔥 ITEMS WITH VARIANTS */
+  /* 🔥 ITEMS */
   items: {
     type: [itemSchema],
     default: []
@@ -128,7 +134,7 @@ const orderSchema = new mongoose.Schema({
       "archive",
       "denied"
     ],
-    default: "pending",
+    default: "payment_required", // 🔥 BETTER DEFAULT
     index: true
   },
 
@@ -146,16 +152,19 @@ const orderSchema = new mongoose.Schema({
   serviceLevel: { type: String, default: "Ground Advantage" },
 
   /* ================= TIMELINE ================= */
-  timeline: [
-    {
-      status: String,
-      date: {
-        type: Date,
-        default: Date.now
-      },
-      note: String
-    }
-  ],
+  timeline: {
+    type: [
+      {
+        status: String,
+        date: {
+          type: Date,
+          default: Date.now
+        },
+        note: String
+      }
+    ],
+    default: []
+  },
 
   /* ================= PAYMENT ================= */
   stripePaymentIntentId: { type: String, default: "" },
@@ -182,5 +191,10 @@ const orderSchema = new mongoose.Schema({
 }, {
   timestamps: true
 })
+
+/* ================= INDEXES (🔥 BIG PERFORMANCE BOOST) ================= */
+orderSchema.index({ user: 1, createdAt: -1 })
+orderSchema.index({ email: 1, createdAt: -1 })
+orderSchema.index({ status: 1 })
 
 export default mongoose.model("Order", orderSchema)
