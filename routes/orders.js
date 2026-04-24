@@ -14,6 +14,8 @@ router.post("/", async (req, res) => {
     console.log("🛒 CREATE ORDER HIT")
 
     let userId = null
+    let userEmail = ""
+
     const authHeader = req.headers.authorization
 
     if (authHeader?.startsWith("Bearer ")) {
@@ -21,6 +23,7 @@ router.post("/", async (req, res) => {
         const token = authHeader.split(" ")[1]
         const decoded = jwt.verify(token, process.env.JWT_SECRET)
         userId = decoded.id
+        userEmail = decoded.email || ""
       } catch {
         console.log("⚠️ Guest checkout")
       }
@@ -39,19 +42,16 @@ router.post("/", async (req, res) => {
     for (const item of items) {
 
       const productId = item.productId || item._id
-
       if (!productId) {
         return res.status(400).json({ message: "Missing productId" })
       }
 
       const product = await Product.findById(productId)
-
       if (!product) {
         return res.status(400).json({ message: "Product not found" })
       }
 
       const selectedVariant = item.selectedVariant || {}
-
       if (!selectedVariant.color || !selectedVariant.size) {
         return res.status(400).json({ message: "Invalid variant data" })
       }
@@ -99,7 +99,7 @@ router.post("/", async (req, res) => {
     const order = await Order.create({
       user: userId,
       customerName: customerName || "Guest",
-      email: email || "",
+      email: email || userEmail || "",
       items: processedItems,
       quantity: totalQuantity,
       subtotal: total,
@@ -136,7 +136,50 @@ router.post("/", async (req, res) => {
 })
 
 /* =========================================================
-   📦 GET ORDER (TRACKING PAGE)
+   👤 GET MY ORDERS (FIXED)
+   ⚠️ MUST BE ABOVE /:id ROUTE
+========================================================= */
+router.get("/my-orders", async (req, res) => {
+  try {
+    console.log("👤 MY ORDERS HIT")
+
+    const authHeader = req.headers.authorization
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "No token provided" })
+    }
+
+    const token = authHeader.split(" ")[1]
+
+    let decoded
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET)
+    } catch (err) {
+      console.error("❌ TOKEN ERROR:", err.message)
+      return res.status(401).json({ message: "Invalid token" })
+    }
+
+    const orders = await Order.find({
+      $or: [
+        { user: decoded.id },
+        { email: decoded.email || "" }
+      ]
+    }).sort({ createdAt: -1 })
+
+    console.log("📦 ORDERS FOUND:", orders.length)
+
+    return res.json(orders)
+
+  } catch (err) {
+    console.error("❌ MY ORDERS ERROR:", err)
+    return res.status(500).json({
+      message: "Server error fetching orders"
+    })
+  }
+})
+
+/* =========================================================
+   📦 GET ORDER BY ID
 ========================================================= */
 router.get("/:id", async (req, res) => {
   try {
@@ -149,12 +192,13 @@ router.get("/:id", async (req, res) => {
     res.json(order)
 
   } catch (err) {
+    console.error("❌ GET ORDER ERROR:", err)
     res.status(500).json({ message: "Server error" })
   }
 })
 
 /* =========================================================
-   🚚 UPDATE SHIPPING (ADMIN UI)
+   🚚 UPDATE SHIPPING
 ========================================================= */
 router.patch("/update-shipping/:id", async (req, res) => {
   try {
@@ -169,7 +213,6 @@ router.patch("/update-shipping/:id", async (req, res) => {
     order.trackingNumber = trackingNumber
     order.trackingLink = trackingLink
     order.carrier = carrier
-
     order.status = "shipped"
 
     order.timeline = order.timeline || []
@@ -181,10 +224,8 @@ router.patch("/update-shipping/:id", async (req, res) => {
 
     await order.save()
 
-    /* 🔥 SOCKET UPDATE */
     req.app.get("io")?.emit("jobUpdated", order)
 
-    /* 📧 OPTIONAL EMAIL */
     if (order.email) {
       await sendOrderStatusEmail(order.email, "shipped", order._id, order)
     }
