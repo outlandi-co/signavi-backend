@@ -1,13 +1,11 @@
 import express from "express"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
+import Product from "../models/Product.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* =========================================================
-   🔥 SQUARE WEBHOOK → AUTO PROCESS (FINAL VERSION)
-========================================================= */
 router.post("/square", express.json(), async (req, res) => {
   try {
     console.log("📡 WEBHOOK RECEIVED")
@@ -15,9 +13,6 @@ router.post("/square", express.json(), async (req, res) => {
     const event = req.body
     console.log("🧪 EVENT TYPE:", event?.type)
 
-    /* =========================================================
-       💳 VALIDATE PAYMENT
-    ========================================================= */
     const payment = event?.data?.object?.payment
 
     if (!payment) {
@@ -26,15 +21,13 @@ router.post("/square", express.json(), async (req, res) => {
     }
 
     if (payment.status !== "COMPLETED") {
-      console.log("⏭️ Skipping status:", payment.status)
+      console.log("⏭️ Skipping:", payment.status)
       return res.sendStatus(200)
     }
 
-    console.log("💳 PAYMENT:", payment.id)
+    console.log("💳 PAYMENT COMPLETE:", payment.id)
 
-    /* =========================================================
-       🔥 METADATA
-    ========================================================= */
+    /* ================= METADATA ================= */
     const metadata = payment?.metadata || {}
 
     const recordId =
@@ -52,9 +45,7 @@ router.post("/square", express.json(), async (req, res) => {
 
     console.log(`📦 PROCESSING ${type.toUpperCase()}:`, recordId)
 
-    /* =========================================================
-       🔥 EXTRACT EMAIL FROM SQUARE
-    ========================================================= */
+    /* ================= EMAIL ================= */
     const buyerEmail =
       payment?.buyerEmailAddress ||
       payment?.billingAddress?.email ||
@@ -68,19 +59,12 @@ router.post("/square", express.json(), async (req, res) => {
     if (type === "quote") {
       const quote = await Quote.findById(recordId)
 
-      if (!quote) {
-        console.warn("⚠️ Quote not found:", recordId)
-        return res.sendStatus(200)
-      }
-
-      if (quote.status === "paid" || quote.status === "archive") {
-        console.log("⚠️ Quote already processed")
+      if (!quote || quote.status === "paid" || quote.status === "archive") {
         return res.sendStatus(200)
       }
 
       quote.status = "paid"
-
-      if (!quote.timeline) quote.timeline = []
+      quote.timeline = quote.timeline || []
 
       quote.timeline.push({
         status: "paid",
@@ -90,22 +74,18 @@ router.post("/square", express.json(), async (req, res) => {
 
       await quote.save()
 
-      console.log("✅ QUOTE MARKED PAID")
-
       const order = new Order({
         customerName: quote.customerName,
-        email: buyerEmail || quote.email, // 🔥 FIXED
+        email: buyerEmail || quote.email,
         quantity: quote.quantity,
         price: quote.price,
         finalPrice: quote.price,
         items: quote.items,
         artwork: quote.artwork,
         notes: quote.notes,
-
         status: "paid",
         productionStatus: "queued",
         source: "quote",
-
         timeline: [
           {
             status: "paid",
@@ -116,14 +96,10 @@ router.post("/square", express.json(), async (req, res) => {
       })
 
       await order.save()
-
-      console.log("🔥 ORDER CREATED:", order._id)
-
       quote.status = "archive"
       await quote.save()
 
-      const io = req.app.get("io")
-      if (io) io.emit("jobCreated", order)
+      req.app.get("io")?.emit("jobCreated", order)
 
       if (order.email) {
         await sendOrderStatusEmail(order.email, "paid", order._id, order)
@@ -131,50 +107,75 @@ router.post("/square", express.json(), async (req, res) => {
     }
 
     /* =========================================================
-       🟩 ORDER → MARK PAID + SYNC EMAIL
+       🟩 ORDER → INVENTORY + PAID
     ========================================================= */
     if (type === "order") {
       const order = await Order.findById(recordId)
 
-      if (!order) {
-        console.warn("⚠️ Order not found:", recordId)
+      if (!order || order.status === "paid") {
         return res.sendStatus(200)
       }
 
-      if (order.status === "paid") {
-        console.log("⚠️ Order already processed")
-        return res.sendStatus(200)
-      }
-
-      /* 🔥 UPDATE EMAIL FROM SQUARE */
+      /* 🔥 UPDATE EMAIL */
       if (buyerEmail && !order.email) {
         order.email = buyerEmail
-        console.log("✅ ORDER EMAIL UPDATED")
       }
 
+      console.log("🔥 DEDUCTING INVENTORY...")
+
+      /* ================= INVENTORY DEDUCTION ================= */
+      for (const item of order.items) {
+
+        const product = await Product.findOne({ name: item.name })
+
+        if (!product || !product.variants?.length) {
+          console.warn("⚠️ Product missing:", item.name)
+          continue
+        }
+
+        const variant = product.variants.find(v => {
+          return (
+            String(v.color).trim().toLowerCase() ===
+            String(item.variant?.color).trim().toLowerCase() &&
+            String(v.size).trim().toUpperCase() ===
+            String(item.variant?.size).trim().toUpperCase()
+          )
+        })
+
+        if (!variant) {
+          console.warn("⚠️ Variant missing:", item.variant)
+          continue
+        }
+
+        variant.stock = Math.max(0, variant.stock - item.quantity)
+
+        console.log(
+          `📦 STOCK UPDATED → ${product.name} (${variant.size}) = ${variant.stock}`
+        )
+
+        await product.save()
+      }
+
+      /* ================= MARK PAID ================= */
       order.status = "paid"
       order.productionStatus = "queued"
 
-      if (!order.timeline) order.timeline = []
-
+      order.timeline = order.timeline || []
       order.timeline.push({
         status: "paid",
         date: new Date(),
-        note: "Payment received via webhook"
+        note: "Payment confirmed via webhook"
       })
 
       await order.save()
 
       console.log("✅ ORDER MARKED PAID:", order._id)
 
-      const io = req.app.get("io")
-      if (io) io.emit("jobUpdated", order)
+      req.app.get("io")?.emit("jobUpdated", order)
 
       if (order.email) {
         await sendOrderStatusEmail(order.email, "paid", order._id, order)
         console.log("📧 EMAIL SENT")
-      } else {
-        console.warn("⚠️ No email available")
       }
     }
 
