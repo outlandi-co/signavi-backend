@@ -3,7 +3,6 @@ import "dotenv/config"
 
 import express from "express"
 import mongoose from "mongoose"
-import cors from "cors"
 import cookieParser from "cookie-parser"
 import http from "http"
 import { Server } from "socket.io"
@@ -28,19 +27,20 @@ const server = http.createServer(app)
 /* ================= LOG ================= */
 console.log("\n🔥 SERVER READY 🚀\n")
 
-/* ================= CORS (FINAL HARD FIX) ================= */
-app.use((req, res, next) => {
-  const allowedOrigins = [
-    "https://signavistudio.store",
-    "http://localhost:5173"
-  ]
+/* ================= CORS (BULLETPROOF) ================= */
+const allowedOrigins = [
+  "https://signavistudio.store",
+  "http://localhost:5173"
+]
 
+app.use((req, res, next) => {
   const origin = req.headers.origin
 
   if (allowedOrigins.includes(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin)
   }
 
+  res.setHeader("Vary", "Origin") // 🔥 important for proxies
   res.setHeader("Access-Control-Allow-Credentials", "true")
 
   res.setHeader(
@@ -53,7 +53,7 @@ app.use((req, res, next) => {
     "Origin, X-Requested-With, Content-Type, Accept, Authorization"
   )
 
-  /* 🔥 HANDLE PREFLIGHT REQUEST */
+  /* 🔥 HANDLE PREFLIGHT */
   if (req.method === "OPTIONS") {
     return res.sendStatus(200)
   }
@@ -81,11 +81,8 @@ app.use("/api/square", squareRoutes)
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: [
-      "https://signavistudio.store",
-      "http://localhost:5173"
-    ],
-    methods: ["GET", "POST", "PATCH"]
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
   }
 })
 
