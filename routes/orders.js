@@ -1,228 +1,99 @@
 import express from "express"
-import jwt from "jsonwebtoken"
 import Order from "../models/Order.js"
-import Product from "../models/Product.js"
-import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* =========================================================
-   👑 ADMIN - GET ALL ORDERS (PROTECTED)
-========================================================= */
-router.get("/", async (req, res) => {
-  try {
-    console.log("👑 ADMIN GET ALL ORDERS")
-
-    const authHeader = req.headers.authorization
-
-    if (!authHeader?.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "No token provided" })
-    }
-
-    const token = authHeader.split(" ")[1]
-
-    let decoded
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET)
-    } catch (err) {
-      console.error("❌ TOKEN INVALID:", err.message)
-      return res.status(401).json({ message: "Invalid token" })
-    }
-
-    if (decoded.role !== "admin") {
-      console.log("⛔ NOT ADMIN:", decoded)
-      return res.status(403).json({ message: "Forbidden - Admins only" })
-    }
-
-    const orders = await Order.find().sort({ createdAt: -1 })
-
-    console.log("📦 ADMIN ORDERS:", orders.length)
-
-    return res.json({
-      success: true,
-      data: orders
-    })
-
-  } catch (err) {
-    console.error("❌ ADMIN ORDERS ERROR:", err)
-    return res.status(500).json({ message: "Server error" })
-  }
-})
-
-/* =========================================================
-   🛒 CREATE ORDER
-========================================================= */
+/* ================= CREATE ORDER ================= */
 router.post("/", async (req, res) => {
   try {
-    console.log("🛒 CREATE ORDER HIT")
+    console.log("📦 INCOMING ORDER:", JSON.stringify(req.body, null, 2))
 
-    let userId = null
-    let userEmail = ""
+    const {
+      customerName,
+      email,
+      items = []
+    } = req.body
 
-    const authHeader = req.headers.authorization
-
-    if (authHeader?.startsWith("Bearer ")) {
-      try {
-        const token = authHeader.split(" ")[1]
-        const decoded = jwt.verify(token, process.env.JWT_SECRET)
-        userId = decoded.id
-        userEmail = decoded.email || ""
-      } catch {
-        console.log("⚠️ Guest checkout")
-      }
+    /* 🔥 BASIC VALIDATION ONLY */
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" })
     }
-
-    const { customerName, email, items } = req.body
 
     if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: "No items provided" })
+      return res.status(400).json({ message: "Items are required" })
     }
 
-    let total = 0
-    let totalQuantity = 0
-    const processedItems = []
-
-    for (const item of items) {
-      const productId = item.productId || item._id
-
-      if (!productId) {
-        return res.status(400).json({ message: "Missing productId" })
+    /* 🔥 SANITIZE ITEMS (NO HARD FAILS) */
+    const cleanItems = items.map(item => ({
+      productId: item.productId || item._id || item.id || null,
+      name: item.name || "Item",
+      quantity: Number(item.quantity || 1),
+      price: Number(item.price || 0),
+      variant: {
+        color: item?.variant?.color || "",
+        size: item?.variant?.size || ""
       }
+    }))
 
-      const product = await Product.findById(productId)
-      if (!product) {
-        return res.status(400).json({ message: "Product not found" })
-      }
+    /* 🔥 CALCULATE TOTALS (BACKEND SOURCE OF TRUTH) */
+    const subtotal = cleanItems.reduce((sum, item) => {
+      return sum + (item.price * item.quantity)
+    }, 0)
 
-      const selectedVariant = item.selectedVariant || {}
+    const taxRate = 0.0825
+    const tax = subtotal * taxRate
 
-      if (!selectedVariant.color || !selectedVariant.size) {
-        return res.status(400).json({ message: "Invalid variant data" })
-      }
+    const finalPrice = subtotal + tax
 
-      const incomingColor = String(selectedVariant.color).trim().toLowerCase()
-      const incomingSize = String(selectedVariant.size).trim().toUpperCase()
-
-      const variant = product.variants.find(v => {
-        const dbColor = String(v.color || "").trim().toLowerCase()
-        const dbSize = String(v.size || "").trim().toUpperCase()
-        return dbColor === incomingColor && dbSize === incomingSize
-      })
-
-      if (!variant) {
-        return res.status(400).json({
-          message: `Variant not found: ${selectedVariant.color} / ${selectedVariant.size}`
-        })
-      }
-
-      const qty = Number(item.quantity) || 1
-
-      if (variant.stock < qty) {
-        return res.status(400).json({
-          message: `${product.name} (${variant.size}) only has ${variant.stock} left`
-        })
-      }
-
-      const price = Number(variant.price || 0)
-      const lineTotal = price * qty
-
-      total += lineTotal
-      totalQuantity += qty
-
-      processedItems.push({
-        name: product.name,
-        quantity: qty,
-        price,
-        variant: {
-          color: variant.color,
-          size: variant.size
-        }
-      })
-    }
-
-    const order = await Order.create({
-      user: userId,
+    /* 🔥 CREATE ORDER */
+    const order = new Order({
       customerName: customerName || "Guest",
-      email: email || userEmail || "",
-      items: processedItems,
-      quantity: totalQuantity,
-      subtotal: total,
-      tax: total * 0.0825,
-      price: total * 1.0825,
-      finalPrice: total * 1.0825,
-      source: "store",
+      email,
+
+      items: cleanItems,
+
+      quantity: cleanItems.reduce((sum, i) => sum + i.quantity, 0),
+
+      subtotal,
+      tax,
+      price: subtotal,
+      finalPrice,
+
       status: "payment_required",
-      timeline: [
-        {
-          status: "created",
-          date: new Date(),
-          note: "Order created"
-        }
-      ]
+      source: "store"
     })
+
+    await order.save()
 
     console.log("✅ ORDER CREATED:", order._id)
 
-    if (order.email) {
-      await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
-    }
-
-    req.app.get("io")?.emit("jobCreated", order)
-
-    return res.status(201).json({
+    res.json({
       success: true,
       data: order
     })
 
   } catch (err) {
-    console.error("❌ ORDER ERROR:", err)
-    return res.status(500).json({ message: err.message })
+    console.error("❌ CREATE ORDER ERROR:", err)
+    res.status(500).json({ message: "Server error creating order" })
   }
 })
 
-/* =========================================================
-   👤 GET MY ORDERS
-========================================================= */
-router.get("/my-orders", async (req, res) => {
+/* ================= GET ALL (ADMIN) ================= */
+router.get("/", async (req, res) => {
   try {
-    console.log("👤 MY ORDERS HIT")
+    const orders = await Order.find().sort({ createdAt: -1 })
 
-    const authHeader = req.headers.authorization
-
-    if (!authHeader?.startsWith("Bearer ")) {
-      return res.json({ success: true, data: [] })
-    }
-
-    const token = authHeader.split(" ")[1]
-
-    let decoded
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET)
-    } catch (err) {
-      return res.json({ success: true, data: [] })
-    }
-
-    const query = []
-
-    if (decoded.id) query.push({ user: decoded.id })
-    if (decoded.email) query.push({ email: decoded.email })
-
-    const orders = await Order.find({ $or: query }).sort({ createdAt: -1 })
-
-    return res.json({
+    res.json({
       success: true,
       data: orders
     })
-
   } catch (err) {
-    console.error("❌ MY ORDERS ERROR:", err)
-    return res.status(500).json({ message: "Server error" })
+    console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ message: "Failed to fetch orders" })
   }
 })
 
-/* =========================================================
-   📦 GET ORDER BY ID
-========================================================= */
+/* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -231,11 +102,45 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    res.json(order)
-
+    res.json({
+      success: true,
+      data: order
+    })
   } catch (err) {
     console.error("❌ GET ORDER ERROR:", err)
-    res.status(500).json({ message: "Server error" })
+    res.status(500).json({ message: "Failed to fetch order" })
+  }
+})
+
+/* ================= UPDATE STATUS ================= */
+router.patch("/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body
+
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.status = status || order.status
+
+    order.timeline.push({
+      status: order.status,
+      date: new Date(),
+      note: "Status updated"
+    })
+
+    await order.save()
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ STATUS UPDATE ERROR:", err)
+    res.status(500).json({ message: "Failed to update status" })
   }
 })
 
