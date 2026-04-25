@@ -28,12 +28,21 @@ const server = http.createServer(app)
 /* ================= LOG ================= */
 console.log("\n🔥 SERVER READY 🚀\n")
 
-/* ================= CORS (FIRST!) ================= */
-app.use(cors({
-  origin: true, // 🔥 allow dynamic origins (BEST FOR DEV)
+/* ================= CORS (FIXED) ================= */
+const corsOptions = {
+  origin: [
+    "https://signavistudio.store",
+    "http://localhost:5173"
+  ],
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-}))
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // 🔥 PATCH ADDED
+  allowedHeaders: ["Content-Type", "Authorization"]
+}
+
+app.use(cors(corsOptions))
+
+// 🔥 HANDLE PREFLIGHT (CRITICAL FIX)
+app.options("*", cors(corsOptions))
 
 /* ================= MIDDLEWARE ================= */
 app.use(express.json())
@@ -55,7 +64,11 @@ app.use("/api/square", squareRoutes)
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: true
+    origin: [
+      "https://signavistudio.store",
+      "http://localhost:5173"
+    ],
+    methods: ["GET", "POST", "PATCH"]
   }
 })
 
