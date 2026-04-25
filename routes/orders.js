@@ -7,6 +7,49 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 
 /* =========================================================
+   👑 ADMIN - GET ALL ORDERS (PROTECTED)
+========================================================= */
+router.get("/", async (req, res) => {
+  try {
+    console.log("👑 ADMIN GET ALL ORDERS")
+
+    const authHeader = req.headers.authorization
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({ message: "No token provided" })
+    }
+
+    const token = authHeader.split(" ")[1]
+
+    let decoded
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET)
+    } catch (err) {
+      console.error("❌ TOKEN INVALID:", err.message)
+      return res.status(401).json({ message: "Invalid token" })
+    }
+
+    if (decoded.role !== "admin") {
+      console.log("⛔ NOT ADMIN:", decoded)
+      return res.status(403).json({ message: "Forbidden - Admins only" })
+    }
+
+    const orders = await Order.find().sort({ createdAt: -1 })
+
+    console.log("📦 ADMIN ORDERS:", orders.length)
+
+    return res.json({
+      success: true,
+      data: orders
+    })
+
+  } catch (err) {
+    console.error("❌ ADMIN ORDERS ERROR:", err)
+    return res.status(500).json({ message: "Server error" })
+  }
+})
+
+/* =========================================================
    🛒 CREATE ORDER
 ========================================================= */
 router.post("/", async (req, res) => {
@@ -98,7 +141,7 @@ router.post("/", async (req, res) => {
     }
 
     const order = await Order.create({
-      user: userId, // 🔥 CRITICAL FIX
+      user: userId,
       customerName: customerName || "Guest",
       email: email || userEmail || "",
       items: processedItems,
@@ -138,7 +181,7 @@ router.post("/", async (req, res) => {
 })
 
 /* =========================================================
-   👤 GET MY ORDERS (🔥 FIXED)
+   👤 GET MY ORDERS
 ========================================================= */
 router.get("/my-orders", async (req, res) => {
   try {
@@ -147,7 +190,6 @@ router.get("/my-orders", async (req, res) => {
     const authHeader = req.headers.authorization
 
     if (!authHeader?.startsWith("Bearer ")) {
-      console.log("⚠️ No auth header")
       return res.json({ success: true, data: [] })
     }
 
@@ -157,26 +199,15 @@ router.get("/my-orders", async (req, res) => {
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET)
     } catch (err) {
-      console.error("❌ TOKEN INVALID:", err.message)
       return res.json({ success: true, data: [] })
     }
-
-    console.log("🔑 USER:", decoded)
 
     const query = []
 
     if (decoded.id) query.push({ user: decoded.id })
     if (decoded.email) query.push({ email: decoded.email })
 
-    if (query.length === 0) {
-      return res.json({ success: true, data: [] })
-    }
-
-    const orders = await Order.find({
-      $or: query
-    }).sort({ createdAt: -1 })
-
-    console.log("📦 ORDERS FOUND:", orders.length)
+    const orders = await Order.find({ $or: query }).sort({ createdAt: -1 })
 
     return res.json({
       success: true,
@@ -205,47 +236,6 @@ router.get("/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ GET ORDER ERROR:", err)
     res.status(500).json({ message: "Server error" })
-  }
-})
-
-/* =========================================================
-   🚚 UPDATE SHIPPING
-========================================================= */
-router.patch("/update-shipping/:id", async (req, res) => {
-  try {
-    const { trackingNumber, trackingLink, carrier } = req.body
-
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    order.trackingNumber = trackingNumber
-    order.trackingLink = trackingLink
-    order.carrier = carrier
-    order.status = "shipped"
-
-    order.timeline = order.timeline || []
-    order.timeline.push({
-      status: "shipped",
-      date: new Date(),
-      note: "Order shipped"
-    })
-
-    await order.save()
-
-    req.app.get("io")?.emit("jobUpdated", order)
-
-    if (order.email) {
-      await sendOrderStatusEmail(order.email, "shipped", order._id, order)
-    }
-
-    res.json(order)
-
-  } catch (err) {
-    console.error("❌ SHIPPING ERROR:", err)
-    res.status(500).json({ message: "Error updating shipping" })
   }
 })
 
