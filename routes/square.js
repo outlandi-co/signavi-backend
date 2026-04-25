@@ -17,15 +17,12 @@ const client = new SquareClient({
 const LOCATION_ID = process.env.SQUARE_SANDBOX_LOCATION_ID
 
 /* =========================================================
-   💳 CREATE PAYMENT LINK (SANDBOX ONLY)
+   💳 CREATE PAYMENT LINK
 ========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
-    console.log("💳 CREATE PAYMENT:", id)
-
-    /* ================= ENV CHECK ================= */
     if (!process.env.SQUARE_SANDBOX_ACCESS_TOKEN) {
       throw new Error("Missing sandbox access token")
     }
@@ -52,11 +49,26 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("📦 TYPE:", type)
 
-    /* ================= PRICE ================= */
-    const amountValue =
-      Number(record.finalPrice) ||
-      Number(record.price) ||
-      0
+    /* ================= PRICE CALC ================= */
+    let amountValue = 0
+
+    if (type === "quote") {
+      const subtotal = Number(record.price || 0)
+      const shipping = Number(record.shippingCost || 0)
+
+      const TAX_RATE = 0.0825
+      const tax = subtotal * TAX_RATE
+
+      amountValue = subtotal + shipping + tax
+
+      /* optional: store for reference */
+      record.finalPrice = amountValue
+    } else {
+      amountValue =
+        Number(record.finalPrice) ||
+        Number(record.price) ||
+        0
+    }
 
     if (!amountValue || isNaN(amountValue)) {
       throw new Error("Invalid price")
@@ -64,7 +76,6 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("💰 FINAL PRICE:", amountValue)
 
-    /* 🔥 Convert to cents */
     const amountCents = BigInt(Math.round(amountValue * 100))
 
     /* ================= CREATE PAYMENT ================= */
@@ -96,30 +107,17 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    console.log("🧪 SQUARE RESPONSE RECEIVED")
-
     let url = response?.paymentLink?.url
 
-    if (!url) {
-      throw new Error("No payment URL returned from Square")
-    }
-
-    /* ================= SANITIZE ================= */
-    if (url.startsWith("ttps://")) {
-      url = "h" + url
-    }
+    if (!url) throw new Error("No payment URL returned")
 
     if (!url.startsWith("http")) {
-      url = `https://${url}`
+      url = `https://${url.replace(/^https?:\/\//, "")}`
     }
-
-    console.log("🌐 PAYMENT URL: 🧪 SANDBOX LINK")
 
     /* ================= SAVE ================= */
     record.paymentUrl = url
     await record.save()
-
-    console.log("✅ PAYMENT LINK SAVED")
 
     return res.json({
       success: true,
@@ -128,11 +126,10 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR FULL:", err)
+    console.error("❌ SQUARE ERROR:", err)
 
     return res.status(500).json({
-      message: err.message,
-      details: err?.errors || null
+      message: err.message
     })
   }
 })
