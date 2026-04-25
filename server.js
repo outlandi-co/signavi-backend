@@ -19,15 +19,15 @@ import expenseRoutes from "./routes/expenses.js"
 import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
+import shippingRoutes from "./routes/shipping.js"
 
 /* ================= APP ================= */
 const app = express()
 const server = http.createServer(app)
 
-/* ================= LOG ================= */
 console.log("\n🔥 SERVER READY 🚀\n")
 
-/* ================= CORS (BULLETPROOF) ================= */
+/* ================= CORS ================= */
 const allowedOrigins = [
   "https://signavistudio.store",
   "http://localhost:5173"
@@ -40,7 +40,7 @@ app.use((req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", origin)
   }
 
-  res.setHeader("Vary", "Origin") // 🔥 important for proxies
+  res.setHeader("Vary", "Origin")
   res.setHeader("Access-Control-Allow-Credentials", "true")
 
   res.setHeader(
@@ -53,7 +53,6 @@ app.use((req, res, next) => {
     "Origin, X-Requested-With, Content-Type, Accept, Authorization"
   )
 
-  /* 🔥 HANDLE PREFLIGHT */
   if (req.method === "OPTIONS") {
     return res.sendStatus(200)
   }
@@ -77,6 +76,7 @@ app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
+app.use("/api/shipping", shippingRoutes)
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {

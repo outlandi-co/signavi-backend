@@ -1,5 +1,7 @@
 import express from "express"
+import axios from "axios"
 import Order from "../models/Order.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
@@ -60,7 +62,13 @@ router.post("/", async (req, res) => {
       price: subtotal,
       finalPrice,
       status: "payment_required",
-      source: "store"
+      source: "store",
+      timeline: [
+        {
+          status: "payment_required",
+          note: "Order created, awaiting payment"
+        }
+      ]
     })
 
     await order.save()
@@ -76,7 +84,75 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= GET MY ORDERS (🔥 FIX) ================= */
+/* ================= SHIP ORDER (🔥 CORE FEATURE) ================= */
+router.post("/ship/:id", async (req, res) => {
+  try {
+    console.log("🚚 SHIPPING ORDER:", req.params.id)
+
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    /* 🔥 CALL SHIPPING SERVICE */
+    const shipRes = await axios.post(
+      `${process.env.BASE_URL}/api/shipping/create-shipment`,
+      {
+        address_to: {
+          name: order.customerName,
+          street1: "123 Customer St", // 🔥 REPLACE WITH REAL DATA LATER
+          city: "Merced",
+          state: "CA",
+          zip: "95340",
+          country: "US"
+        }
+      }
+    )
+
+    console.log("📦 SHIPPO RESPONSE:", shipRes.data)
+
+    /* 🔥 SAVE SHIPPING DATA */
+    order.trackingNumber = shipRes.data.trackingNumber || ""
+    order.trackingLink = shipRes.data.trackingLink || ""
+    order.shippingLabel = shipRes.data.labelUrl || ""
+
+    order.status = "shipped"
+
+    order.timeline.push({
+      status: "shipped",
+      date: new Date(),
+      note: "Order shipped"
+    })
+
+    await order.save()
+
+    /* 🔥 SEND EMAIL */
+    await sendOrderStatusEmail(
+      order.email,
+      "shipped",
+      order._id,
+      order
+    )
+
+    /* 🔥 SOCKET UPDATE */
+    const io = req.app.get("io")
+    if (io) {
+      io.emit("jobUpdated")
+    }
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ SHIP ERROR:", err)
+    res.status(500).json({ message: "Shipping failed" })
+  }
+})
+
+/* ================= GET MY ORDERS ================= */
 router.get("/my-orders", async (req, res) => {
   try {
     console.log("📥 FETCH MY ORDERS")
@@ -91,8 +167,6 @@ router.get("/my-orders", async (req, res) => {
 
     const orders = await Order.find({ email })
       .sort({ createdAt: -1 })
-
-    console.log("✅ ORDERS FOUND:", orders.length)
 
     res.json({
       success: true,
@@ -111,7 +185,8 @@ router.get("/my-orders", async (req, res) => {
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
-    const orders = await Order.find().sort({ createdAt: -1 })
+    const orders = await Order.find()
+      .sort({ createdAt: -1 })
 
     res.json({
       success: true,
