@@ -95,6 +95,60 @@ router.post("/create-shipment", async (req, res) => {
     console.log("➡️ Service:", rate.servicelevel?.name)
     console.log("➡️ Cost:", rate.amount)
 
+    router.post("/get-rates", async (req, res) => {
+  try {
+    console.log("📦 Getting shipping rates...")
+
+    if (!req.body.address_to) {
+      return res.status(400).json({ error: "address_to required" })
+    }
+
+    const shipmentRes = await axios.post(
+      `${SHIPPO_API}/shipments/`,
+      {
+        address_from: {
+          name: "SignaVi",
+          street1: "123 Main St",
+          city: "Merced",
+          state: "CA",
+          zip: "95340",
+          country: "US"
+        },
+        address_to: req.body.address_to,
+        parcels: [
+          {
+            length: "10",
+            width: "7",
+            height: "1",
+            distance_unit: "in",
+            weight: "1",
+            mass_unit: "lb"
+          }
+        ],
+        async: false
+      },
+      {
+        headers: {
+          Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
+    )
+
+    const rates = shipmentRes.data.rates || []
+
+    res.json({
+      success: true,
+      rates: rates.slice(0, 3) // return top 3 options
+    })
+
+  } catch (err) {
+    console.error("❌ RATE ERROR:", err.response?.data || err.message)
+    res.status(500).json({ error: "Failed to get rates" })
+  }
+})
+
+
     /* ================= CREATE LABEL ================= */
     console.log("🏷️ Creating label...")
 
