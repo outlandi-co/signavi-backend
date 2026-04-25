@@ -7,6 +7,13 @@ const quoteSchema = new mongoose.Schema({
   quantity: { type: Number, default: 1 },
   price: { type: Number, default: 25 },
 
+  /* 🔥 NEW: SHIPPING */
+  shippingCost: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
   items: [
     {
       name: String,
@@ -61,7 +68,10 @@ const quoteSchema = new mongoose.Schema({
   timeline: [
     {
       status: String,
-      date: Date,
+      date: {
+        type: Date,
+        default: Date.now
+      },
       note: String
     }
   ]
