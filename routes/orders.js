@@ -8,13 +8,8 @@ router.post("/", async (req, res) => {
   try {
     console.log("📦 INCOMING ORDER:", JSON.stringify(req.body, null, 2))
 
-    const {
-      customerName,
-      email,
-      items = []
-    } = req.body
+    const { customerName, email, items = [] } = req.body
 
-    /* 🔥 BASIC VALIDATION ONLY */
     if (!email) {
       return res.status(400).json({ message: "Email is required" })
     }
@@ -23,7 +18,6 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "Items are required" })
     }
 
-    /* 🔥 SANITIZE ITEMS (FIXED VARIANT + SAFE FALLBACKS) */
     const cleanItems = items.map(item => {
       const safeColor =
         item?.variant?.color ||
@@ -41,7 +35,6 @@ router.post("/", async (req, res) => {
         quantity: Number(item.quantity || 1),
         price: Number(item.price || 0),
 
-        /* 🔥 FIXED VARIANT */
         variant: {
           color: safeColor.toLowerCase(),
           size: safeSize.toUpperCase()
@@ -49,7 +42,6 @@ router.post("/", async (req, res) => {
       }
     })
 
-    /* 🔥 CALCULATE TOTALS (BACKEND SOURCE OF TRUTH) */
     const subtotal = cleanItems.reduce((sum, item) => {
       return sum + (item.price * item.quantity)
     }, 0)
@@ -58,27 +50,20 @@ router.post("/", async (req, res) => {
     const tax = subtotal * taxRate
     const finalPrice = subtotal + tax
 
-    /* 🔥 CREATE ORDER */
     const order = new Order({
       customerName: customerName || "Guest",
       email,
-
       items: cleanItems,
-
       quantity: cleanItems.reduce((sum, i) => sum + i.quantity, 0),
-
       subtotal,
       tax,
       price: subtotal,
       finalPrice,
-
       status: "payment_required",
       source: "store"
     })
 
     await order.save()
-
-    console.log("✅ ORDER CREATED:", order._id)
 
     res.json({
       success: true,
@@ -87,11 +72,43 @@ router.post("/", async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE ORDER ERROR:", err)
-    res.status(500).json({ message: err.message || "Server error creating order" })
+    res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= GET ALL (ADMIN) ================= */
+/* ================= GET MY ORDERS (🔥 FIX) ================= */
+router.get("/my-orders", async (req, res) => {
+  try {
+    console.log("📥 FETCH MY ORDERS")
+
+    const email = req.query.email
+
+    if (!email) {
+      return res.status(400).json({
+        message: "Email required"
+      })
+    }
+
+    const orders = await Order.find({ email })
+      .sort({ createdAt: -1 })
+
+    console.log("✅ ORDERS FOUND:", orders.length)
+
+    res.json({
+      success: true,
+      data: orders
+    })
+
+  } catch (err) {
+    console.error("❌ MY ORDERS ERROR:", err)
+
+    res.status(500).json({
+      message: "Failed to fetch orders"
+    })
+  }
+})
+
+/* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 })
@@ -101,7 +118,6 @@ router.get("/", async (req, res) => {
       data: orders
     })
   } catch (err) {
-    console.error("❌ GET ORDERS ERROR:", err)
     res.status(500).json({ message: "Failed to fetch orders" })
   }
 })
@@ -120,40 +136,7 @@ router.get("/:id", async (req, res) => {
       data: order
     })
   } catch (err) {
-    console.error("❌ GET ORDER ERROR:", err)
     res.status(500).json({ message: "Failed to fetch order" })
-  }
-})
-
-/* ================= UPDATE STATUS ================= */
-router.patch("/:id/status", async (req, res) => {
-  try {
-    const { status } = req.body
-
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    order.status = status || order.status
-
-    order.timeline.push({
-      status: order.status,
-      date: new Date(),
-      note: "Status updated"
-    })
-
-    await order.save()
-
-    res.json({
-      success: true,
-      data: order
-    })
-
-  } catch (err) {
-    console.error("❌ STATUS UPDATE ERROR:", err)
-    res.status(500).json({ message: "Failed to update status" })
   }
 })
 
