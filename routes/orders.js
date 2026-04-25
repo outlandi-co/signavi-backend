@@ -23,17 +23,31 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ message: "Items are required" })
     }
 
-    /* 🔥 SANITIZE ITEMS (NO HARD FAILS) */
-    const cleanItems = items.map(item => ({
-      productId: item.productId || item._id || item.id || null,
-      name: item.name || "Item",
-      quantity: Number(item.quantity || 1),
-      price: Number(item.price || 0),
-      variant: {
-        color: item?.variant?.color || "",
-        size: item?.variant?.size || ""
+    /* 🔥 SANITIZE ITEMS (FIXED VARIANT + SAFE FALLBACKS) */
+    const cleanItems = items.map(item => {
+      const safeColor =
+        item?.variant?.color ||
+        item?.selectedVariant?.color ||
+        "standard"
+
+      const safeSize =
+        item?.variant?.size ||
+        item?.selectedVariant?.size ||
+        "M"
+
+      return {
+        productId: item.productId || item._id || item.id || null,
+        name: item.name || "Item",
+        quantity: Number(item.quantity || 1),
+        price: Number(item.price || 0),
+
+        /* 🔥 FIXED VARIANT */
+        variant: {
+          color: safeColor.toLowerCase(),
+          size: safeSize.toUpperCase()
+        }
       }
-    }))
+    })
 
     /* 🔥 CALCULATE TOTALS (BACKEND SOURCE OF TRUTH) */
     const subtotal = cleanItems.reduce((sum, item) => {
@@ -42,7 +56,6 @@ router.post("/", async (req, res) => {
 
     const taxRate = 0.0825
     const tax = subtotal * taxRate
-
     const finalPrice = subtotal + tax
 
     /* 🔥 CREATE ORDER */
@@ -74,7 +87,7 @@ router.post("/", async (req, res) => {
 
   } catch (err) {
     console.error("❌ CREATE ORDER ERROR:", err)
-    res.status(500).json({ message: "Server error creating order" })
+    res.status(500).json({ message: err.message || "Server error creating order" })
   }
 })
 
