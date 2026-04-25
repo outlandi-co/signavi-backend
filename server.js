@@ -28,21 +28,38 @@ const server = http.createServer(app)
 /* ================= LOG ================= */
 console.log("\n🔥 SERVER READY 🚀\n")
 
-/* ================= CORS (FIXED) ================= */
-const corsOptions = {
-  origin: [
+/* ================= CORS (FINAL HARD FIX) ================= */
+app.use((req, res, next) => {
+  const allowedOrigins = [
     "https://signavistudio.store",
     "http://localhost:5173"
-  ],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], // 🔥 PATCH ADDED
-  allowedHeaders: ["Content-Type", "Authorization"]
-}
+  ]
 
-app.use(cors(corsOptions))
+  const origin = req.headers.origin
 
-// 🔥 HANDLE PREFLIGHT (CRITICAL FIX)
-app.options("*", cors(corsOptions))
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin)
+  }
+
+  res.setHeader("Access-Control-Allow-Credentials", "true")
+
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+  )
+
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  )
+
+  /* 🔥 HANDLE PREFLIGHT REQUEST */
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200)
+  }
+
+  next()
+})
 
 /* ================= MIDDLEWARE ================= */
 app.use(express.json())
