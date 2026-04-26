@@ -77,6 +77,8 @@ router.post("/get-rates", async (req, res) => {
 /* ================= CREATE SHIPMENT ================= */
 router.post("/create-shipment", async (req, res) => {
   try {
+    console.log("🚚 CREATE SHIPMENT HIT")
+
     if (!req.body?.address_to) {
       return res.status(400).json({ error: "address_to required" })
     }
@@ -116,6 +118,10 @@ router.post("/create-shipment", async (req, res) => {
     )
 
     const rate = shipmentRes.data.rates?.[0]
+
+    if (!rate) {
+      return res.status(400).json({ error: "No rates found" })
+    }
 
     const transactionRes = await axios.post(
       `${SHIPPO_API}/transactions/`,
