@@ -23,18 +23,20 @@ router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
+    console.log("💳 CREATE PAYMENT:", id)
+
+    /* 🔥 ENV CHECK */
     if (!process.env.SQUARE_SANDBOX_ACCESS_TOKEN) {
-      throw new Error("Missing sandbox access token")
+      throw new Error("Missing SQUARE_SANDBOX_ACCESS_TOKEN")
     }
 
-    if (!LOCATION_ID) {
-      throw new Error("Missing sandbox location ID")
+    if (!process.env.SQUARE_SANDBOX_LOCATION_ID) {
+      throw new Error("Missing SQUARE_SANDBOX_LOCATION_ID")
     }
 
     const CLIENT_URL =
       process.env.CLIENT_URL || "http://localhost:5173"
 
-    /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
     let type = "quote"
 
@@ -49,7 +51,7 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("📦 TYPE:", type)
 
-    /* ================= PRICE CALC ================= */
+    /* ================= PRICE ================= */
     let amountValue = 0
 
     if (type === "quote") {
@@ -60,9 +62,6 @@ router.post("/create-payment/:id", async (req, res) => {
       const tax = subtotal * TAX_RATE
 
       amountValue = subtotal + shipping + tax
-
-      /* optional: store for reference */
-      record.finalPrice = amountValue
     } else {
       amountValue =
         Number(record.finalPrice) ||
@@ -70,13 +69,16 @@ router.post("/create-payment/:id", async (req, res) => {
         0
     }
 
+    console.log("💰 CALCULATED:", amountValue)
+
     if (!amountValue || isNaN(amountValue)) {
-      throw new Error("Invalid price")
+      throw new Error("Invalid price calculation")
     }
 
-    console.log("💰 FINAL PRICE:", amountValue)
-
+    /* 🔥 FIX: ALWAYS SAFE BIGINT */
     const amountCents = BigInt(Math.round(amountValue * 100))
+
+    console.log("💰 CENTS:", amountCents.toString())
 
     /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
@@ -115,9 +117,10 @@ router.post("/create-payment/:id", async (req, res) => {
       url = `https://${url.replace(/^https?:\/\//, "")}`
     }
 
-    /* ================= SAVE ================= */
     record.paymentUrl = url
     await record.save()
+
+    console.log("✅ PAYMENT LINK CREATED:", url)
 
     return res.json({
       success: true,
@@ -126,12 +129,18 @@ router.post("/create-payment/:id", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR:", err)
+    console.error("❌ SQUARE ERROR:")
+
+    if (err.response) {
+      console.error("📡 STATUS:", err.response.status)
+      console.error("📡 DATA:", JSON.stringify(err.response.data, null, 2))
+    } else {
+      console.error("🔥 SERVER:", err.message)
+    }
 
     return res.status(500).json({
       message: err.message
     })
   }
 })
-
 export default router

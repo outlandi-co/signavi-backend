@@ -27,12 +27,34 @@ router.get("/health", (req, res) => {
 router.post("/get-rates", async (req, res) => {
   try {
     console.log("\n📦 ===== GET RATES HIT =====")
+    console.log("📥 BODY:", req.body)
 
     if (!req.body?.address_to) {
-      return res.status(400).json({ error: "address_to required" })
+      return res.status(400).json({
+        error: "address_to required"
+      })
     }
 
     const addressTo = normalizeAddress(req.body.address_to)
+
+    /* 🔥 STRICT VALIDATION */
+    const requiredFields = ["name", "street1", "city", "state", "zip", "country"]
+
+    for (let field of requiredFields) {
+      if (!addressTo[field]) {
+        return res.status(400).json({
+          error: `Missing field: ${field}`,
+          addressTo
+        })
+      }
+    }
+
+    console.log("📍 VALIDATED ADDRESS:", addressTo)
+
+    /* 🔥 ENSURE API KEY */
+    if (!process.env.SHIPPO_API_KEY) {
+      throw new Error("SHIPPO_API_KEY missing in environment")
+    }
 
     const shipmentRes = await axios.post(
       `${SHIPPO_API}/shipments/`,
@@ -68,7 +90,7 @@ router.post("/get-rates", async (req, res) => {
 
     const rates = shipmentRes.data.rates || []
 
-    console.log("💰 Rates Found:", rates.length)
+    console.log("💰 RATES:", rates)
 
     res.json({
       success: true,
@@ -76,7 +98,14 @@ router.post("/get-rates", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ RATE ERROR:", err.response?.data || err.message)
+    console.error("❌ SHIPPO FULL ERROR:")
+
+    if (err.response) {
+      console.error("📡 STATUS:", err.response.status)
+      console.error("📡 DATA:", JSON.stringify(err.response.data, null, 2))
+    } else {
+      console.error("🔥 SERVER:", err.message)
+    }
 
     res.status(500).json({
       error: "Failed to get rates",

@@ -15,7 +15,6 @@ router.post("/", async (req, res) => {
       email,
       items = [],
 
-      /* 🔥 NEW SHIPPING FIELDS */
       shippingAddress,
       shippingCost = 0,
       shippingRateId = "",
@@ -47,10 +46,9 @@ router.post("/", async (req, res) => {
       0
     )
 
-    const taxRate = 0.0825
-    const tax = subtotal * taxRate
+    const TAX_RATE = 0.0825
+    const tax = subtotal * TAX_RATE
 
-    /* 🔥 INCLUDE SHIPPING */
     const finalPrice =
       subtotal +
       tax +
@@ -67,7 +65,6 @@ router.post("/", async (req, res) => {
       price: subtotal,
       finalPrice,
 
-      /* 🔥 SAVE SHIPPING */
       shippingAddress,
       shippingCost,
       shippingRateId,
@@ -95,7 +92,7 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= CHECKOUT (SAVE ADDRESS + SHIPPING) ================= */
+/* ================= CHECKOUT (🔥 FIXED) ================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -112,11 +109,31 @@ router.patch("/:id/checkout", async (req, res) => {
       serviceLevel
     } = req.body
 
+    /* ================= SAVE SHIPPING ================= */
     order.shippingAddress = shippingAddress
     order.shippingCost = Number(shippingCost || 0)
     order.shippingRateId = shippingRateId
     order.carrier = carrier
     order.serviceLevel = serviceLevel
+
+    /* ================= 🔥 RECALCULATE TOTAL ================= */
+    const subtotal =
+      Number(order.subtotal) ||
+      Number(order.price) ||
+      0
+
+    const TAX_RATE = 0.0825
+    const tax = subtotal * TAX_RATE
+
+    const finalPrice =
+      subtotal +
+      tax +
+      order.shippingCost
+
+    order.tax = tax
+    order.finalPrice = finalPrice
+
+    console.log("💰 UPDATED FINAL PRICE:", finalPrice)
 
     await order.save()
 
@@ -145,12 +162,11 @@ router.post("/ship/:id", async (req, res) => {
       })
     }
 
-    /* 🔥 USE REAL ADDRESS */
     const shipRes = await axios.post(
       `${process.env.BASE_URL}/api/shipping/create-shipment`,
       {
         address_to: order.shippingAddress,
-        rate_id: order.shippingRateId // 🔥 IMPORTANT
+        rate_id: order.shippingRateId
       }
     )
 
@@ -183,7 +199,7 @@ router.post("/ship/:id", async (req, res) => {
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ SHIP ERROR:", err)
+    console.error("❌ SHIP ERROR:", err.response?.data || err.message)
     res.status(500).json({ message: "Shipping failed" })
   }
 })
