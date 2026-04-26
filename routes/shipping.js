@@ -18,7 +18,7 @@ const normalizeAddress = (addr = {}) => {
   }
 }
 
-/* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
+/* ================= HEALTH CHECK ================= */
 router.get("/health", (req, res) => {
   res.json({ ok: true, route: "shipping" })
 })
@@ -29,14 +29,10 @@ router.post("/get-rates", async (req, res) => {
     console.log("\n📦 ===== GET RATES HIT =====")
 
     if (!req.body?.address_to) {
-      return res.status(400).json({
-        error: "address_to required"
-      })
+      return res.status(400).json({ error: "address_to required" })
     }
 
     const addressTo = normalizeAddress(req.body.address_to)
-
-    console.log("📍 Normalized Address:", addressTo)
 
     const shipmentRes = await axios.post(
       `${SHIPPO_API}/shipments/`,
@@ -76,12 +72,11 @@ router.post("/get-rates", async (req, res) => {
 
     res.json({
       success: true,
-      rates: rates.slice(0, 3) // top 3 options
+      rates: rates.slice(0, 3)
     })
 
   } catch (err) {
-    console.error("❌ RATE ERROR:")
-    console.error(err.response?.data || err.message)
+    console.error("❌ RATE ERROR:", err.response?.data || err.message)
 
     res.status(500).json({
       error: "Failed to get rates",
@@ -95,15 +90,51 @@ router.post("/create-shipment", async (req, res) => {
   try {
     console.log("\n🚚 ===== CREATE SHIPMENT HIT =====")
 
-    if (!req.body?.address_to) {
-      return res.status(400).json({
-        error: "address_to required"
+    const { address_to, rate_id } = req.body
+
+    if (!address_to) {
+      return res.status(400).json({ error: "address_to required" })
+    }
+
+    const addressTo = normalizeAddress(address_to)
+
+    console.log("📍 Address:", addressTo)
+    console.log("🎯 Selected Rate ID:", rate_id)
+
+    /* =========================================================
+       🔥 USE SELECTED RATE IF PROVIDED
+    ========================================================= */
+    if (rate_id) {
+      console.log("✅ Using user-selected rate")
+
+      const transactionRes = await axios.post(
+        `${SHIPPO_API}/transactions/`,
+        {
+          rate: rate_id,
+          label_file_type: "PDF"
+        },
+        {
+          headers: {
+            Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`,
+            "Content-Type": "application/json"
+          }
+        }
+      )
+
+      const t = transactionRes.data
+
+      return res.json({
+        success: true,
+        trackingNumber: t.tracking_number,
+        trackingLink: t.tracking_url_provider,
+        labelUrl: t.label_url
       })
     }
 
-    const addressTo = normalizeAddress(req.body.address_to)
-
-    console.log("📍 Normalized Address:", addressTo)
+    /* =========================================================
+       🔄 FALLBACK (if no rate_id)
+    ========================================================= */
+    console.log("⚠️ No rate_id provided — falling back to first rate")
 
     const shipmentRes = await axios.post(
       `${SHIPPO_API}/shipments/`,
@@ -141,15 +172,10 @@ router.post("/create-shipment", async (req, res) => {
     const rate = shipment.rates?.[0]
 
     if (!rate) {
-      console.error("❌ No rates found")
-
       return res.status(400).json({
-        error: "No shipping rates found",
-        shipment
+        error: "No rates found"
       })
     }
-
-    console.log("💰 Using Rate:", rate.amount)
 
     const transactionRes = await axios.post(
       `${SHIPPO_API}/transactions/`,
@@ -167,9 +193,6 @@ router.post("/create-shipment", async (req, res) => {
 
     const t = transactionRes.data
 
-    console.log("✅ SHIPMENT CREATED")
-    console.log("📦 Tracking:", t.tracking_number)
-
     res.json({
       success: true,
       trackingNumber: t.tracking_number,
@@ -178,8 +201,7 @@ router.post("/create-shipment", async (req, res) => {
     })
 
   } catch (err) {
-    console.error("❌ SHIP ERROR:")
-    console.error(err.response?.data || err.message)
+    console.error("❌ SHIP ERROR:", err.response?.data || err.message)
 
     res.status(500).json({
       error: "Shipment failed",
