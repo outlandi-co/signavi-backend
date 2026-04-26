@@ -2,45 +2,30 @@ import express from "express"
 import axios from "axios"
 
 const router = express.Router()
-
 const SHIPPO_API = "https://api.goshippo.com"
 
-/* 🔥 CONFIRM ROUTE LOAD */
 console.log("🚚 SHIPPING ROUTE LOADED")
 
-/* ================= CREATE SHIPMENT ================= */
-router.post("/create-shipment", async (req, res) => {
+/* ================= NORMALIZE ================= */
+const normalizeAddress = (addr = {}) => ({
+  name: addr.name || "",
+  street1: addr.street1 || "",
+  city: addr.city || "",
+  state: (addr.state || "").toUpperCase(),
+  zip: String(addr.zip || ""),
+  country: (addr.country || "US").toUpperCase()
+})
+
+/* ================= GET RATES ================= */
+router.post("/get-rates", async (req, res) => {
   try {
-    console.log("\n📦 ===== NEW SHIPMENT REQUEST =====")
+    console.log("📦 GET RATES HIT")
 
-    /* 🔥 LOG BODY */
-    console.log("📥 Incoming Body:", JSON.stringify(req.body, null, 2))
-
-    /* 🔥 VALIDATION */
-    if (!req.body || !req.body.address_to) {
-      console.error("❌ address_to missing")
-
-      return res.status(400).json({
-        error: "address_to is required",
-        example: {
-          address_to: {
-            name: "Adam",
-            street1: "456 Test St",
-            city: "Merced",
-            state: "CA",
-            zip: "95340",
-            country: "US"
-          }
-        }
-      })
+    if (!req.body?.address_to) {
+      return res.status(400).json({ error: "address_to required" })
     }
 
-    const addressTo = req.body.address_to
-
-    console.log("📍 Shipping To:", addressTo)
-
-    /* ================= CREATE SHIPMENT ================= */
-    console.log("🚚 Calling Shippo /shipments...")
+    const addressTo = normalizeAddress(req.body.address_to)
 
     const shipmentRes = await axios.post(
       `${SHIPPO_API}/shipments/`,
@@ -74,34 +59,29 @@ router.post("/create-shipment", async (req, res) => {
       }
     )
 
-    const shipment = shipmentRes.data
+    res.json({
+      success: true,
+      rates: shipmentRes.data.rates || []
+    })
 
-    console.log("📦 Shipment created")
-    console.log("➡️ Rates:", shipment.rates?.length || 0)
+  } catch (err) {
+    console.error("❌ RATE ERROR:", err.response?.data || err.message)
 
-    const rate = shipment.rates?.[0]
+    res.status(500).json({
+      error: "Failed to get rates",
+      details: err.response?.data || err.message
+    })
+  }
+})
 
-    if (!rate) {
-      console.error("❌ No rates returned from Shippo")
-
-      return res.status(400).json({
-        error: "No shipping rates found",
-        shipment
-      })
-    }
-
-    console.log("💰 Selected Rate:")
-    console.log("➡️ Carrier:", rate.provider)
-    console.log("➡️ Service:", rate.servicelevel?.name)
-    console.log("➡️ Cost:", rate.amount)
-
-    router.post("/get-rates", async (req, res) => {
+/* ================= CREATE SHIPMENT ================= */
+router.post("/create-shipment", async (req, res) => {
   try {
-    console.log("📦 Getting shipping rates...")
-
-    if (!req.body.address_to) {
+    if (!req.body?.address_to) {
       return res.status(400).json({ error: "address_to required" })
     }
+
+    const addressTo = normalizeAddress(req.body.address_to)
 
     const shipmentRes = await axios.post(
       `${SHIPPO_API}/shipments/`,
@@ -114,7 +94,7 @@ router.post("/create-shipment", async (req, res) => {
           zip: "95340",
           country: "US"
         },
-        address_to: req.body.address_to,
+        address_to: addressTo,
         parcels: [
           {
             length: "10",
@@ -135,22 +115,7 @@ router.post("/create-shipment", async (req, res) => {
       }
     )
 
-    const rates = shipmentRes.data.rates || []
-
-    res.json({
-      success: true,
-      rates: rates.slice(0, 3) // return top 3 options
-    })
-
-  } catch (err) {
-    console.error("❌ RATE ERROR:", err.response?.data || err.message)
-    res.status(500).json({ error: "Failed to get rates" })
-  }
-})
-
-
-    /* ================= CREATE LABEL ================= */
-    console.log("🏷️ Creating label...")
+    const rate = shipmentRes.data.rates?.[0]
 
     const transactionRes = await axios.post(
       `${SHIPPO_API}/transactions/`,
@@ -166,31 +131,16 @@ router.post("/create-shipment", async (req, res) => {
       }
     )
 
-    const transaction = transactionRes.data
-
-    console.log("🏷️ Label created successfully")
-    console.log("➡️ Tracking:", transaction.tracking_number)
-    console.log("➡️ Label URL:", transaction.label_url)
-
-    console.log("✅ ===== SHIPMENT COMPLETE =====\n")
+    const t = transactionRes.data
 
     res.json({
-      success: true,
-      trackingNumber: transaction.tracking_number,
-      trackingLink: transaction.tracking_url_provider,
-      labelUrl: transaction.label_url
+      trackingNumber: t.tracking_number,
+      trackingLink: t.tracking_url_provider,
+      labelUrl: t.label_url
     })
 
   } catch (err) {
-    console.error("\n❌ ===== SHIP ERROR =====")
-
-    if (err.response) {
-      console.error("📡 Shippo Response:", err.response.data)
-    } else {
-      console.error("🔥 Server Error:", err.message)
-    }
-
-    console.error("❌ =====================\n")
+    console.error("❌ SHIP ERROR:", err.response?.data || err.message)
 
     res.status(500).json({
       error: "Shipment failed",
