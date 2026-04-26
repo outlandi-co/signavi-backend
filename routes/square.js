@@ -7,25 +7,19 @@ const router = express.Router()
 
 console.log("💳 SQUARE ROUTE LOADED → SANDBOX MODE")
 
-/* ================= CLIENT (SANDBOX ONLY) ================= */
 const client = new SquareClient({
   token: process.env.SQUARE_SANDBOX_ACCESS_TOKEN,
   environment: SquareEnvironment.Sandbox
 })
 
-/* ================= LOCATION ================= */
 const LOCATION_ID = process.env.SQUARE_SANDBOX_LOCATION_ID
 
-/* =========================================================
-   💳 CREATE PAYMENT LINK
-========================================================= */
 router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
     console.log("💳 CREATE PAYMENT:", id)
 
-    /* 🔥 ENV CHECK */
     if (!process.env.SQUARE_SANDBOX_ACCESS_TOKEN) {
       throw new Error("Missing SQUARE_SANDBOX_ACCESS_TOKEN")
     }
@@ -51,7 +45,7 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("📦 TYPE:", type)
 
-    /* ================= PRICE ================= */
+    /* ================= 🔥 ALWAYS RECALCULATE ================= */
     let amountValue = 0
 
     if (type === "quote") {
@@ -62,25 +56,46 @@ router.post("/create-payment/:id", async (req, res) => {
       const tax = subtotal * TAX_RATE
 
       amountValue = subtotal + shipping + tax
+
     } else {
-      amountValue =
-        Number(record.finalPrice) ||
+      const subtotal =
+        Number(record.subtotal) ||
         Number(record.price) ||
         0
+
+      const shipping = Number(record.shippingCost || 0)
+
+      const TAX_RATE = 0.0825
+      const tax = subtotal * TAX_RATE
+
+      amountValue = subtotal + shipping + tax
     }
 
     console.log("💰 CALCULATED:", amountValue)
 
-    if (!amountValue || isNaN(amountValue)) {
-      throw new Error("Invalid price calculation")
+    /* 🔥 HARD FAIL IF BAD DATA */
+    if (!amountValue || amountValue <= 0 || isNaN(amountValue)) {
+      console.error("❌ BAD ORDER DATA:", {
+        subtotal: record.subtotal,
+        price: record.price,
+        finalPrice: record.finalPrice,
+        shippingCost: record.shippingCost
+      })
+
+      return res.status(400).json({
+        message: "Invalid order price",
+        debug: {
+          subtotal: record.subtotal,
+          price: record.price,
+          shippingCost: record.shippingCost
+        }
+      })
     }
 
-    /* 🔥 FIX: ALWAYS SAFE BIGINT */
     const amountCents = BigInt(Math.round(amountValue * 100))
 
     console.log("💰 CENTS:", amountCents.toString())
 
-    /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
 
@@ -122,7 +137,7 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("✅ PAYMENT LINK CREATED:", url)
 
-    return res.json({
+    res.json({
       success: true,
       url,
       orderId: record._id
@@ -138,9 +153,10 @@ router.post("/create-payment/:id", async (req, res) => {
       console.error("🔥 SERVER:", err.message)
     }
 
-    return res.status(500).json({
+    res.status(500).json({
       message: err.message
     })
   }
 })
+
 export default router
