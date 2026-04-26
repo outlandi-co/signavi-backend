@@ -6,26 +6,37 @@ const SHIPPO_API = "https://api.goshippo.com"
 
 console.log("🚚 SHIPPING ROUTE LOADED")
 
-/* ================= NORMALIZE ================= */
-const normalizeAddress = (addr = {}) => ({
-  name: addr.name || "",
-  street1: addr.street1 || "",
-  city: addr.city || "",
-  state: (addr.state || "").toUpperCase(),
-  zip: String(addr.zip || ""),
-  country: (addr.country || "US").toUpperCase()
+/* ================= NORMALIZE ADDRESS ================= */
+const normalizeAddress = (addr = {}) => {
+  return {
+    name: addr.name || "",
+    street1: addr.street1 || "",
+    city: addr.city || "",
+    state: (addr.state || "").toUpperCase().slice(0, 2),
+    zip: String(addr.zip || "").trim(),
+    country: (addr.country || "US").toUpperCase()
+  }
+}
+
+/* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
+router.get("/health", (req, res) => {
+  res.json({ ok: true, route: "shipping" })
 })
 
 /* ================= GET RATES ================= */
 router.post("/get-rates", async (req, res) => {
   try {
-    console.log("📦 GET RATES HIT")
+    console.log("\n📦 ===== GET RATES HIT =====")
 
     if (!req.body?.address_to) {
-      return res.status(400).json({ error: "address_to required" })
+      return res.status(400).json({
+        error: "address_to required"
+      })
     }
 
     const addressTo = normalizeAddress(req.body.address_to)
+
+    console.log("📍 Normalized Address:", addressTo)
 
     const shipmentRes = await axios.post(
       `${SHIPPO_API}/shipments/`,
@@ -59,13 +70,18 @@ router.post("/get-rates", async (req, res) => {
       }
     )
 
+    const rates = shipmentRes.data.rates || []
+
+    console.log("💰 Rates Found:", rates.length)
+
     res.json({
       success: true,
-      rates: shipmentRes.data.rates || []
+      rates: rates.slice(0, 3) // top 3 options
     })
 
   } catch (err) {
-    console.error("❌ RATE ERROR:", err.response?.data || err.message)
+    console.error("❌ RATE ERROR:")
+    console.error(err.response?.data || err.message)
 
     res.status(500).json({
       error: "Failed to get rates",
@@ -77,13 +93,17 @@ router.post("/get-rates", async (req, res) => {
 /* ================= CREATE SHIPMENT ================= */
 router.post("/create-shipment", async (req, res) => {
   try {
-    console.log("🚚 CREATE SHIPMENT HIT")
+    console.log("\n🚚 ===== CREATE SHIPMENT HIT =====")
 
     if (!req.body?.address_to) {
-      return res.status(400).json({ error: "address_to required" })
+      return res.status(400).json({
+        error: "address_to required"
+      })
     }
 
     const addressTo = normalizeAddress(req.body.address_to)
+
+    console.log("📍 Normalized Address:", addressTo)
 
     const shipmentRes = await axios.post(
       `${SHIPPO_API}/shipments/`,
@@ -117,11 +137,19 @@ router.post("/create-shipment", async (req, res) => {
       }
     )
 
-    const rate = shipmentRes.data.rates?.[0]
+    const shipment = shipmentRes.data
+    const rate = shipment.rates?.[0]
 
     if (!rate) {
-      return res.status(400).json({ error: "No rates found" })
+      console.error("❌ No rates found")
+
+      return res.status(400).json({
+        error: "No shipping rates found",
+        shipment
+      })
     }
+
+    console.log("💰 Using Rate:", rate.amount)
 
     const transactionRes = await axios.post(
       `${SHIPPO_API}/transactions/`,
@@ -139,14 +167,19 @@ router.post("/create-shipment", async (req, res) => {
 
     const t = transactionRes.data
 
+    console.log("✅ SHIPMENT CREATED")
+    console.log("📦 Tracking:", t.tracking_number)
+
     res.json({
+      success: true,
       trackingNumber: t.tracking_number,
       trackingLink: t.tracking_url_provider,
       labelUrl: t.label_url
     })
 
   } catch (err) {
-    console.error("❌ SHIP ERROR:", err.response?.data || err.message)
+    console.error("❌ SHIP ERROR:")
+    console.error(err.response?.data || err.message)
 
     res.status(500).json({
       error: "Shipment failed",
