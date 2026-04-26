@@ -2,47 +2,19 @@ import mongoose from "mongoose"
 
 /* ================= ITEM SCHEMA ================= */
 const itemSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    default: "",
-    trim: true
-  },
+  name: { type: String, default: "", trim: true },
+  quantity: { type: Number, default: 1, min: 1 },
+  price: { type: Number, default: 0, min: 0 },
 
-  quantity: {
-    type: Number,
-    default: 1,
-    min: 1
-  },
-
-  price: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-
-  /* 🔥 VARIANT */
   variant: {
-    color: {
-      type: String,
-      default: "",
-      lowercase: true,
-      trim: true
-    },
-    size: {
-      type: String,
-      default: "",
-      uppercase: true,
-      trim: true
-    }
+    color: { type: String, default: "", lowercase: true, trim: true },
+    size: { type: String, default: "", uppercase: true, trim: true }
   }
-
 }, { _id: false })
-
 
 /* ================= ORDER SCHEMA ================= */
 const orderSchema = new mongoose.Schema({
 
-  /* ================= USER ================= */
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
@@ -50,70 +22,28 @@ const orderSchema = new mongoose.Schema({
     index: true
   },
 
-  /* ================= CUSTOMER ================= */
-  customerName: {
-    type: String,
-    default: "Unknown",
-    trim: true
-  },
+  customerName: { type: String, default: "Unknown", trim: true },
 
   email: {
     type: String,
     default: "",
     lowercase: true,
     trim: true,
-    index: true // 🔥 IMPORTANT FOR FAST LOOKUP
+    index: true
   },
 
-  /* ================= ORDER ================= */
-  quantity: {
-    type: Number,
-    default: 1,
-    min: 1
-  },
-
-  printType: {
-    type: String,
-    default: "screenprint"
-  },
-
-  artwork: {
-    type: String,
-    default: null
-  },
+  quantity: { type: Number, default: 1, min: 1 },
+  printType: { type: String, default: "screenprint" },
+  artwork: { type: String, default: null },
 
   /* ================= PRICING ================= */
-  subtotal: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
+  subtotal: { type: Number, default: 0, min: 0 },
+  tax: { type: Number, default: 0, min: 0 },
+  price: { type: Number, default: 0, min: 0 },
+  finalPrice: { type: Number, default: 0, min: 0 },
 
-  tax: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
+  items: { type: [itemSchema], default: [] },
 
-  price: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-
-  finalPrice: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-
-  /* 🔥 ITEMS */
-  items: {
-    type: [itemSchema],
-    default: []
-  },
-
-  /* ================= SOURCE ================= */
   source: {
     type: String,
     enum: ["store", "quote"],
@@ -134,14 +64,26 @@ const orderSchema = new mongoose.Schema({
       "archive",
       "denied"
     ],
-    default: "payment_required", // 🔥 BETTER DEFAULT
-    index: true
+    default: "payment_required"
+    // ❌ removed index:true here
   },
 
   /* ================= SHIPPING ================= */
   trackingNumber: { type: String, default: "" },
   trackingLink: { type: String, default: "" },
   shippingLabel: { type: String, default: "" },
+
+  // 🔥 OPTIONAL (recommended for your checkout flow)
+  shippingAddress: {
+    name: String,
+    street1: String,
+    city: String,
+    state: String,
+    zip: String,
+    country: String
+  },
+
+  shippingCost: { type: Number, default: 0 },
 
   weight: { type: Number, default: 1 },
   length: { type: Number, default: 10 },
@@ -156,10 +98,7 @@ const orderSchema = new mongoose.Schema({
     type: [
       {
         status: String,
-        date: {
-          type: Date,
-          default: Date.now
-        },
+        date: { type: Date, default: Date.now },
         note: String
       }
     ],
@@ -171,30 +110,20 @@ const orderSchema = new mongoose.Schema({
   stripeSessionId: { type: String, default: "" },
   stripeChargeId: { type: String, default: "" },
 
-  paymentUrl: {
-    type: String,
-    default: ""
-  },
+  paymentUrl: { type: String, default: "" },
 
-  /* ================= FINANCE ================= */
-  currency: {
-    type: String,
-    default: "usd"
-  },
-
+  currency: { type: String, default: "usd" },
   amountReceived: { type: Number, default: 0 },
   amountRefunded: { type: Number, default: 0 },
   stripeFee: { type: Number, default: 0 },
   netAmount: { type: Number, default: 0 },
   cogs: { type: Number, default: 0 }
 
-}, {
-  timestamps: true
-})
+}, { timestamps: true })
 
-/* ================= INDEXES (🔥 BIG PERFORMANCE BOOST) ================= */
+/* ================= INDEXES ================= */
 orderSchema.index({ user: 1, createdAt: -1 })
 orderSchema.index({ email: 1, createdAt: -1 })
-orderSchema.index({ status: 1 })
+orderSchema.index({ status: 1 }) // ✅ keep only this
 
 export default mongoose.model("Order", orderSchema)
