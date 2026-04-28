@@ -17,7 +17,7 @@ router.get("/", async (req, res) => {
   }
 })
 
-/* ================= 🔥 GET CUSTOMER ORDERS ================= */
+/* ================= GET CUSTOMER ORDERS ================= */
 router.get("/my-orders", async (req, res) => {
   try {
     const email = req.query.email?.toLowerCase()
@@ -28,13 +28,27 @@ router.get("/my-orders", async (req, res) => {
 
     const orders = await Order.find({ email }).sort({ createdAt: -1 })
 
-    res.json({
-      success: true,
-      data: orders
-    })
+    res.json({ success: true, data: orders })
 
   } catch (err) {
     console.error("❌ MY ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= 🔥 GET SINGLE ORDER (FIXED POSITION) ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ GET ORDER ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -82,8 +96,7 @@ router.post("/", async (req, res) => {
       order
     )
 
-    const io = req.app.get("io")
-    io?.emit("jobUpdated")
+    req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: order })
 
@@ -124,8 +137,7 @@ router.patch("/:id", async (req, res) => {
         order
       )
 
-      const io = req.app.get("io")
-      io?.emit("jobUpdated")
+      req.app.get("io")?.emit("jobUpdated")
     }
 
     res.json({ success: true, data: order })
@@ -136,33 +148,12 @@ router.patch("/:id", async (req, res) => {
   }
 })
 
-/* ================= GET SINGLE ORDER ================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    res.json({
-      success: true,
-      data: order
-    })
-
-  } catch (err) {
-    console.error("❌ GET ORDER ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= UPDATE STATUS (SPECIFIC) ================= */
+/* ================= UPDATE STATUS ================= */
 router.patch("/:id/status", async (req, res) => {
   try {
     const { status, price, finalPrice, denialReason } = req.body
 
     const update = {}
-
     if (status) update.status = status
     if (price !== undefined) update.price = price
     if (finalPrice !== undefined) update.finalPrice = finalPrice
@@ -194,8 +185,7 @@ router.patch("/:id/status", async (req, res) => {
         order
       )
 
-      const io = req.app.get("io")
-      io?.emit("jobUpdated")
+      req.app.get("io")?.emit("jobUpdated")
     }
 
     res.json({ success: true, data: order })
@@ -243,8 +233,7 @@ router.post("/ship/:id", async (req, res) => {
       order
     )
 
-    const io = req.app.get("io")
-    io?.emit("jobUpdated")
+    req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: order })
 
