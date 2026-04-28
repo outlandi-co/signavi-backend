@@ -27,41 +27,26 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     if (!record) {
-      throw new Error("Record not found")
+      return res.status(404).json({ message: "Record not found" })
     }
 
-    console.log("📦 TYPE:", type)
+    /* ================= CALCULATE ================= */
+    let subtotal = Number(record.subtotal || record.price || 0)
+    let shipping = Number(record.shippingCost || 0)
+    let tax = Number(record.tax || subtotal * 0.0825)
 
-    /* 🔥 ALWAYS RECALCULATE TOTAL */
-    let amountValue = 0
+    const total = subtotal + shipping + tax
 
-    if (type === "quote") {
-      const subtotal = Number(record.price || 0)
-      const shipping = Number(record.shippingCost || 0)
-      const tax = subtotal * 0.0825
-
-      amountValue = subtotal + shipping + tax
-
-    } else {
-      const subtotal = Number(record.subtotal || 0)
-      const shipping = Number(record.shippingCost || 0)
-      const tax = Number(record.tax || subtotal * 0.0825)
-
-      amountValue = subtotal + shipping + tax
-    }
-
-    console.log("💰 CALCULATED:", amountValue)
-
-    if (!amountValue || amountValue <= 0) {
-      console.error("❌ BAD ORDER:", record)
+    if (!total || total <= 0) {
       return res.status(400).json({
-        message: "Invalid order total",
+        message: "Invalid total",
         debug: record
       })
     }
 
-    const amountCents = BigInt(Math.round(amountValue * 100))
+    const amount = BigInt(Math.round(total * 100))
 
+    /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
       order: {
@@ -71,7 +56,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `${type.toUpperCase()} #${record._id}`,
             quantity: "1",
             basePriceMoney: {
-              amount: amountCents,
+              amount,
               currency: "USD"
             }
           }
@@ -82,7 +67,11 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url = response.paymentLink.url
+    const url = response?.paymentLink?.url
+
+    if (!url) {
+      throw new Error("No payment URL returned")
+    }
 
     record.paymentUrl = url
     await record.save()
@@ -92,7 +81,7 @@ router.post("/create-payment/:id", async (req, res) => {
     res.json({ success: true, url })
 
   } catch (err) {
-    console.error("❌ SQUARE ERROR:", err.message)
+    console.error("❌ SQUARE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })

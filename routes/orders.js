@@ -4,185 +4,150 @@ import Order from "../models/Order.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
+const BASE_URL = process.env.BASE_URL || "http://localhost:5050"
 
 /* ================= CREATE ORDER ================= */
 router.post("/", async (req, res) => {
   try {
-    console.log("📦 INCOMING ORDER:", JSON.stringify(req.body, null, 2))
+    const { customerName, email, items = [] } = req.body
 
-    const {
-      customerName,
-      email,
-      items = [],
-
-      shippingAddress,
-      shippingCost = 0,
-      shippingRateId = "",
-      carrier = "",
-      serviceLevel = ""
-    } = req.body
-
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" })
+    if (!email || !items.length) {
+      return res.status(400).json({ message: "Missing data" })
     }
 
-    if (!Array.isArray(items) || items.length === 0) {
-      return res.status(400).json({ message: "Items are required" })
-    }
-
-    const cleanItems = items.map(item => ({
-      productId: item.productId || item._id || item.id || null,
-      name: item.name || "Item",
-      quantity: Number(item.quantity || 1),
-      price: Number(item.price || 0),
-      variant: {
-        color: (item?.variant?.color || "standard").toLowerCase(),
-        size: (item?.variant?.size || "M").toUpperCase()
-      }
-    }))
-
-    const subtotal = cleanItems.reduce(
-      (sum, item) => sum + item.price * item.quantity,
+    const subtotal = items.reduce(
+      (sum, i) => sum + i.price * i.quantity,
       0
     )
 
-    const TAX_RATE = 0.0825
-    const tax = subtotal * TAX_RATE
-
-    const finalPrice =
-      subtotal +
-      tax +
-      Number(shippingCost || 0)
+    const tax = subtotal * 0.0825
 
     const order = new Order({
       customerName: customerName || "Guest",
-      email,
-      items: cleanItems,
-      quantity: cleanItems.reduce((s, i) => s + i.quantity, 0),
-
+      email: email.toLowerCase(),
+      items,
       subtotal,
       tax,
-      price: subtotal,
-      finalPrice,
-
-      shippingAddress,
-      shippingCost,
-      shippingRateId,
-      carrier,
-      serviceLevel,
-
+      finalPrice: subtotal + tax,
       status: "payment_required",
       source: "store",
-
       timeline: [
         {
           status: "payment_required",
-          note: "Order created, awaiting payment"
+          note: "Order created"
         }
       ]
     })
 
     await order.save()
 
+    await sendOrderStatusEmail(
+      order.email,
+      "payment_required",
+      order._id,
+      order
+    )
+
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ CREATE ORDER ERROR:", err)
+    console.error("❌ CREATE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= CHECKOUT (🔥 FIXED) ================= */
-router.patch("/:id/checkout", async (req, res) => {
+/* ================= UPDATE (GENERAL PATCH) ================= */
+/* 🔥 THIS FIXES YOUR CURRENT 404 */
+router.patch("/:id", async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id)
+    const update = req.body
+
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      update,
+      { new: true }
+    )
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    const {
-      shippingAddress,
-      shippingCost,
-      shippingRateId,
-      carrier,
-      serviceLevel
-    } = req.body
-
-    /* ================= SAVE SHIPPING ================= */
-    order.shippingAddress = shippingAddress
-    order.shippingCost = Number(shippingCost || 0)
-    order.shippingRateId = shippingRateId
-    order.carrier = carrier
-    order.serviceLevel = serviceLevel
-
-    /* ================= 🔥 RECALCULATE TOTAL ================= */
-    const subtotal =
-      Number(order.subtotal) ||
-      Number(order.price) ||
-      0
-
-    const TAX_RATE = 0.0825
-    const tax = subtotal * TAX_RATE
-
-    const finalPrice =
-      subtotal +
-      tax +
-      order.shippingCost
-
-    order.tax = tax
-    order.finalPrice = finalPrice
-
-    console.log("💰 UPDATED FINAL PRICE:", finalPrice)
-
-    await order.save()
+    /* 🔥 OPTIONAL EMAIL TRIGGER */
+    if (update.status) {
+      await sendOrderStatusEmail(
+        order.email,
+        update.status,
+        order._id,
+        order
+      )
+    }
 
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ CHECKOUT ERROR:", err)
-    res.status(500).json({ message: "Checkout failed" })
+    console.error("❌ PATCH ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= SHIP ORDER ================= */
-router.post("/ship/:id", async (req, res) => {
+/* ================= UPDATE STATUS (SPECIFIC) ================= */
+router.patch("/:id/status", async (req, res) => {
   try {
-    console.log("🚚 SHIPPING ORDER:", req.params.id)
+    const { status, price, finalPrice, denialReason } = req.body
 
-    const order = await Order.findById(req.params.id)
+    const update = {}
+
+    if (status) update.status = status
+    if (price !== undefined) update.price = price
+    if (finalPrice !== undefined) update.finalPrice = finalPrice
+    if (denialReason) update.denialReason = denialReason
+
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      update,
+      { new: true }
+    )
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    if (!order.shippingAddress) {
-      return res.status(400).json({
-        message: "Missing shipping address"
-      })
+    await sendOrderStatusEmail(
+      order.email,
+      status,
+      order._id,
+      order
+    )
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ UPDATE STATUS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= SHIP ================= */
+router.post("/ship/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order || !order.shippingAddress) {
+      return res.status(400).json({ message: "Missing order or address" })
     }
 
     const shipRes = await axios.post(
-      `${process.env.BASE_URL}/api/shipping/create-shipment`,
+      `${BASE_URL}/api/shipping/create-shipment`,
       {
         address_to: order.shippingAddress,
         rate_id: order.shippingRateId
       }
     )
 
-    console.log("📦 SHIP RESPONSE:", shipRes.data)
-
-    order.trackingNumber = shipRes.data.trackingNumber || ""
-    order.trackingLink = shipRes.data.trackingLink || ""
-    order.shippingLabel = shipRes.data.labelUrl || ""
-
+    order.trackingNumber = shipRes.data.trackingNumber
+    order.trackingLink = shipRes.data.trackingLink
+    order.shippingLabel = shipRes.data.labelUrl
     order.status = "shipped"
-
-    order.timeline.push({
-      status: "shipped",
-      date: new Date(),
-      note: "Order shipped"
-    })
 
     await order.save()
 
@@ -199,46 +164,9 @@ router.post("/ship/:id", async (req, res) => {
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ SHIP ERROR:", err.response?.data || err.message)
+    console.error("❌ SHIP ERROR:", err)
     res.status(500).json({ message: "Shipping failed" })
   }
-})
-
-/* ================= GET MY ORDERS ================= */
-router.get("/my-orders", async (req, res) => {
-  try {
-    const email = req.query.email
-
-    if (!email) {
-      return res.status(400).json({ message: "Email required" })
-    }
-
-    const orders = await Order.find({ email })
-      .sort({ createdAt: -1 })
-
-    res.json({ success: true, data: orders })
-
-  } catch (err) {
-    console.error("❌ MY ORDERS ERROR:", err)
-    res.status(500).json({ message: "Failed to fetch orders" })
-  }
-})
-
-/* ================= GET ALL ================= */
-router.get("/", async (req, res) => {
-  const orders = await Order.find().sort({ createdAt: -1 })
-  res.json({ success: true, data: orders })
-})
-
-/* ================= GET ONE ================= */
-router.get("/:id", async (req, res) => {
-  const order = await Order.findById(req.params.id)
-
-  if (!order) {
-    return res.status(404).json({ message: "Order not found" })
-  }
-
-  res.json({ success: true, data: order })
 })
 
 export default router

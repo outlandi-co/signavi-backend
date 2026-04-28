@@ -2,62 +2,18 @@ import express from "express"
 import axios from "axios"
 
 const router = express.Router()
-const SHIPPO_API = "https://api.goshippo.com"
 
-console.log("🚚 SHIPPING ROUTE LOADED")
-
-/* ================= NORMALIZE ADDRESS ================= */
-const normalizeAddress = (addr = {}) => {
-  return {
-    name: addr.name || "",
-    street1: addr.street1 || "",
-    city: addr.city || "",
-    state: (addr.state || "").toUpperCase().slice(0, 2),
-    zip: String(addr.zip || "").trim(),
-    country: (addr.country || "US").toUpperCase()
-  }
-}
-
-/* ================= HEALTH CHECK ================= */
-router.get("/health", (req, res) => {
-  res.json({ ok: true, route: "shipping" })
-})
-
-/* ================= GET RATES ================= */
+/* ================= GET SHIPPING RATES ================= */
 router.post("/get-rates", async (req, res) => {
   try {
-    console.log("\n📦 ===== GET RATES HIT =====")
-    console.log("📥 BODY:", req.body)
+    const { address_to } = req.body
 
-    if (!req.body?.address_to) {
-      return res.status(400).json({
-        error: "address_to required"
-      })
+    if (!address_to) {
+      return res.status(400).json({ message: "Missing address_to" })
     }
 
-    const addressTo = normalizeAddress(req.body.address_to)
-
-    /* 🔥 STRICT VALIDATION */
-    const requiredFields = ["name", "street1", "city", "state", "zip", "country"]
-
-    for (let field of requiredFields) {
-      if (!addressTo[field]) {
-        return res.status(400).json({
-          error: `Missing field: ${field}`,
-          addressTo
-        })
-      }
-    }
-
-    console.log("📍 VALIDATED ADDRESS:", addressTo)
-
-    /* 🔥 ENSURE API KEY */
-    if (!process.env.SHIPPO_API_KEY) {
-      throw new Error("SHIPPO_API_KEY missing in environment")
-    }
-
-    const shipmentRes = await axios.post(
-      `${SHIPPO_API}/shipments/`,
+    const shippoRes = await axios.post(
+      "https://api.goshippo.com/shipments/",
       {
         address_from: {
           name: "SignaVi",
@@ -67,14 +23,14 @@ router.post("/get-rates", async (req, res) => {
           zip: "95340",
           country: "US"
         },
-        address_to: addressTo,
+        address_to,
         parcels: [
           {
             length: "10",
             width: "7",
-            height: "1",
+            height: "5",
             distance_unit: "in",
-            weight: "1",
+            weight: "2",
             mass_unit: "lb"
           }
         ],
@@ -82,160 +38,52 @@ router.post("/get-rates", async (req, res) => {
       },
       {
         headers: {
-          Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`,
-          "Content-Type": "application/json"
+          Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`
         }
       }
     )
 
-    const rates = shipmentRes.data.rates || []
+    const rates = shippoRes.data.rates || []
 
-    console.log("💰 RATES:", rates)
-
-    res.json({
-      success: true,
-      rates: rates.slice(0, 3)
-    })
-
+    res.json({ success: true, rates })
   } catch (err) {
-    console.error("❌ SHIPPO FULL ERROR:")
-
-    if (err.response) {
-      console.error("📡 STATUS:", err.response.status)
-      console.error("📡 DATA:", JSON.stringify(err.response.data, null, 2))
-    } else {
-      console.error("🔥 SERVER:", err.message)
-    }
-
-    res.status(500).json({
-      error: "Failed to get rates",
-      details: err.response?.data || err.message
-    })
+    console.error("❌ GET RATES ERROR:", err.response?.data || err.message)
+    res.status(500).json({ message: "Failed to get rates" })
   }
 })
 
 /* ================= CREATE SHIPMENT ================= */
 router.post("/create-shipment", async (req, res) => {
   try {
-    console.log("\n🚚 ===== CREATE SHIPMENT HIT =====")
-
     const { address_to, rate_id } = req.body
 
-    if (!address_to) {
-      return res.status(400).json({ error: "address_to required" })
+    if (!address_to || !rate_id) {
+      return res.status(400).json({ message: "Missing data" })
     }
 
-    const addressTo = normalizeAddress(address_to)
-
-    console.log("📍 Address:", addressTo)
-    console.log("🎯 Selected Rate ID:", rate_id)
-
-    /* =========================================================
-       🔥 USE SELECTED RATE IF PROVIDED
-    ========================================================= */
-    if (rate_id) {
-      console.log("✅ Using user-selected rate")
-
-      const transactionRes = await axios.post(
-        `${SHIPPO_API}/transactions/`,
-        {
-          rate: rate_id,
-          label_file_type: "PDF"
-        },
-        {
-          headers: {
-            Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`,
-            "Content-Type": "application/json"
-          }
-        }
-      )
-
-      const t = transactionRes.data
-
-      return res.json({
-        success: true,
-        trackingNumber: t.tracking_number,
-        trackingLink: t.tracking_url_provider,
-        labelUrl: t.label_url
-      })
-    }
-
-    /* =========================================================
-       🔄 FALLBACK (if no rate_id)
-    ========================================================= */
-    console.log("⚠️ No rate_id provided — falling back to first rate")
-
-    const shipmentRes = await axios.post(
-      `${SHIPPO_API}/shipments/`,
+    const transaction = await axios.post(
+      "https://api.goshippo.com/transactions/",
       {
-        address_from: {
-          name: "SignaVi",
-          street1: "123 Main St",
-          city: "Merced",
-          state: "CA",
-          zip: "95340",
-          country: "US"
-        },
-        address_to: addressTo,
-        parcels: [
-          {
-            length: "10",
-            width: "7",
-            height: "1",
-            distance_unit: "in",
-            weight: "1",
-            mass_unit: "lb"
-          }
-        ],
+        rate: rate_id,
+        label_file_type: "PDF",
         async: false
       },
       {
         headers: {
-          Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`,
-          "Content-Type": "application/json"
+          Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`
         }
       }
     )
-
-    const shipment = shipmentRes.data
-    const rate = shipment.rates?.[0]
-
-    if (!rate) {
-      return res.status(400).json({
-        error: "No rates found"
-      })
-    }
-
-    const transactionRes = await axios.post(
-      `${SHIPPO_API}/transactions/`,
-      {
-        rate: rate.object_id,
-        label_file_type: "PDF"
-      },
-      {
-        headers: {
-          Authorization: `ShippoToken ${process.env.SHIPPO_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    )
-
-    const t = transactionRes.data
 
     res.json({
       success: true,
-      trackingNumber: t.tracking_number,
-      trackingLink: t.tracking_url_provider,
-      labelUrl: t.label_url
+      trackingNumber: transaction.data.tracking_number,
+      trackingLink: transaction.data.tracking_url_provider,
+      labelUrl: transaction.data.label_url
     })
-
   } catch (err) {
-    console.error("❌ SHIP ERROR:", err.response?.data || err.message)
-
-    res.status(500).json({
-      error: "Shipment failed",
-      details: err.response?.data || err.message
-    })
+    console.error("❌ SHIPMENT ERROR:", err.response?.data || err.message)
+    res.status(500).json({ message: "Shipment failed" })
   }
 })
 
