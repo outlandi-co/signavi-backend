@@ -6,6 +6,18 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 const BASE_URL = process.env.BASE_URL || "http://localhost:5050"
 
+/* ================= GET ALL ORDERS ================= */
+router.get("/", async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 })
+
+    res.json({ success: true, data: orders })
+  } catch (err) {
+    console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
 /* ================= CREATE ORDER ================= */
 router.post("/", async (req, res) => {
   try {
@@ -57,7 +69,6 @@ router.post("/", async (req, res) => {
 })
 
 /* ================= UPDATE (GENERAL PATCH) ================= */
-/* 🔥 THIS FIXES YOUR CURRENT 404 */
 router.patch("/:id", async (req, res) => {
   try {
     const update = req.body
@@ -72,7 +83,6 @@ router.patch("/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* 🔥 OPTIONAL EMAIL TRIGGER */
     if (update.status) {
       await sendOrderStatusEmail(
         order.email,
