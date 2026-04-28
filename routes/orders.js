@@ -136,6 +136,26 @@ router.patch("/:id", async (req, res) => {
   }
 })
 
+/* ================= GET SINGLE ORDER ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ GET ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
 /* ================= UPDATE STATUS (SPECIFIC) ================= */
 router.patch("/:id/status", async (req, res) => {
   try {
