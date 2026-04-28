@@ -36,7 +36,7 @@ router.get("/my-orders", async (req, res) => {
   }
 })
 
-/* ================= 🔥 GET SINGLE ORDER (FIXED POSITION) ================= */
+/* ================= GET SINGLE ORDER ================= */
 router.get("/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -106,7 +106,57 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= UPDATE (GENERAL PATCH) ================= */
+/* ================= 🔥 CHECKOUT (NEW ROUTE) ================= */
+router.patch("/:id/checkout", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const {
+      shippingAddress,
+      shippingRateId,
+      shippingCost,
+      carrier,
+      serviceLevel
+    } = req.body
+
+    order.shippingAddress = shippingAddress
+    order.shippingRateId = shippingRateId
+    order.shippingCost = shippingCost
+    order.carrier = carrier
+    order.serviceLevel = serviceLevel
+
+    order.status = "shipping"
+
+    order.timeline.push({
+      status: "shipping",
+      note: "Shipping selected",
+      date: new Date()
+    })
+
+    await order.save()
+
+    await sendOrderStatusEmail(
+      order.email,
+      "shipping",
+      order._id,
+      order
+    )
+
+    req.app.get("io")?.emit("jobUpdated")
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ CHECKOUT ERROR:", err)
+    res.status(500).json({ message: "Checkout failed" })
+  }
+})
+
+/* ================= UPDATE ================= */
 router.patch("/:id", async (req, res) => {
   try {
     const update = req.body
@@ -144,54 +194,6 @@ router.patch("/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ PATCH ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= UPDATE STATUS ================= */
-router.patch("/:id/status", async (req, res) => {
-  try {
-    const { status, price, finalPrice, denialReason } = req.body
-
-    const update = {}
-    if (status) update.status = status
-    if (price !== undefined) update.price = price
-    if (finalPrice !== undefined) update.finalPrice = finalPrice
-    if (denialReason) update.denialReason = denialReason
-
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      update,
-      { new: true }
-    )
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    if (status) {
-      order.timeline.push({
-        status,
-        note: "Status updated",
-        date: new Date()
-      })
-
-      await order.save()
-
-      await sendOrderStatusEmail(
-        order.email,
-        status,
-        order._id,
-        order
-      )
-
-      req.app.get("io")?.emit("jobUpdated")
-    }
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ UPDATE STATUS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
