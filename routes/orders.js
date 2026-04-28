@@ -10,10 +10,31 @@ const BASE_URL = process.env.BASE_URL || "http://localhost:5050"
 router.get("/", async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 })
-
     res.json({ success: true, data: orders })
   } catch (err) {
     console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= 🔥 GET CUSTOMER ORDERS ================= */
+router.get("/my-orders", async (req, res) => {
+  try {
+    const email = req.query.email?.toLowerCase()
+
+    if (!email) {
+      return res.status(400).json({ message: "Email required" })
+    }
+
+    const orders = await Order.find({ email }).sort({ createdAt: -1 })
+
+    res.json({
+      success: true,
+      data: orders
+    })
+
+  } catch (err) {
+    console.error("❌ MY ORDERS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -46,7 +67,8 @@ router.post("/", async (req, res) => {
       timeline: [
         {
           status: "payment_required",
-          note: "Order created"
+          note: "Order created",
+          date: new Date()
         }
       ]
     })
@@ -59,6 +81,9 @@ router.post("/", async (req, res) => {
       order._id,
       order
     )
+
+    const io = req.app.get("io")
+    io?.emit("jobUpdated")
 
     res.json({ success: true, data: order })
 
@@ -84,12 +109,23 @@ router.patch("/:id", async (req, res) => {
     }
 
     if (update.status) {
+      order.timeline.push({
+        status: update.status,
+        note: "Status updated",
+        date: new Date()
+      })
+
+      await order.save()
+
       await sendOrderStatusEmail(
         order.email,
         update.status,
         order._id,
         order
       )
+
+      const io = req.app.get("io")
+      io?.emit("jobUpdated")
     }
 
     res.json({ success: true, data: order })
@@ -122,12 +158,25 @@ router.patch("/:id/status", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    await sendOrderStatusEmail(
-      order.email,
-      status,
-      order._id,
-      order
-    )
+    if (status) {
+      order.timeline.push({
+        status,
+        note: "Status updated",
+        date: new Date()
+      })
+
+      await order.save()
+
+      await sendOrderStatusEmail(
+        order.email,
+        status,
+        order._id,
+        order
+      )
+
+      const io = req.app.get("io")
+      io?.emit("jobUpdated")
+    }
 
     res.json({ success: true, data: order })
 
@@ -158,6 +207,12 @@ router.post("/ship/:id", async (req, res) => {
     order.trackingLink = shipRes.data.trackingLink
     order.shippingLabel = shipRes.data.labelUrl
     order.status = "shipped"
+
+    order.timeline.push({
+      status: "shipped",
+      note: "Order shipped",
+      date: new Date()
+    })
 
     await order.save()
 
