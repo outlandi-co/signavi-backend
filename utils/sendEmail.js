@@ -1,11 +1,11 @@
 import nodemailer from "nodemailer"
 import fs from "fs"
 
+/* =========================================================
+   📦 CREATE TRANSPORTER (REUSE)
+========================================================= */
 let transporter
 
-/* =========================================================
-   📦 CREATE TRANSPORTER
-========================================================= */
 const getTransporter = () => {
   if (transporter) return transporter
 
@@ -65,7 +65,7 @@ const sanitizeLink = (link, fallback) => {
 }
 
 /* =========================================================
-   📧 SEND ORDER STATUS EMAIL
+   📧 MAIN EMAIL FUNCTION
 ========================================================= */
 export const sendOrderStatusEmail = async (
   to,
@@ -80,17 +80,72 @@ export const sendOrderStatusEmail = async (
       process.env.CLIENT_URL || "https://signavistudio.store"
 
     const successLink = buildSafeUrl(CLIENT_URL, `/success/${id}`)
-    const paymentFallback = buildSafeUrl(CLIENT_URL, `/checkout/${id}`)
+    const checkoutLink = buildSafeUrl(CLIENT_URL, `/checkout/${id}`)
 
-    const paymentLink = sanitizeLink(order?.paymentUrl, paymentFallback)
+    const paymentLink = sanitizeLink(order?.paymentUrl, checkoutLink)
 
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
     let attachments = []
 
-    /* ================= PAYMENT REQUIRED ================= */
-    if (status === "payment_required") {
+    /* =========================================================
+       ✅ APPROVED
+    ========================================================= */
+    if (status === "approved") {
+      subject = "✅ Your Quote Has Been Approved"
+
+      html += `
+        <p>Hello ${order?.customerName || "Customer"},</p>
+
+        <p>Your quote has been <strong>approved</strong>.</p>
+
+        <h3>Total: $${order?.price || order?.finalPrice || 0}</h3>
+
+        <p>Please proceed with payment to begin production.</p>
+
+        <p>
+          <a href="${paymentLink}" target="_blank"
+            style="
+              display:inline-block;
+              padding:14px 24px;
+              background:#06b6d4;
+              color:#000;
+              text-decoration:none;
+              border-radius:6px;
+              font-weight:bold;
+            ">
+            💳 Pay Now
+          </a>
+        </p>
+      `
+    }
+
+    /* =========================================================
+       ❌ DENIED
+    ========================================================= */
+    else if (status === "denied") {
+      subject = "❌ Your Quote Was Not Approved"
+
+      html += `
+        <p>Hello ${order?.customerName || "Customer"},</p>
+
+        <p>Unfortunately, your quote has been <strong>denied</strong>.</p>
+
+        ${
+          order?.denialReason
+            ? `<p><strong>Reason:</strong> ${order.denialReason}</p>`
+            : ""
+        }
+
+        <p>You may revise and resubmit your request.</p>
+      `
+    }
+
+    /* =========================================================
+       💳 PAYMENT REQUIRED
+    ========================================================= */
+    else if (status === "payment_required") {
       subject = "Your Order is Ready – Payment Required"
 
       html += `
@@ -117,7 +172,9 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* ================= PAYMENT SUCCESS ================= */
+    /* =========================================================
+       💰 PAID
+    ========================================================= */
     else if (status === "paid") {
       subject = "Payment Received – Order Confirmed"
 
@@ -135,7 +192,6 @@ export const sendOrderStatusEmail = async (
         </p>
       `
 
-      /* 📄 ATTACH INVOICE */
       if (order.invoice && fs.existsSync(order.invoice)) {
         attachments.push({
           filename: `invoice-${id}.pdf`,
@@ -144,7 +200,9 @@ export const sendOrderStatusEmail = async (
       }
     }
 
-    /* ================= SHIPPED ================= */
+    /* =========================================================
+       📦 SHIPPED
+    ========================================================= */
     else if (status === "shipped") {
       subject = "Your Order Has Shipped 📦"
 
@@ -153,7 +211,9 @@ export const sendOrderStatusEmail = async (
 
         <p>Your order is on the way!</p>
 
-        <p><strong>Tracking Number:</strong> ${order.trackingNumber || "N/A"}</p>
+        <p><strong>Tracking Number:</strong> ${
+          order.trackingNumber || "N/A"
+        }</p>
 
         ${
           order.trackingLink
@@ -163,7 +223,9 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* ================= DEFAULT ================= */
+    /* =========================================================
+       🔄 DEFAULT
+    ========================================================= */
     else {
       html += `<p>Status updated: ${status}</p>`
     }
@@ -192,7 +254,7 @@ export const sendOrderStatusEmail = async (
 }
 
 /* =========================================================
-   📧 ABANDONED CART (PLACEHOLDER)
+   🛒 ABANDONED CART (OPTIONAL)
 ========================================================= */
 export const sendAbandonedCartEmail = async (email, cart = []) => {
   try {

@@ -1,6 +1,7 @@
 import express from "express"
 import mongoose from "mongoose"
 import Quote from "../models/Quote.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
@@ -58,7 +59,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 APPROVE (MUST BE BEFORE /:id)
+   🔥 APPROVE
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
@@ -77,7 +78,6 @@ router.patch("/:id/approve", async (req, res) => {
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
 
-    quote.timeline = quote.timeline || []
     quote.timeline.push({
       status: "approved",
       note: "Quote approved",
@@ -85,6 +85,15 @@ router.patch("/:id/approve", async (req, res) => {
     })
 
     await quote.save()
+
+    /* 🔥 SEND EMAIL */
+    await sendOrderStatusEmail(
+      quote.email,
+      "approved",
+      quote._id,
+      quote
+    )
+
     req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: quote })
@@ -96,7 +105,7 @@ router.patch("/:id/approve", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 DENY (MUST BE BEFORE /:id)
+   🔥 DENY
 ========================================================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
@@ -112,14 +121,12 @@ router.patch("/:id/deny", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
+    const reason = req.body?.reason || "Not specified"
+
     quote.approvalStatus = "denied"
     quote.status = "denied"
+    quote.denialReason = reason
 
-    if (req.body?.reason) {
-      quote.denialReason = req.body.reason
-    }
-
-    quote.timeline = quote.timeline || []
     quote.timeline.push({
       status: "denied",
       note: "Quote denied",
@@ -127,6 +134,15 @@ router.patch("/:id/deny", async (req, res) => {
     })
 
     await quote.save()
+
+    /* 🔥 SEND EMAIL */
+    await sendOrderStatusEmail(
+      quote.email,
+      "denied",
+      quote._id,
+      quote
+    )
+
     req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: quote })
