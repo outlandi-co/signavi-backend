@@ -1,24 +1,7 @@
-import nodemailer from "nodemailer"
+import { Resend } from "resend"
 import fs from "fs"
 
-/* =========================================================
-   📦 CREATE TRANSPORTER (REUSE)
-========================================================= */
-let transporter
-
-const getTransporter = () => {
-  if (transporter) return transporter
-
-  transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  })
-
-  return transporter
-}
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 /* =========================================================
    🔗 SAFE URL BUILDER
@@ -74,8 +57,6 @@ export const sendOrderStatusEmail = async (
   order = {}
 ) => {
   try {
-    const transporter = getTransporter()
-
     const CLIENT_URL =
       process.env.CLIENT_URL || "https://signavistudio.store"
 
@@ -87,11 +68,7 @@ export const sendOrderStatusEmail = async (
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
-    let attachments = []
-
-    /* =========================================================
-       ✅ APPROVED
-    ========================================================= */
+    /* ================= APPROVED ================= */
     if (status === "approved") {
       subject = "✅ Your Quote Has Been Approved"
 
@@ -121,9 +98,7 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* =========================================================
-       ❌ DENIED
-    ========================================================= */
+    /* ================= DENIED ================= */
     else if (status === "denied") {
       subject = "❌ Your Quote Was Not Approved"
 
@@ -142,9 +117,7 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* =========================================================
-       💳 PAYMENT REQUIRED
-    ========================================================= */
+    /* ================= PAYMENT REQUIRED ================= */
     else if (status === "payment_required") {
       subject = "Your Order is Ready – Payment Required"
 
@@ -172,9 +145,7 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* =========================================================
-       💰 PAID
-    ========================================================= */
+    /* ================= PAID ================= */
     else if (status === "paid") {
       subject = "Payment Received – Order Confirmed"
 
@@ -191,18 +162,9 @@ export const sendOrderStatusEmail = async (
           </a>
         </p>
       `
-
-      if (order.invoice && fs.existsSync(order.invoice)) {
-        attachments.push({
-          filename: `invoice-${id}.pdf`,
-          path: order.invoice
-        })
-      }
     }
 
-    /* =========================================================
-       📦 SHIPPED
-    ========================================================= */
+    /* ================= SHIPPED ================= */
     else if (status === "shipped") {
       subject = "Your Order Has Shipped 📦"
 
@@ -223,9 +185,7 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* =========================================================
-       🔄 DEFAULT
-    ========================================================= */
+    /* ================= DEFAULT ================= */
     else {
       html += `<p>Status updated: ${status}</p>`
     }
@@ -238,12 +198,11 @@ export const sendOrderStatusEmail = async (
       </p>
     `
 
-    await transporter.sendMail({
-      from: `"SignaVi Studio" <${process.env.EMAIL_USER}>`,
+    await resend.emails.send({
+      from: "SignaVi Studio <onboarding@resend.dev>",
       to,
       subject,
-      html,
-      attachments
+      html
     })
 
     console.log("📧 EMAIL SENT →", to)
@@ -254,7 +213,7 @@ export const sendOrderStatusEmail = async (
 }
 
 /* =========================================================
-   🛒 ABANDONED CART (OPTIONAL)
+   🛒 ABANDONED CART
 ========================================================= */
 export const sendAbandonedCartEmail = async (email, cart = []) => {
   try {
