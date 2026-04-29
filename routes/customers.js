@@ -4,6 +4,12 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
+/* ================= HELPER ================= */
+const safeEmail = (value) => {
+  if (!value || typeof value !== "string") return null
+  return value.toLowerCase()
+}
+
 /* ================= GET ALL CUSTOMERS ================= */
 router.get("/", async (req, res) => {
   try {
@@ -13,12 +19,12 @@ router.get("/", async (req, res) => {
     const customers = await Promise.all(
       users.map(async (user) => {
 
-        const userEmail = user?.email?.toLowerCase() || null
+        const userEmail = safeEmail(user?.email)
 
         if (!userEmail) {
           return {
-            _id: user._id,
-            name: user.name || "",
+            _id: user?._id,
+            name: user?.name || "",
             email: "",
             totalOrders: 0,
             totalSpent: 0
@@ -28,12 +34,12 @@ router.get("/", async (req, res) => {
         const orders = await Order.find({ email: userEmail }).lean()
 
         const totalSpent = orders.reduce((sum, o) => {
-          return sum + Number(o.finalPrice || o.price || 0)
+          return sum + Number(o?.finalPrice || o?.price || 0)
         }, 0)
 
         return {
           _id: user._id,
-          name: user.name || "",
+          name: user?.name || "",
           email: userEmail,
           totalOrders: orders.length,
           totalSpent
@@ -53,11 +59,11 @@ router.get("/", async (req, res) => {
 router.get("/orders/:email", async (req, res) => {
   try {
 
-    const email = req.params?.email?.toLowerCase()
+    const email = safeEmail(req.params?.email)
 
     if (!email) {
       return res.status(400).json({
-        message: "Email param required"
+        message: "Valid email param required"
       })
     }
 
