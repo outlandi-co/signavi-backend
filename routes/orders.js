@@ -27,7 +27,6 @@ router.get("/my-orders", async (req, res) => {
     }
 
     const orders = await Order.find({ email }).sort({ createdAt: -1 })
-
     res.json({ success: true, data: orders })
 
   } catch (err) {
@@ -89,12 +88,8 @@ router.post("/", async (req, res) => {
 
     await order.save()
 
-    await sendOrderStatusEmail(
-      order.email,
-      "payment_required",
-      order._id,
-      order
-    )
+    sendOrderStatusEmail(order.email, "payment_required", order._id, order)
+      .catch(err => console.error("EMAIL FAIL:", err.message))
 
     req.app.get("io")?.emit("jobUpdated")
 
@@ -106,9 +101,16 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= 🔥 CHECKOUT (NEW ROUTE) ================= */
+/* ================= 🔥 FIXED CHECKOUT ================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
+    console.log("➡️ CHECKOUT HIT")
+    console.log("➡️ BODY:", req.body)
+
+    if (!req.body || Object.keys(req.body).length === 0) {
+      return res.status(400).json({ message: "Missing request body" })
+    }
+
     const order = await Order.findById(req.params.id)
 
     if (!order) {
@@ -116,16 +118,18 @@ router.patch("/:id/checkout", async (req, res) => {
     }
 
     const {
-      shippingAddress,
-      shippingRateId,
-      shippingCost,
-      carrier,
-      serviceLevel
+      shippingAddress = null,
+      shippingRateId = null,
+      shippingCost = 0,
+      carrier = "",
+      serviceLevel = ""
     } = req.body
 
-    order.shippingAddress = shippingAddress
-    order.shippingRateId = shippingRateId
-    order.shippingCost = shippingCost
+    /* 🔥 SAFE ASSIGNMENTS */
+    if (shippingAddress) order.shippingAddress = shippingAddress
+    if (shippingRateId) order.shippingRateId = shippingRateId
+
+    order.shippingCost = Number(shippingCost) || 0
     order.carrier = carrier
     order.serviceLevel = serviceLevel
 
@@ -139,20 +143,22 @@ router.patch("/:id/checkout", async (req, res) => {
 
     await order.save()
 
-    await sendOrderStatusEmail(
-      order.email,
-      "shipping",
-      order._id,
-      order
-    )
+    console.log("✅ CHECKOUT COMPLETE")
+
+    sendOrderStatusEmail(order.email, "shipping", order._id, order)
+      .catch(err => console.error("EMAIL FAIL:", err.message))
 
     req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ CHECKOUT ERROR:", err)
-    res.status(500).json({ message: "Checkout failed" })
+    console.error("❌ CHECKOUT CRASH:", err)
+
+    res.status(500).json({
+      message: "Checkout failed",
+      error: err.message
+    })
   }
 })
 
@@ -180,12 +186,8 @@ router.patch("/:id", async (req, res) => {
 
       await order.save()
 
-      await sendOrderStatusEmail(
-        order.email,
-        update.status,
-        order._id,
-        order
-      )
+      sendOrderStatusEmail(order.email, update.status, order._id, order)
+        .catch(err => console.error("EMAIL FAIL:", err.message))
 
       req.app.get("io")?.emit("jobUpdated")
     }
@@ -228,12 +230,8 @@ router.post("/ship/:id", async (req, res) => {
 
     await order.save()
 
-    await sendOrderStatusEmail(
-      order.email,
-      "shipped",
-      order._id,
-      order
-    )
+    sendOrderStatusEmail(order.email, "shipped", order._id, order)
+      .catch(err => console.error("EMAIL FAIL:", err.message))
 
     req.app.get("io")?.emit("jobUpdated")
 
