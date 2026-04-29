@@ -1,7 +1,11 @@
 import express from "express"
+import mongoose from "mongoose"
 import Quote from "../models/Quote.js"
 
 const router = express.Router()
+
+/* ================= HELPER ================= */
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 /* ================= CREATE QUOTE ================= */
 router.post("/", async (req, res) => {
@@ -32,13 +36,9 @@ router.post("/", async (req, res) => {
     })
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated")
 
-    res.json({
-      success: true,
-      data: quote
-    })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR:", err)
@@ -50,44 +50,25 @@ router.post("/", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 })
-
-    res.json({
-      success: true,
-      data: quotes
-    })
-
+    res.json({ success: true, data: quotes })
   } catch (err) {
     console.error("❌ GET QUOTES ERROR:", err)
     res.status(500).json({ message: "Failed to load quotes" })
   }
 })
 
-/* ================= GET ONE ================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const quote = await Quote.findById(req.params.id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    res.json({
-      success: true,
-      data: quote
-    })
-
-  } catch (err) {
-    console.error("❌ GET ONE ERROR:", err)
-    res.status(500).json({ message: "Failed to load quote" })
-  }
-})
-
 /* =========================================================
-   🔥 APPROVE QUOTE (MUST BE BEFORE /:id)
+   🔥 APPROVE (MUST BE BEFORE /:id)
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
-    const quote = await Quote.findById(req.params.id)
+    const { id } = req.params
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const quote = await Quote.findById(id)
 
     if (!quote) {
       return res.status(404).json({ message: "Quote not found" })
@@ -104,13 +85,9 @@ router.patch("/:id/approve", async (req, res) => {
     })
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated")
 
-    res.json({
-      success: true,
-      data: quote
-    })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
@@ -119,11 +96,17 @@ router.patch("/:id/approve", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 DENY QUOTE (MUST BE BEFORE /:id)
+   🔥 DENY (MUST BE BEFORE /:id)
 ========================================================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
-    const quote = await Quote.findById(req.params.id)
+    const { id } = req.params
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const quote = await Quote.findById(id)
 
     if (!quote) {
       return res.status(404).json({ message: "Quote not found" })
@@ -144,13 +127,9 @@ router.patch("/:id/deny", async (req, res) => {
     })
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated")
 
-    res.json({
-      success: true,
-      data: quote
-    })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ DENY ERROR:", err)
@@ -158,10 +137,39 @@ router.patch("/:id/deny", async (req, res) => {
   }
 })
 
-/* ================= UPDATE (GENERIC) ================= */
+/* ================= GET ONE ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    res.json({ success: true, data: quote })
+
+  } catch (err) {
+    console.error("❌ GET ONE ERROR:", err)
+    res.status(500).json({ message: "Failed to load quote" })
+  }
+})
+
+/* ================= UPDATE ================= */
 router.patch("/:id", async (req, res) => {
   try {
-    const quote = await Quote.findById(req.params.id)
+    const { id } = req.params
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const quote = await Quote.findById(id)
 
     if (!quote) {
       return res.status(404).json({ message: "Quote not found" })
@@ -190,13 +198,9 @@ router.patch("/:id", async (req, res) => {
     })
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated")
 
-    res.json({
-      success: true,
-      data: quote
-    })
+    res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ UPDATE ERROR:", err)
