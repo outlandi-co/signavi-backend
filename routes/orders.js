@@ -20,13 +20,14 @@ router.get("/", async (req, res) => {
 /* ================= GET CUSTOMER ORDERS ================= */
 router.get("/my-orders", async (req, res) => {
   try {
-    const email = req.query.email?.toLowerCase()
+    const email = req.query?.email?.toLowerCase()
 
     if (!email) {
       return res.status(400).json({ message: "Email required" })
     }
 
     const orders = await Order.find({ email }).sort({ createdAt: -1 })
+
     res.json({ success: true, data: orders })
 
   } catch (err) {
@@ -55,14 +56,19 @@ router.get("/:id", async (req, res) => {
 /* ================= CREATE ORDER ================= */
 router.post("/", async (req, res) => {
   try {
-    const { customerName, email, items = [] } = req.body
+    let { customerName, email, items = [] } = req.body
 
-    if (!email || !items.length) {
-      return res.status(400).json({ message: "Missing data" })
+    /* 🔥 GUEST SUPPORT */
+    if (!email) {
+      email = "guest@signavi.com"
+    }
+
+    if (!items.length) {
+      return res.status(400).json({ message: "Items required" })
     }
 
     const subtotal = items.reduce(
-      (sum, i) => sum + i.price * i.quantity,
+      (sum, i) => sum + (Number(i.price) * Number(i.quantity)),
       0
     )
 
@@ -88,6 +94,7 @@ router.post("/", async (req, res) => {
 
     await order.save()
 
+    /* 🔥 SAFE EMAIL */
     sendOrderStatusEmail(order.email, "payment_required", order._id, order)
       .catch(err => console.error("EMAIL FAIL:", err.message))
 
@@ -101,7 +108,7 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= 🔥 FIXED CHECKOUT ================= */
+/* ================= CHECKOUT ================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
     console.log("➡️ CHECKOUT HIT")
@@ -118,11 +125,11 @@ router.patch("/:id/checkout", async (req, res) => {
     }
 
     const {
-      shippingAddress = null,
-      shippingRateId = null,
-      shippingCost = 0,
-      carrier = "",
-      serviceLevel = ""
+      shippingAddress,
+      shippingRateId,
+      shippingCost,
+      carrier,
+      serviceLevel
     } = req.body
 
     /* 🔥 SAFE ASSIGNMENTS */
@@ -130,8 +137,8 @@ router.patch("/:id/checkout", async (req, res) => {
     if (shippingRateId) order.shippingRateId = shippingRateId
 
     order.shippingCost = Number(shippingCost) || 0
-    order.carrier = carrier
-    order.serviceLevel = serviceLevel
+    order.carrier = carrier || ""
+    order.serviceLevel = serviceLevel || ""
 
     order.status = "shipping"
 
@@ -142,8 +149,6 @@ router.patch("/:id/checkout", async (req, res) => {
     })
 
     await order.save()
-
-    console.log("✅ CHECKOUT COMPLETE")
 
     sendOrderStatusEmail(order.email, "shipping", order._id, order)
       .catch(err => console.error("EMAIL FAIL:", err.message))
@@ -177,7 +182,8 @@ router.patch("/:id", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    if (update.status) {
+    /* 🔥 ONLY PUSH TIMELINE IF STATUS EXISTS */
+    if (update?.status) {
       order.timeline.push({
         status: update.status,
         note: "Status updated",
