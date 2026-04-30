@@ -6,6 +6,7 @@ import mongoose from "mongoose"
 import cookieParser from "cookie-parser"
 import http from "http"
 import { Server } from "socket.io"
+import cors from "cors"
 
 /* ================= ROUTES ================= */
 import productRoutes from "./routes/products.js"
@@ -27,38 +28,37 @@ const server = http.createServer(app)
 
 console.log("\n🔥 SERVER READY 🚀\n")
 
-/* ================= CORS ================= */
+/* ================= CORS (🔥 FIXED) ================= */
 const allowedOrigins = [
   "https://signavistudio.store",
   "http://localhost:5173"
 ]
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin
+app.use(cors({
+  origin: (origin, callback) => {
+    // allow Postman / server-to-server requests (no origin)
+    if (!origin) return callback(null, true)
 
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin)
-  }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    } else {
+      console.warn("❌ CORS BLOCKED:", origin)
+      return callback(new Error("Not allowed by CORS"))
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Origin",
+    "X-Requested-With",
+    "Content-Type",
+    "Accept",
+    "Authorization"
+  ]
+}))
 
-  res.setHeader("Vary", "Origin")
-  res.setHeader("Access-Control-Allow-Credentials", "true")
-
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-  )
-
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-  )
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200)
-  }
-
-  next()
-})
+// 🔥 handle preflight cleanly
+app.options("/*", cors())
 
 /* ================= MIDDLEWARE ================= */
 app.use(express.json())
