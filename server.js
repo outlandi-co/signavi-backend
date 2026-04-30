@@ -57,8 +57,7 @@ app.use(cors({
   ]
 }))
 
-// 🔥 handle preflight cleanly
-app.options("/*", cors())
+
 
 /* ================= MIDDLEWARE ================= */
 app.use(express.json())
