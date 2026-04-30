@@ -114,7 +114,7 @@ export const sendOrderStatusEmail = async (
     console.log("📤 SENDING EMAIL TO:", to)
 
     const response = await resend.emails.send({
-      from: "SignaVi Studio <onboarding@resend.dev>",
+      from: "SignaVi Studio <noreply@signavistudio.store>",
       to,
       subject,
       html
