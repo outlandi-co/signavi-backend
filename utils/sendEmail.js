@@ -12,12 +12,7 @@ export const sendOrderStatusEmail = async (
   order = {}
 ) => {
   try {
-    // 🔥 DEBUG ENTRY POINT
-    console.log("📧 EMAIL FUNCTION TRIGGERED:", {
-      to,
-      status,
-      id
-    })
+    console.log("📧 EMAIL FUNCTION TRIGGERED:", { to, status, id })
 
     if (!to) {
       console.log("⚠️ No email provided")
@@ -37,8 +32,36 @@ export const sendOrderStatusEmail = async (
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
-    /* ================= PAYMENT REQUIRED (🔥 PRIMARY FLOW) ================= */
-    if (status === "payment_required") {
+    /* ================= RESET PASSWORD (🔥 ADD THIS) ================= */
+    if (status === "reset_password") {
+      subject = "🔐 Reset Your Password"
+
+      html += `
+        <p>Hello ${order?.customerName || "Customer"},</p>
+
+        <p>You requested a password reset.</p>
+
+        <p>
+          <a href="${order.resetUrl}" target="_blank"
+            style="
+              display:inline-block;
+              padding:14px 24px;
+              background:#06b6d4;
+              color:#000;
+              text-decoration:none;
+              border-radius:6px;
+              font-weight:bold;
+            ">
+            🔐 Reset Password
+          </a>
+        </p>
+
+        <p>This link expires in 15 minutes.</p>
+      `
+    }
+
+    /* ================= PAYMENT REQUIRED ================= */
+    else if (status === "payment_required") {
       subject = "💳 Payment Required – Your Order is Ready"
 
       html += `
@@ -65,19 +88,6 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* ================= APPROVED (fallback) ================= */
-    else if (status === "approved") {
-      subject = "✅ Your Quote Has Been Approved"
-
-      html += `
-        <p>Hello ${order?.customerName || "Customer"},</p>
-
-        <p>Your quote has been approved.</p>
-
-        <h3>Total: $${order?.price || 0}</h3>
-      `
-    }
-
     /* ================= DENIED ================= */
     else if (status === "denied") {
       subject = "❌ Your Quote Was Not Approved"
@@ -85,11 +95,7 @@ export const sendOrderStatusEmail = async (
       html += `
         <p>Hello ${order?.customerName || "Customer"},</p>
 
-        <p>Your quote was <strong>denied</strong>.</p>
-
-        <p><strong>Reason:</strong> ${
-          order?.denialReason || "Not specified"
-        }</p>
+        <p>Your quote was denied.</p>
       `
     }
 
@@ -98,7 +104,6 @@ export const sendOrderStatusEmail = async (
       html += `<p>Status update: ${status}</p>`
     }
 
-    /* ================= FOOTER ================= */
     html += `
       <p style="margin-top:20px;">
         Thank you,<br/>
@@ -106,7 +111,6 @@ export const sendOrderStatusEmail = async (
       </p>
     `
 
-    // 🔥 SEND EMAIL
     console.log("📤 SENDING EMAIL TO:", to)
 
     const response = await resend.emails.send({
