@@ -59,7 +59,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 APPROVE
+   🔥 APPROVE (FIXED)
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
@@ -75,6 +75,13 @@ router.patch("/:id/approve", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
+    // 🔥 CRITICAL FIX: REQUIRE PRICE
+    if (!quote.price || quote.price <= 0) {
+      return res.status(400).json({
+        message: "⚠️ Set price before approving this quote"
+      })
+    }
+
     quote.approvalStatus = "approved"
     quote.status = "payment_required"
 
@@ -86,13 +93,19 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    /* 🔥 SEND EMAIL */
-    await sendOrderStatusEmail(
-      quote.email,
-      "approved",
-      quote._id,
-      quote
-    )
+    // 🔥 DEBUG + EMAIL FIX
+    console.log("📧 ATTEMPTING EMAIL:", quote.email)
+
+    try {
+      await sendOrderStatusEmail(
+        quote.email,
+        "payment_required", // ✅ matches your email system
+        quote._id,
+        quote
+      )
+    } catch (emailErr) {
+      console.error("❌ EMAIL FAIL (APPROVE):", emailErr)
+    }
 
     req.app.get("io")?.emit("jobUpdated")
 
@@ -135,13 +148,18 @@ router.patch("/:id/deny", async (req, res) => {
 
     await quote.save()
 
-    /* 🔥 SEND EMAIL */
-    await sendOrderStatusEmail(
-      quote.email,
-      "denied",
-      quote._id,
-      quote
-    )
+    console.log("📧 ATTEMPTING EMAIL (DENY):", quote.email)
+
+    try {
+      await sendOrderStatusEmail(
+        quote.email,
+        "denied",
+        quote._id,
+        quote
+      )
+    } catch (emailErr) {
+      console.error("❌ EMAIL FAIL (DENY):", emailErr)
+    }
 
     req.app.get("io")?.emit("jobUpdated")
 
@@ -173,54 +191,6 @@ router.get("/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ GET ONE ERROR:", err)
     res.status(500).json({ message: "Failed to load quote" })
-  }
-})
-
-/* ================= UPDATE ================= */
-router.patch("/:id", async (req, res) => {
-  try {
-    const { id } = req.params
-
-    if (!isValidId(id)) {
-      return res.status(400).json({ message: "Invalid ID" })
-    }
-
-    const quote = await Quote.findById(id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    if (req.body.price !== undefined) {
-      quote.price = Number(req.body.price)
-    }
-
-    if (req.body.shippingCost !== undefined) {
-      quote.shippingCost = Number(req.body.shippingCost)
-    }
-
-    if (req.body.approvalStatus) {
-      quote.approvalStatus = req.body.approvalStatus
-    }
-
-    if (req.body.approvalStatus === "approved") {
-      quote.status = "payment_required"
-    }
-
-    quote.timeline.push({
-      status: req.body.approvalStatus || "updated",
-      note: "Quote updated",
-      date: new Date()
-    })
-
-    await quote.save()
-    req.app.get("io")?.emit("jobUpdated")
-
-    res.json({ success: true, data: quote })
-
-  } catch (err) {
-    console.error("❌ UPDATE ERROR:", err)
-    res.status(500).json({ message: "Update failed" })
   }
 })
 

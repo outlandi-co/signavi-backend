@@ -1,51 +1,6 @@
 import { Resend } from "resend"
-import fs from "fs"
 
 const resend = new Resend(process.env.RESEND_API_KEY)
-
-/* =========================================================
-   🔗 SAFE URL BUILDER
-========================================================= */
-const buildSafeUrl = (base, path = "") => {
-  let url = base || "signavistudio.store"
-
-  url = url.trim()
-  url = url.replace(/^(https?:)?\/?\//i, "")
-  url = url.replace(/^ttps?:?\/?\/?/i, "")
-
-  url = `https://${url}`
-
-  if (url.endsWith("/")) {
-    url = url.slice(0, -1)
-  }
-
-  return `${url}${path}`
-}
-
-/* =========================================================
-   🔧 LINK SANITIZER
-========================================================= */
-const sanitizeLink = (link, fallback) => {
-  let finalLink = link || fallback
-
-  if (!finalLink) return fallback
-
-  finalLink = finalLink.trim()
-
-  if (finalLink.startsWith("ttps://")) {
-    finalLink = "h" + finalLink
-  }
-
-  if (finalLink.startsWith("https//")) {
-    finalLink = finalLink.replace("https//", "https://")
-  }
-
-  if (!finalLink.startsWith("http")) {
-    finalLink = buildSafeUrl(finalLink)
-  }
-
-  return finalLink
-}
 
 /* =========================================================
    📧 MAIN EMAIL FUNCTION
@@ -57,32 +12,44 @@ export const sendOrderStatusEmail = async (
   order = {}
 ) => {
   try {
+    // 🔥 DEBUG ENTRY POINT
+    console.log("📧 EMAIL FUNCTION TRIGGERED:", {
+      to,
+      status,
+      id
+    })
+
+    if (!to) {
+      console.log("⚠️ No email provided")
+      return
+    }
+
+    if (!process.env.RESEND_API_KEY) {
+      console.log("❌ RESEND_API_KEY MISSING")
+      return
+    }
+
     const CLIENT_URL =
       process.env.CLIENT_URL || "https://signavistudio.store"
 
-    const successLink = buildSafeUrl(CLIENT_URL, `/success/${id}`)
-    const checkoutLink = buildSafeUrl(CLIENT_URL, `/checkout/${id}`)
-
-    const paymentLink = sanitizeLink(order?.paymentUrl, checkoutLink)
+    const checkoutLink = `${CLIENT_URL}/checkout/${id}`
 
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
-    /* ================= APPROVED ================= */
-    if (status === "approved") {
-      subject = "✅ Your Quote Has Been Approved"
+    /* ================= PAYMENT REQUIRED (🔥 PRIMARY FLOW) ================= */
+    if (status === "payment_required") {
+      subject = "💳 Payment Required – Your Order is Ready"
 
       html += `
         <p>Hello ${order?.customerName || "Customer"},</p>
 
-        <p>Your quote has been <strong>approved</strong>.</p>
+        <p>Your quote has been approved and is ready for payment.</p>
 
-        <h3>Total: $${order?.price || order?.finalPrice || 0}</h3>
-
-        <p>Please proceed with payment to begin production.</p>
+        <h3>Total: $${order?.price || 0}</h3>
 
         <p>
-          <a href="${paymentLink}" target="_blank"
+          <a href="${checkoutLink}" target="_blank"
             style="
               display:inline-block;
               padding:14px 24px;
@@ -95,6 +62,19 @@ export const sendOrderStatusEmail = async (
             💳 Pay Now
           </a>
         </p>
+      `
+    }
+
+    /* ================= APPROVED (fallback) ================= */
+    else if (status === "approved") {
+      subject = "✅ Your Quote Has Been Approved"
+
+      html += `
+        <p>Hello ${order?.customerName || "Customer"},</p>
+
+        <p>Your quote has been approved.</p>
+
+        <h3>Total: $${order?.price || 0}</h3>
       `
     }
 
@@ -105,89 +85,17 @@ export const sendOrderStatusEmail = async (
       html += `
         <p>Hello ${order?.customerName || "Customer"},</p>
 
-        <p>Unfortunately, your quote has been <strong>denied</strong>.</p>
+        <p>Your quote was <strong>denied</strong>.</p>
 
-        ${
-          order?.denialReason
-            ? `<p><strong>Reason:</strong> ${order.denialReason}</p>`
-            : ""
-        }
-
-        <p>You may revise and resubmit your request.</p>
-      `
-    }
-
-    /* ================= PAYMENT REQUIRED ================= */
-    else if (status === "payment_required") {
-      subject = "Your Order is Ready – Payment Required"
-
-      html += `
-        <p>Hello ${order?.customerName || "Customer"},</p>
-
-        <p>Your order is ready for payment.</p>
-
-        <h3>Total: $${order?.finalPrice || order?.price || 0}</h3>
-
-        <p>
-          <a href="${paymentLink}" target="_blank"
-            style="
-              display:inline-block;
-              padding:14px 24px;
-              background:#06b6d4;
-              color:#000;
-              text-decoration:none;
-              border-radius:6px;
-              font-weight:bold;
-            ">
-            💳 Pay Now
-          </a>
-        </p>
-      `
-    }
-
-    /* ================= PAID ================= */
-    else if (status === "paid") {
-      subject = "Payment Received – Order Confirmed"
-
-      html += `
-        <p>Hi ${order?.customerName || "Customer"},</p>
-
-        <p>We’ve received your payment 🎉</p>
-
-        <h3>Total Paid: $${order?.finalPrice || order?.price || 0}</h3>
-
-        <p>
-          <a href="${successLink}" target="_blank">
-            View Order Status →
-          </a>
-        </p>
-      `
-    }
-
-    /* ================= SHIPPED ================= */
-    else if (status === "shipped") {
-      subject = "Your Order Has Shipped 📦"
-
-      html += `
-        <p>Hi ${order?.customerName || "Customer"},</p>
-
-        <p>Your order is on the way!</p>
-
-        <p><strong>Tracking Number:</strong> ${
-          order.trackingNumber || "N/A"
+        <p><strong>Reason:</strong> ${
+          order?.denialReason || "Not specified"
         }</p>
-
-        ${
-          order.trackingLink
-            ? `<p><a href="${order.trackingLink}" target="_blank">Track Package →</a></p>`
-            : ""
-        }
       `
     }
 
     /* ================= DEFAULT ================= */
     else {
-      html += `<p>Status updated: ${status}</p>`
+      html += `<p>Status update: ${status}</p>`
     }
 
     /* ================= FOOTER ================= */
@@ -198,28 +106,19 @@ export const sendOrderStatusEmail = async (
       </p>
     `
 
-    await resend.emails.send({
+    // 🔥 SEND EMAIL
+    console.log("📤 SENDING EMAIL TO:", to)
+
+    const response = await resend.emails.send({
       from: "SignaVi Studio <onboarding@resend.dev>",
       to,
       subject,
       html
     })
 
-    console.log("📧 EMAIL SENT →", to)
+    console.log("📧 EMAIL SUCCESS:", response)
 
   } catch (err) {
-    console.error("❌ EMAIL ERROR:", err)
-  }
-}
-
-/* =========================================================
-   🛒 ABANDONED CART
-========================================================= */
-export const sendAbandonedCartEmail = async (email, cart = []) => {
-  try {
-    console.log("📧 Abandoned cart →", email)
-    console.log("🛒 Cart:", cart)
-  } catch (err) {
-    console.error("❌ Abandoned cart error:", err)
+    console.error("❌ EMAIL ERROR FULL:", err)
   }
 }
