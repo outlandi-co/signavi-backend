@@ -58,8 +58,74 @@ router.get("/", async (req, res) => {
   }
 })
 
+/* ================= GET ONE ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    res.json({ success: true, data: quote })
+
+  } catch (err) {
+    console.error("❌ GET ONE ERROR:", err)
+    res.status(500).json({ message: "Failed to load quote" })
+  }
+})
+
+/* ================= UPDATE PRICE / FIELDS ================= */
+router.patch("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!isValidId(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const quote = await Quote.findById(id)
+
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" })
+    }
+
+    // 🔥 Update price
+    if (req.body.price !== undefined) {
+      quote.price = Number(req.body.price)
+    }
+
+    // 🔥 Update shipping
+    if (req.body.shippingCost !== undefined) {
+      quote.shippingCost = Number(req.body.shippingCost)
+    }
+
+    quote.timeline.push({
+      status: "updated",
+      note: "Quote updated",
+      date: new Date()
+    })
+
+    await quote.save()
+
+    req.app.get("io")?.emit("jobUpdated")
+
+    res.json({ success: true, data: quote })
+
+  } catch (err) {
+    console.error("❌ UPDATE ERROR:", err)
+    res.status(500).json({ message: "Update failed" })
+  }
+})
+
 /* =========================================================
-   🔥 APPROVE (FIXED)
+   🔥 APPROVE (FINAL FIXED VERSION)
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
@@ -75,7 +141,7 @@ router.patch("/:id/approve", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    // 🔥 CRITICAL FIX: REQUIRE PRICE
+    // 🔥 REQUIRE PRICE
     if (!quote.price || quote.price <= 0) {
       return res.status(400).json({
         message: "⚠️ Set price before approving this quote"
@@ -93,18 +159,18 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    // 🔥 DEBUG + EMAIL FIX
+    // 🔥 EMAIL TRIGGER (CORRECT FLOW)
     console.log("📧 ATTEMPTING EMAIL:", quote.email)
 
     try {
       await sendOrderStatusEmail(
         quote.email,
-        "payment_required", // ✅ matches your email system
+        "payment_required",
         quote._id,
         quote
       )
     } catch (emailErr) {
-      console.error("❌ EMAIL FAIL (APPROVE):", emailErr)
+      console.error("❌ EMAIL FAIL:", emailErr)
     }
 
     req.app.get("io")?.emit("jobUpdated")
@@ -168,29 +234,6 @@ router.patch("/:id/deny", async (req, res) => {
   } catch (err) {
     console.error("❌ DENY ERROR:", err)
     res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= GET ONE ================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params
-
-    if (!isValidId(id)) {
-      return res.status(400).json({ message: "Invalid ID" })
-    }
-
-    const quote = await Quote.findById(id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    res.json({ success: true, data: quote })
-
-  } catch (err) {
-    console.error("❌ GET ONE ERROR:", err)
-    res.status(500).json({ message: "Failed to load quote" })
   }
 })
 
