@@ -32,7 +32,9 @@ export const sendOrderStatusEmail = async (
     let subject = "SignaVi Studio Update"
     let html = `<h2>SignaVi Studio</h2>`
 
-    /* ================= RESET PASSWORD (🔥 ADD THIS) ================= */
+    /* =========================================================
+       🔐 RESET PASSWORD
+    ========================================================= */
     if (status === "reset_password") {
       subject = "🔐 Reset Your Password"
 
@@ -60,7 +62,9 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* ================= PAYMENT REQUIRED ================= */
+    /* =========================================================
+       💳 PAYMENT REQUIRED
+    ========================================================= */
     else if (status === "payment_required") {
       subject = "💳 Payment Required – Your Order is Ready"
 
@@ -69,7 +73,7 @@ export const sendOrderStatusEmail = async (
 
         <p>Your quote has been approved and is ready for payment.</p>
 
-        <h3>Total: $${order?.price || 0}</h3>
+        <h3>Total: $${Number(order?.price || 0).toFixed(2)}</h3>
 
         <p>
           <a href="${checkoutLink}" target="_blank"
@@ -88,7 +92,9 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* ================= DENIED ================= */
+    /* =========================================================
+       ❌ DENIED
+    ========================================================= */
     else if (status === "denied") {
       subject = "❌ Your Quote Was Not Approved"
 
@@ -99,11 +105,14 @@ export const sendOrderStatusEmail = async (
       `
     }
 
-    /* ================= DEFAULT ================= */
+    /* =========================================================
+       📦 DEFAULT
+    ========================================================= */
     else {
       html += `<p>Status update: ${status}</p>`
     }
 
+    /* ================= FOOTER ================= */
     html += `
       <p style="margin-top:20px;">
         Thank you,<br/>
@@ -120,7 +129,14 @@ export const sendOrderStatusEmail = async (
       html
     })
 
-    console.log("📧 EMAIL SUCCESS:", response)
+    /* =========================================================
+       🔍 HANDLE RESEND ERRORS PROPERLY
+    ========================================================= */
+    if (response?.error) {
+      console.error("❌ RESEND ERROR:", response.error)
+    } else {
+      console.log("📧 EMAIL SUCCESS:", response)
+    }
 
   } catch (err) {
     console.error("❌ EMAIL ERROR FULL:", err)

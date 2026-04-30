@@ -2,9 +2,9 @@ import express from "express"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import crypto from "crypto"
-import nodemailer from "nodemailer"
 import User from "../models/User.js"
 import { requireAuth } from "../middleware/requireAuth.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
@@ -24,7 +24,6 @@ router.post("/register", async (req, res) => {
     }
 
     const existingUser = await User.findOne({ email })
-
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" })
     }
@@ -70,13 +69,11 @@ router.post("/login", async (req, res) => {
     }
 
     const user = await User.findOne({ email })
-
     if (!user) {
       return res.status(400).json({ message: "User not found" })
     }
 
     const validPassword = await bcrypt.compare(password, user.password)
-
     if (!validPassword) {
       return res.status(400).json({ message: "Invalid password" })
     }
@@ -138,13 +135,11 @@ router.post("/change-password", requireAuth, async (req, res) => {
     }
 
     const user = await User.findById(req.user.id)
-
     if (!user) {
       return res.status(404).json({ message: "User not found" })
     }
 
     const valid = await bcrypt.compare(currentPassword, user.password)
-
     if (!valid) {
       return res.status(400).json({
         message: "Incorrect current password"
@@ -164,9 +159,11 @@ router.post("/change-password", requireAuth, async (req, res) => {
   }
 })
 
-/* ================= FORGOT PASSWORD ================= */
+/* ================= FORGOT PASSWORD (🔥 FIXED) ================= */
 router.post("/forgot-password", async (req, res) => {
   try {
+    console.log("🔥 FORGOT PASSWORD HIT:", req.body.email)
+
     const { email } = req.body || {}
 
     if (!email) {
@@ -187,28 +184,20 @@ router.post("/forgot-password", async (req, res) => {
 
     await user.save()
 
-    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173"
+    const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173"
+    const resetUrl = `${CLIENT_URL}/reset-password/${rawToken}`
 
-    const resetLink = `${FRONTEND_URL}/reset-password/${rawToken}`
+    console.log("🔐 RESET LINK:", resetUrl)
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
+    await sendOrderStatusEmail(
+      user.email,
+      "reset_password",
+      rawToken,
+      {
+        resetUrl,
+        customerName: user.name
       }
-    })
-
-    await transporter.sendMail({
-      to: user.email,
-      subject: "Reset your password",
-      html: `
-        <h2>Password Reset</h2>
-        <p>Click below to reset your password:</p>
-        <a href="${resetLink}">${resetLink}</a>
-        <p>This link expires in 15 minutes.</p>
-      `
-    })
+    )
 
     console.log("📧 RESET EMAIL SENT:", user.email)
 
@@ -254,35 +243,6 @@ router.post("/reset-password/:token", async (req, res) => {
   } catch (err) {
     console.error("❌ RESET PASSWORD ERROR:", err)
     res.status(500).json({ message: "Reset failed" })
-  }
-})
-
-/* ================= CREATE ADMIN ================= */
-router.post("/create-admin", async (req, res) => {
-  try {
-    const existing = await User.findOne({ email: "admin@signavi.com" })
-
-    if (existing) {
-      return res.json({ message: "Admin already exists" })
-    }
-
-    const hashedPassword = await bcrypt.hash("123456", 10)
-
-    const admin = await User.create({
-      name: "Admin",
-      email: "admin@signavi.com",
-      password: hashedPassword,
-      role: "admin"
-    })
-
-    res.json({
-      message: "Admin created",
-      admin
-    })
-
-  } catch (err) {
-    console.error("❌ CREATE ADMIN ERROR:", err)
-    res.status(500).json({ message: err.message })
   }
 })
 
