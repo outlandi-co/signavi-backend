@@ -38,8 +38,14 @@ router.get("/my-orders", async (req, res) => {
 
 /* ================= GET SINGLE ORDER ================= */
 router.get("/:id", async (req, res) => {
+  const { id } = req.params
+
+  if (!id || id === "null") {
+    return res.status(400).json({ message: "Invalid order ID" })
+  }
+
   try {
-    const order = await Order.findById(req.params.id)
+    const order = await Order.findById(id)
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
