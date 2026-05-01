@@ -66,7 +66,7 @@ router.post("/", async (req, res) => {
 
     /* 🔥 GUEST SUPPORT */
     if (!email) {
-      email = "guest@signavi.com"
+      email: user.email
     }
 
     if (!items.length) {

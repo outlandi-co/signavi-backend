@@ -18,6 +18,10 @@ router.post("/create-payment/:id", async (req, res) => {
   try {
     const { id } = req.params
 
+    if (!id || id === "null") {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
     let record = await Quote.findById(id)
     let type = "quote"
 
@@ -28,6 +32,14 @@ router.post("/create-payment/:id", async (req, res) => {
 
     if (!record) {
       return res.status(404).json({ message: "Record not found" })
+    }
+
+    /* =========================================================
+       🔥 PREVENT DUPLICATE PAYMENT LINKS
+    ========================================================= */
+    if (record.paymentUrl) {
+      console.log("⚠️ Reusing existing payment link:", record.paymentUrl)
+      return res.json({ success: true, url: record.paymentUrl })
     }
 
     /* ================= CALCULATE ================= */
@@ -46,9 +58,13 @@ router.post("/create-payment/:id", async (req, res) => {
 
     const amount = BigInt(Math.round(total * 100))
 
-    /* ================= CREATE PAYMENT ================= */
+    /* =========================================================
+       🔥 STABLE IDEMPOTENCY KEY (NO Date.now())
+    ========================================================= */
+    const idempotencyKey = `${id}-payment`
+
     const response = await client.checkout.paymentLinks.create({
-      idempotencyKey: `${id}-${Date.now()}`,
+      idempotencyKey,
       order: {
         locationId: LOCATION_ID,
         lineItems: [
@@ -73,10 +89,11 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("No payment URL returned")
     }
 
+    /* ================= SAVE ================= */
     record.paymentUrl = url
     await record.save()
 
-    console.log("✅ PAYMENT LINK:", url)
+    console.log("✅ PAYMENT LINK CREATED:", url)
 
     res.json({ success: true, url })
 
