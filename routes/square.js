@@ -37,7 +37,23 @@ router.post("/create-payment/:id", async (req, res) => {
     /* ================= PREVENT DUPLICATE ================= */
     if (record.paymentUrl) {
       console.log("⚠️ Reusing existing payment link:", record.paymentUrl)
-      return res.json({ success: true, url: record.paymentUrl })
+
+      // 🔥 FIND RELATED ORDER
+      let existingOrder =
+        type === "quote"
+          ? await Order.findOne({ quoteId: record._id })
+          : record
+
+      const invoiceUrl = existingOrder
+        ? `${process.env.BASE_URL}/api/orders/${existingOrder._id}/invoice`
+        : null
+
+      return res.json({
+        success: true,
+        url: record.paymentUrl,
+        invoiceUrl,
+        orderId: existingOrder?._id || null
+      })
     }
 
     /* ================= CALCULATE ================= */
@@ -59,15 +75,13 @@ router.post("/create-payment/:id", async (req, res) => {
     /* ================= IDEMPOTENCY ================= */
     const idempotencyKey = `${id}-payment`
 
-    /* =========================================================
-       🔥 CRITICAL FIX: ADD NOTE FOR WEBHOOK MATCHING
-    ========================================================= */
+    /* ================= CREATE PAYMENT LINK ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey,
       order: {
         locationId: LOCATION_ID,
 
-        // 🔥 THIS IS THE FIX
+        // 🔥 IMPORTANT FOR WEBHOOK MATCHING
         note: `ID:${record._id}`,
 
         lineItems: [
@@ -92,13 +106,46 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("No payment URL returned")
     }
 
-    /* ================= SAVE ================= */
+    /* ================= ENSURE ORDER EXISTS ================= */
+    let order = null
+
+    if (type === "quote") {
+      order = await Order.findOne({ quoteId: record._id })
+
+      if (!order) {
+        order = await Order.create({
+          customerName: record.customerName,
+          email: record.email,
+          items: record.items,
+          subtotal,
+          tax,
+          finalPrice: total,
+          status: "payment_required",
+          quoteId: record._id
+        })
+
+        console.log("🧾 ORDER CREATED FROM QUOTE:", order._id)
+      }
+    } else {
+      order = record
+    }
+
+    /* ================= SAVE PAYMENT LINK ================= */
     record.paymentUrl = url
     await record.save()
 
     console.log("✅ PAYMENT LINK CREATED:", url)
 
-    res.json({ success: true, url })
+    /* ================= INVOICE LINK ================= */
+    const invoiceUrl = `${process.env.BASE_URL}/api/orders/${order._id}/invoice`
+
+    /* ================= RESPONSE ================= */
+    res.json({
+      success: true,
+      url,
+      invoiceUrl,
+      orderId: order._id
+    })
 
   } catch (err) {
     console.error("❌ SQUARE ERROR:", err)

@@ -22,6 +22,9 @@ import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
 import shippingRoutes from "./routes/shipping.js"
 
+// 🔥 NEW: WEBHOOK ROUTE
+import squareWebhook from "./routes/squareWebhook.js"
+
 /* ================= APP ================= */
 const app = express()
 const server = http.createServer(app)
@@ -49,14 +52,24 @@ app.use(cors({
 }))
 
 /* =========================================================
-   🔥 SAFE JSON PARSER (FIX YOUR ERROR)
+   🔥 CRITICAL: WEBHOOK MUST COME BEFORE JSON PARSER
+========================================================= */
+
+// ✅ RAW BODY ONLY FOR WEBHOOK
+app.use("/api/square/webhook", express.raw({ type: "application/json" }))
+
+// ✅ REGISTER WEBHOOK ROUTE FIRST
+app.use("/api/square", squareWebhook)
+
+/* =========================================================
+   🔥 SAFE JSON PARSER (FOR EVERYTHING ELSE)
 ========================================================= */
 app.use(express.json({
   strict: true,
   limit: "2mb"
 }))
 
-/* 🔥 HANDLE BAD JSON (THIS FIXES YOUR CRASH) */
+/* 🔥 HANDLE BAD JSON */
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && "body" in err) {
     console.error("❌ BAD JSON RECEIVED:", err.message)
@@ -83,7 +96,7 @@ app.use("/api/quotes", quoteRoutes)
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
-app.use("/api/square", squareRoutes)
+app.use("/api/square", squareRoutes) // payment route stays
 app.use("/api/shipping", shippingRoutes)
 
 /* ================= SOCKET ================= */
@@ -100,7 +113,7 @@ io.on("connection", (socket) => {
 })
 
 /* =========================================================
-   🔥 GLOBAL ERROR HANDLER (EXTRA SAFETY)
+   🔥 GLOBAL ERROR HANDLER
 ========================================================= */
 app.use((err, req, res, next) => {
   console.error("❌ GLOBAL ERROR:", err)

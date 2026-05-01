@@ -5,7 +5,7 @@ import Order from "../models/Order.js"
 const router = express.Router()
 
 /* =========================================================
-   🛒 CREATE ORDER (FIXES YOUR 404)
+   🛒 CREATE ORDER
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
@@ -43,7 +43,15 @@ router.post("/", async (req, res) => {
       subtotal,
       tax,
       finalPrice,
-      status: "payment_required"
+      status: "payment_required",
+      printStatus: "pending",
+      timeline: [
+        {
+          status: "created",
+          date: new Date(),
+          note: "Order created"
+        }
+      ]
     })
 
     console.log("✅ ORDER CREATED:", order._id)
@@ -60,167 +68,157 @@ router.post("/", async (req, res) => {
 })
 
 /* =========================================================
-   💰 PROFIT SUMMARY
+   💰 MARK PAID → PRODUCTION
 ========================================================= */
-router.get("/profit-summary", async (req, res) => {
+router.patch("/:id/mark-paid", async (req, res) => {
   try {
-    const orders = await Order.find({ status: { $ne: "denied" } })
+    const order = await Order.findById(req.params.id)
 
-    let revenue = 0
-    let profit = 0
-
-    orders.forEach(o => {
-      const total = Number(o.subtotal || o.finalPrice || 0)
-      revenue += total
-      profit += Number(o.profit || 0)
-    })
-
-    const avgMargin = revenue > 0 ? (profit / revenue) * 100 : 0
-
-    res.json({
-      success: true,
-      data: {
-        revenue: Number(revenue.toFixed(2)),
-        profit: Number(profit.toFixed(2)),
-        avgMargin: Number(avgMargin.toFixed(2)),
-        count: orders.length
-      }
-    })
-  } catch (err) {
-    console.error("❌ PROFIT SUMMARY ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   📊 ANALYTICS
-========================================================= */
-router.get("/analytics", async (req, res) => {
-  try {
-    const orders = await Order.find({ status: { $ne: "denied" } })
-
-    const revenueMap = {}
-    const productMap = {}
-
-    orders.forEach(order => {
-      const total = Number(order.subtotal || order.finalPrice || 0)
-      const date = new Date(order.createdAt).toISOString().slice(0, 10)
-
-      revenueMap[date] = (revenueMap[date] || 0) + total
-
-      order.items?.forEach(item => {
-        const key = item.name || "Unknown"
-
-        if (!productMap[key]) {
-          productMap[key] = { name: key, quantity: 0, revenue: 0 }
-        }
-
-        const itemRevenue = Number(item.price || 0) * Number(item.quantity || 0)
-
-        productMap[key].quantity += Number(item.quantity || 0)
-        productMap[key].revenue += itemRevenue
-      })
-    })
-
-    const revenueByDay = Object.entries(revenueMap)
-      .map(([date, total]) => ({
-        date,
-        total: Number(total.toFixed(2))
-      }))
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-
-    const topProducts = Object.values(productMap)
-      .map(p => ({
-        ...p,
-        revenue: Number(p.revenue.toFixed(2))
-      }))
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 5)
-
-    const lowMarginOrders = orders
-      .filter(o => Number(o.margin || 0) < 20)
-      .map(o => ({
-        id: o._id,
-        customer: o.customerName,
-        margin: Number(o.margin || 0),
-        total: Number(o.finalPrice || 0)
-      }))
-
-    res.json({
-      success: true,
-      data: { revenueByDay, topProducts, lowMarginOrders }
-    })
-
-  } catch (err) {
-    console.error("❌ ANALYTICS ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   🧠 CUSTOMER VALUE
-========================================================= */
-router.get("/customers-value", async (req, res) => {
-  try {
-    const orders = await Order.find({ status: { $ne: "denied" } })
-
-    const map = {}
-
-    orders.forEach(o => {
-      const email = o.email || "guest"
-
-      if (!map[email]) {
-        map[email] = {
-          email,
-          orders: 0,
-          totalSpent: 0
-        }
-      }
-
-      const total = Number(o.subtotal || o.finalPrice || 0)
-
-      map[email].orders += 1
-      map[email].totalSpent += total
-    })
-
-    const customers = Object.values(map)
-      .map(c => ({
-        ...c,
-        totalSpent: Number(c.totalSpent.toFixed(2))
-      }))
-      .sort((a, b) => b.totalSpent - a.totalSpent)
-
-    res.json({ success: true, data: customers })
-
-  } catch (err) {
-    console.error("❌ CLV ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   🔁 RECALCULATE PROFIT
-========================================================= */
-router.post("/recalculate-profit", async (req, res) => {
-  try {
-    const orders = await Order.find()
-
-    let updated = 0
-
-    for (let order of orders) {
-      await order.save()
-      updated++
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
     }
 
-    console.log(`✅ Recalculated ${updated} orders`)
+    order.status = "production"
+    order.printStatus = "queued"
 
-    res.json({
-      success: true,
-      message: `Updated ${updated} orders`
+    if (!order.timeline) order.timeline = []
+
+    order.timeline.push({
+      status: "paid",
+      date: new Date(),
+      note: "Payment received → moved to production"
     })
+
+    await order.save()
+
+    console.log("🔥 ORDER MOVED TO PRODUCTION:", order._id)
+
+    res.json({ success: true, data: order })
+
   } catch (err) {
-    console.error("❌ RECALC ERROR:", err)
+    console.error("❌ MARK PAID ERROR:", err)
     res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   🖨️ PRINT CONTROL
+========================================================= */
+router.patch("/:id/print", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.printStatus = "printing"
+
+    order.timeline.push({
+      status: "printing",
+      date: new Date(),
+      note: "Printing started"
+    })
+
+    await order.save()
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ PRINT ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+router.patch("/:id/print-complete", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.printStatus = "done"
+    order.status = "completed"
+
+    order.timeline.push({
+      status: "completed",
+      date: new Date(),
+      note: "Print completed"
+    })
+
+    await order.save()
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ PRINT COMPLETE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   🧾 INVOICE
+========================================================= */
+router.get("/:id/invoice", async (req, res) => {
+  const { id } = req.params
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).send("Invalid order ID")
+  }
+
+  try {
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).send("Order not found")
+    }
+
+    const html = `
+      <html>
+        <head>
+          <title>Invoice #${order._id}</title>
+          <style>
+            body { font-family: Arial; padding: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            th, td { border: 1px solid #ccc; padding: 8px; }
+          </style>
+        </head>
+        <body>
+
+          <h1>Signavi Studio Invoice</h1>
+
+          <p><b>Order ID:</b> ${order._id}</p>
+          <p><b>Customer:</b> ${order.customerName}</p>
+          <p><b>Email:</b> ${order.email}</p>
+
+          <table>
+            <tr>
+              <th>Name</th>
+              <th>Qty</th>
+              <th>Price</th>
+            </tr>
+
+            ${order.items.map(item => `
+              <tr>
+                <td>${item.name}</td>
+                <td>${item.quantity}</td>
+                <td>$${item.price}</td>
+              </tr>
+            `).join("")}
+          </table>
+
+          <h2>Total: $${order.finalPrice}</h2>
+
+        </body>
+      </html>
+    `
+
+    res.send(html)
+
+  } catch (err) {
+    console.error("❌ INVOICE ERROR:", err)
+    res.status(500).send("Server error")
   }
 })
 
@@ -238,7 +236,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   📄 GET SINGLE ORDER (KEEP LAST)
+   📄 GET SINGLE ORDER
 ========================================================= */
 router.get("/:id", async (req, res) => {
   const { id } = req.params
