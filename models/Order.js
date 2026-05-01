@@ -6,7 +6,7 @@ const itemSchema = new mongoose.Schema({
   quantity: { type: Number, default: 1, min: 1 },
   price: { type: Number, default: 0, min: 0 },
 
-  // 🔥 OPTIONAL (for real profit accuracy)
+  // 🔥 REAL COST SUPPORT
   cost: { type: Number, default: 0, min: 0 },
 
   variant: {
@@ -18,7 +18,6 @@ const itemSchema = new mongoose.Schema({
 /* ================= ORDER SCHEMA ================= */
 const orderSchema = new mongoose.Schema({
 
-  /* ================= USER ================= */
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
@@ -47,8 +46,8 @@ const orderSchema = new mongoose.Schema({
   price: { type: Number, default: 0, min: 0 },
   finalPrice: { type: Number, default: 0, min: 0 },
 
-  /* ================= PROFIT ================= */
-  cogs: { type: Number, default: 0 },     // cost of goods
+  /* ================= PROFIT ENGINE ================= */
+  cogs: { type: Number, default: 0 },
   profit: { type: Number, default: 0 },
   margin: { type: Number, default: 0 },
 
@@ -60,7 +59,6 @@ const orderSchema = new mongoose.Schema({
     default: "store"
   },
 
-  /* ================= STATUS ================= */
   status: {
     type: String,
     enum: [
@@ -114,8 +112,6 @@ const orderSchema = new mongoose.Schema({
   },
 
   /* ================= PAYMENT ================= */
-
-  // 🔥 SQUARE ONLY
   squarePaymentId: { type: String, default: "" },
   squareOrderId: { type: String, default: "" },
 
@@ -126,44 +122,53 @@ const orderSchema = new mongoose.Schema({
   amountReceived: { type: Number, default: 0 },
   amountRefunded: { type: Number, default: 0 },
 
+  /* ================= FEES ================= */
   processingFee: { type: Number, default: 0 },
   netAmount: { type: Number, default: 0 }
 
 }, { timestamps: true })
 
 /* =========================================================
-   🔥 SMART PROFIT ENGINE
+   🔥 AUTO PROFIT + SMART COGS ENGINE
 ========================================================= */
-orderSchema.pre("save", function (next) {
+orderSchema.pre("save", function () {
 
-  const total = this.finalPrice || 0
+  const subtotal = this.subtotal || this.finalPrice || 0
 
-  /* ================= ITEM COST (BEST CASE) ================= */
-  if (this.items && this.items.length > 0) {
-    const itemCost = this.items.reduce((sum, item) => {
-      return sum + (Number(item.cost || 0) * Number(item.quantity || 1))
-    }, 0)
-
-    if (itemCost > 0) {
-      this.cogs = itemCost
-    }
-  }
-
-  /* ================= FALLBACK ESTIMATE ================= */
+  /* ================= AUTO COGS ================= */
   if (!this.cogs || this.cogs === 0) {
-    this.cogs = total * 0.4 // 🔥 40% default cost
+    this.cogs = (this.items || []).reduce((sum, item) => {
+
+      // ✅ Use real cost if provided
+      if (item.cost && item.cost > 0) {
+        return sum + (item.cost * item.quantity)
+      }
+
+      // 🔥 fallback: 40% estimate
+      const estimatedCost = item.price * 0.4
+      return sum + (estimatedCost * item.quantity)
+
+    }, 0)
   }
 
-  /* ================= FINAL CALCULATIONS ================= */
-  this.profit = total - this.cogs
+  /* ================= PROFIT ================= */
+  this.profit = subtotal - this.cogs
 
-  this.margin = total > 0
-    ? (this.profit / total) * 100
-    : 0
+  /* ================= MARGIN ================= */
+  if (subtotal > 0) {
+    this.margin = (this.profit / subtotal) * 100
+  } else {
+    this.margin = 0
+  }
 
-  this.netAmount = total - (this.processingFee || 0)
+  /* ================= NET ================= */
+  this.netAmount = subtotal - (this.processingFee || 0)
 
-  next()
+  /* ================= CLEAN NUMBERS ================= */
+  this.cogs = Number(this.cogs.toFixed(2))
+  this.profit = Number(this.profit.toFixed(2))
+  this.margin = Number(this.margin.toFixed(2))
+  this.netAmount = Number(this.netAmount.toFixed(2))
 })
 
 /* ================= INDEXES ================= */
