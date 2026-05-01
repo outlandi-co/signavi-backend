@@ -6,6 +6,9 @@ const itemSchema = new mongoose.Schema({
   quantity: { type: Number, default: 1, min: 1 },
   price: { type: Number, default: 0, min: 0 },
 
+  // 🔥 OPTIONAL (for real profit accuracy)
+  cost: { type: Number, default: 0, min: 0 },
+
   variant: {
     color: { type: String, default: "", lowercase: true, trim: true },
     size: { type: String, default: "", uppercase: true, trim: true }
@@ -15,6 +18,7 @@ const itemSchema = new mongoose.Schema({
 /* ================= ORDER SCHEMA ================= */
 const orderSchema = new mongoose.Schema({
 
+  /* ================= USER ================= */
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
@@ -32,6 +36,7 @@ const orderSchema = new mongoose.Schema({
     index: true
   },
 
+  /* ================= CORE ================= */
   quantity: { type: Number, default: 1, min: 1 },
   printType: { type: String, default: "screenprint" },
   artwork: { type: String, default: null },
@@ -41,6 +46,11 @@ const orderSchema = new mongoose.Schema({
   tax: { type: Number, default: 0, min: 0 },
   price: { type: Number, default: 0, min: 0 },
   finalPrice: { type: Number, default: 0, min: 0 },
+
+  /* ================= PROFIT ================= */
+  cogs: { type: Number, default: 0 },     // cost of goods
+  profit: { type: Number, default: 0 },
+  margin: { type: Number, default: 0 },
 
   items: { type: [itemSchema], default: [] },
 
@@ -65,7 +75,6 @@ const orderSchema = new mongoose.Schema({
       "denied"
     ],
     default: "payment_required"
-    // ❌ removed index:true here
   },
 
   /* ================= SHIPPING ================= */
@@ -73,7 +82,6 @@ const orderSchema = new mongoose.Schema({
   trackingLink: { type: String, default: "" },
   shippingLabel: { type: String, default: "" },
 
-  // 🔥 OPTIONAL (recommended for your checkout flow)
   shippingAddress: {
     name: String,
     street1: String,
@@ -106,24 +114,61 @@ const orderSchema = new mongoose.Schema({
   },
 
   /* ================= PAYMENT ================= */
-  stripePaymentIntentId: { type: String, default: "" },
-  stripeSessionId: { type: String, default: "" },
-  stripeChargeId: { type: String, default: "" },
+
+  // 🔥 SQUARE ONLY
+  squarePaymentId: { type: String, default: "" },
+  squareOrderId: { type: String, default: "" },
 
   paymentUrl: { type: String, default: "" },
 
   currency: { type: String, default: "usd" },
+
   amountReceived: { type: Number, default: 0 },
   amountRefunded: { type: Number, default: 0 },
-  stripeFee: { type: Number, default: 0 },
-  netAmount: { type: Number, default: 0 },
-  cogs: { type: Number, default: 0 }
+
+  processingFee: { type: Number, default: 0 },
+  netAmount: { type: Number, default: 0 }
 
 }, { timestamps: true })
+
+/* =========================================================
+   🔥 SMART PROFIT ENGINE
+========================================================= */
+orderSchema.pre("save", function (next) {
+
+  const total = this.finalPrice || 0
+
+  /* ================= ITEM COST (BEST CASE) ================= */
+  if (this.items && this.items.length > 0) {
+    const itemCost = this.items.reduce((sum, item) => {
+      return sum + (Number(item.cost || 0) * Number(item.quantity || 1))
+    }, 0)
+
+    if (itemCost > 0) {
+      this.cogs = itemCost
+    }
+  }
+
+  /* ================= FALLBACK ESTIMATE ================= */
+  if (!this.cogs || this.cogs === 0) {
+    this.cogs = total * 0.4 // 🔥 40% default cost
+  }
+
+  /* ================= FINAL CALCULATIONS ================= */
+  this.profit = total - this.cogs
+
+  this.margin = total > 0
+    ? (this.profit / total) * 100
+    : 0
+
+  this.netAmount = total - (this.processingFee || 0)
+
+  next()
+})
 
 /* ================= INDEXES ================= */
 orderSchema.index({ user: 1, createdAt: -1 })
 orderSchema.index({ email: 1, createdAt: -1 })
-orderSchema.index({ status: 1 }) // ✅ keep only this
+orderSchema.index({ status: 1 })
 
 export default mongoose.model("Order", orderSchema)

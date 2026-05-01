@@ -34,9 +34,7 @@ router.post("/create-payment/:id", async (req, res) => {
       return res.status(404).json({ message: "Record not found" })
     }
 
-    /* =========================================================
-       🔥 PREVENT DUPLICATE PAYMENT LINKS
-    ========================================================= */
+    /* ================= PREVENT DUPLICATE ================= */
     if (record.paymentUrl) {
       console.log("⚠️ Reusing existing payment link:", record.paymentUrl)
       return res.json({ success: true, url: record.paymentUrl })
@@ -58,15 +56,20 @@ router.post("/create-payment/:id", async (req, res) => {
 
     const amount = BigInt(Math.round(total * 100))
 
-    /* =========================================================
-       🔥 STABLE IDEMPOTENCY KEY (NO Date.now())
-    ========================================================= */
+    /* ================= IDEMPOTENCY ================= */
     const idempotencyKey = `${id}-payment`
 
+    /* =========================================================
+       🔥 CRITICAL FIX: ADD NOTE FOR WEBHOOK MATCHING
+    ========================================================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey,
       order: {
         locationId: LOCATION_ID,
+
+        // 🔥 THIS IS THE FIX
+        note: `ID:${record._id}`,
+
         lineItems: [
           {
             name: `${type.toUpperCase()} #${record._id}`,

@@ -20,7 +20,6 @@ import expenseRoutes from "./routes/expenses.js"
 import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
-import squareWebhook from "./routes/squareWebhook.js" // 🔥 NEW
 import shippingRoutes from "./routes/shipping.js"
 
 /* ================= APP ================= */
@@ -50,15 +49,27 @@ app.use(cors({
 }))
 
 /* =========================================================
-   🔥 IMPORTANT: WEBHOOK RAW BODY (BEFORE express.json)
+   🔥 SAFE JSON PARSER (FIX YOUR ERROR)
 ========================================================= */
-app.use(
-  "/api/square/webhook",
-  express.raw({ type: "application/json" })
-)
+app.use(express.json({
+  strict: true,
+  limit: "2mb"
+}))
+
+/* 🔥 HANDLE BAD JSON (THIS FIXES YOUR CRASH) */
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && "body" in err) {
+    console.error("❌ BAD JSON RECEIVED:", err.message)
+
+    return res.status(400).json({
+      success: false,
+      message: "Invalid JSON format"
+    })
+  }
+  next()
+})
 
 /* ================= MIDDLEWARE ================= */
-app.use(express.json())
 app.use(cookieParser())
 
 /* ================= ROUTES ================= */
@@ -72,17 +83,13 @@ app.use("/api/quotes", quoteRoutes)
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
-
 app.use("/api/square", squareRoutes)
-app.use("/api/square", squareWebhook) // 🔥 WEBHOOK ROUTE
-
 app.use("/api/shipping", shippingRoutes)
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"]
+    origin: allowedOrigins
   }
 })
 
@@ -92,9 +99,16 @@ io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
 })
 
-/* ================= HEALTH CHECK ================= */
-app.get("/ping", (req, res) => {
-  res.send("pong")
+/* =========================================================
+   🔥 GLOBAL ERROR HANDLER (EXTRA SAFETY)
+========================================================= */
+app.use((err, req, res, next) => {
+  console.error("❌ GLOBAL ERROR:", err)
+
+  res.status(500).json({
+    success: false,
+    message: "Server error"
+  })
 })
 
 /* ================= START ================= */

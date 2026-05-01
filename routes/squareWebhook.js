@@ -1,59 +1,162 @@
 import express from "express"
+import mongoose from "mongoose"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
+const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
+
 /* =========================================================
-   🔥 SQUARE WEBHOOK HANDLER
+   🔥 SQUARE WEBHOOK
 ========================================================= */
 router.post("/webhook", async (req, res) => {
   try {
-    const event = req.body
+    // 🔥 RAW BODY → JSON
+    const event = JSON.parse(req.body.toString())
 
     console.log("📥 WEBHOOK RECEIVED:", event?.type)
 
-    /* ================= PAYMENT COMPLETED ================= */
-    if (event?.type === "payment.created") {
+    if (event?.type !== "payment.created") {
+      return res.sendStatus(200)
+    }
 
-      const payment = event?.data?.object?.payment
+    const payment = event?.data?.object?.payment
+    const note = payment?.note || ""
 
-      const note = payment?.note || ""
-      const orderId = note.replace("ID:", "").trim()
+    const id = note.replace("ID:", "").trim()
 
-      console.log("🔎 Extracted ID:", orderId)
+    if (!isValidId(id)) {
+      console.warn("⚠️ Invalid ID from webhook:", id)
+      return res.sendStatus(200)
+    }
 
-      let record = await Quote.findById(orderId)
+    console.log("🔎 Extracted ID:", id)
 
-      if (!record) {
-        record = await Order.findById(orderId)
+    /* ================= FIND RECORD ================= */
+    let quote = await Quote.findById(id)
+    let order = await Order.findById(id)
+
+    /* =========================================================
+       🔥 CASE 1: QUOTE → CONVERT TO ORDER
+    ========================================================= */
+    if (quote && !order) {
+      console.log("🔁 Converting Quote → Order")
+
+      const newOrder = new Order({
+        customerName: quote.customerName,
+        email: quote.email,
+        quantity: quote.quantity,
+        price: quote.price,
+        subtotal: quote.price,
+        shippingCost: quote.shippingCost || 0,
+        tax: quote.tax || 0,
+        finalPrice:
+          (quote.price || 0) +
+          (quote.shippingCost || 0) +
+          (quote.tax || 0),
+
+        items: quote.items || [],
+        artwork: quote.artwork || "",
+        printType: quote.printType || "screenprint",
+
+        status: "production", // 🔥 AUTO MOVE
+        source: "order",
+
+        timeline: [
+          ...(quote.timeline || []),
+          {
+            status: "paid",
+            note: "Payment received",
+            date: new Date()
+          },
+          {
+            status: "production",
+            note: "Moved to production",
+            date: new Date()
+          }
+        ]
+      })
+
+      await newOrder.save()
+
+      // 🔥 mark quote as paid/archived
+      quote.status = "paid"
+      quote.approvalStatus = "approved"
+
+      quote.timeline.push({
+        status: "paid",
+        note: "Payment completed",
+        date: new Date()
+      })
+
+      await quote.save()
+
+      console.log("✅ ORDER CREATED:", newOrder._id)
+
+      /* ================= EMAIL ================= */
+      try {
+        await sendOrderStatusEmail(
+          newOrder.email,
+          "paid",
+          newOrder._id,
+          newOrder
+        )
+      } catch (err) {
+        console.error("❌ EMAIL FAIL:", err)
       }
 
-      if (!record) {
-        console.warn("⚠️ No record found for webhook ID")
-        return res.sendStatus(200)
-      }
+      /* ================= SOCKET ================= */
+      req.app.get("io")?.emit("jobUpdated", newOrder)
 
-      /* ================= UPDATE STATUS ================= */
-      record.status = "paid"
+      return res.sendStatus(200)
+    }
 
-      record.timeline.push({
+    /* =========================================================
+       🔥 CASE 2: EXISTING ORDER → MARK PAID
+    ========================================================= */
+    if (order) {
+      order.status = "production"
+
+      order.timeline.push({
         status: "paid",
         note: "Payment received",
         date: new Date()
       })
 
-      await record.save()
+      await order.save()
 
-      console.log("✅ MARKED AS PAID:", record._id)
+      console.log("✅ ORDER MARKED PAID:", order._id)
+
+      try {
+        await sendOrderStatusEmail(
+          order.email,
+          "paid",
+          order._id,
+          order
+        )
+      } catch (err) {
+        console.error("❌ EMAIL FAIL:", err)
+      }
+
+      req.app.get("io")?.emit("jobUpdated", order)
+
+      return res.sendStatus(200)
     }
 
-    res.sendStatus(200)
+    console.warn("⚠️ No record found for ID:", id)
 
+    res.sendStatus(200)
   } catch (err) {
     console.error("❌ WEBHOOK ERROR:", err)
     res.sendStatus(500)
   }
+})
+
+/* 🔥 Optional browser check */
+router.get("/webhook", (req, res) => {
+  res.send("Webhook is live (POST only)")
 })
 
 export default router

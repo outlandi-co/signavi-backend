@@ -1,4 +1,5 @@
 import express from "express"
+import mongoose from "mongoose"
 import axios from "axios"
 import Order from "../models/Order.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
@@ -6,7 +7,146 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 const router = express.Router()
 const BASE_URL = process.env.BASE_URL || "http://localhost:5050"
 
-/* ================= GET ALL ORDERS ================= */
+/* =========================================================
+   💰 PROFIT SUMMARY
+========================================================= */
+router.get("/profit-summary", async (req, res) => {
+  try {
+    const orders = await Order.find({
+      status: { $ne: "denied" }
+    })
+
+    let revenue = 0
+    let profit = 0
+
+    orders.forEach(o => {
+      revenue += Number(o.finalPrice || 0)
+      profit += Number(o.profit || 0)
+    })
+
+    const avgMargin =
+      revenue > 0 ? (profit / revenue) * 100 : 0
+
+    res.json({
+      success: true,
+      data: {
+        revenue,
+        profit,
+        avgMargin,
+        count: orders.length
+      }
+    })
+
+  } catch (err) {
+    console.error("❌ PROFIT SUMMARY ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   📊 ANALYTICS
+========================================================= */
+router.get("/analytics", async (req, res) => {
+  try {
+    const orders = await Order.find({
+      status: { $ne: "denied" }
+    })
+
+    const revenueMap = {}
+    const productMap = {}
+
+    orders.forEach(order => {
+
+      const date = new Date(order.createdAt)
+        .toISOString()
+        .slice(0, 10)
+
+      revenueMap[date] =
+        (revenueMap[date] || 0) +
+        Number(order.finalPrice || 0)
+
+      order.items?.forEach(item => {
+        const key = item.name || "Unknown"
+
+        if (!productMap[key]) {
+          productMap[key] = {
+            name: key,
+            quantity: 0,
+            revenue: 0
+          }
+        }
+
+        productMap[key].quantity += Number(item.quantity || 0)
+        productMap[key].revenue +=
+          Number(item.price || 0) * Number(item.quantity || 0)
+      })
+    })
+
+    const revenueByDay = Object.entries(revenueMap)
+      .map(([date, total]) => ({ date, total }))
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+
+    const topProducts = Object.values(productMap)
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 5)
+
+    const lowMarginOrders = orders
+      .filter(o => Number(o.margin || 0) < 20)
+      .map(o => ({
+        id: o._id,
+        customer: o.customerName,
+        margin: o.margin,
+        total: o.finalPrice
+      }))
+
+    res.json({
+      success: true,
+      data: {
+        revenueByDay,
+        topProducts,
+        lowMarginOrders
+      }
+    })
+
+  } catch (err) {
+    console.error("❌ ANALYTICS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   🔁 RECALCULATE PROFIT (RUN ONCE)
+========================================================= */
+router.post("/recalculate-profit", async (req, res) => {
+  try {
+    const orders = await Order.find()
+
+    let updated = 0
+
+    for (let order of orders) {
+      order.cogs = order.cogs || 0
+      order.markModified("cogs")
+
+      await order.save()
+      updated++
+    }
+
+    console.log(`✅ Recalculated ${updated} orders`)
+
+    res.json({
+      success: true,
+      message: `Updated ${updated} orders`
+    })
+
+  } catch (err) {
+    console.error("❌ RECALC ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   📦 GET ALL
+========================================================= */
 router.get("/", async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 })
@@ -17,7 +157,9 @@ router.get("/", async (req, res) => {
   }
 })
 
-/* ================= GET CUSTOMER ORDERS ================= */
+/* =========================================================
+   👤 CUSTOMER ORDERS
+========================================================= */
 router.get("/my-orders", async (req, res) => {
   try {
     const email = req.query?.email?.toLowerCase()
@@ -36,11 +178,13 @@ router.get("/my-orders", async (req, res) => {
   }
 })
 
-/* ================= GET SINGLE ORDER ================= */
+/* =========================================================
+   📄 GET SINGLE ORDER
+========================================================= */
 router.get("/:id", async (req, res) => {
   const { id } = req.params
 
-  if (!id || id === "null") {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ message: "Invalid order ID" })
   }
 
@@ -59,15 +203,14 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-/* ================= CREATE ORDER ================= */
+/* =========================================================
+   🛒 CREATE ORDER
+========================================================= */
 router.post("/", async (req, res) => {
   try {
     let { customerName, email, items = [] } = req.body
 
-    /* 🔥 GUEST SUPPORT */
-    if (!email) {
-      email: user.email
-    }
+    if (!email) email = "guest@signavi.com"
 
     if (!items.length) {
       return res.status(400).json({ message: "Items required" })
@@ -100,7 +243,6 @@ router.post("/", async (req, res) => {
 
     await order.save()
 
-    /* 🔥 SAFE EMAIL */
     sendOrderStatusEmail(order.email, "payment_required", order._id, order)
       .catch(err => console.error("EMAIL FAIL:", err.message))
 
@@ -114,105 +256,9 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= CHECKOUT ================= */
-router.patch("/:id/checkout", async (req, res) => {
-  try {
-    console.log("➡️ CHECKOUT HIT")
-    console.log("➡️ BODY:", req.body)
-
-    if (!req.body || Object.keys(req.body).length === 0) {
-      return res.status(400).json({ message: "Missing request body" })
-    }
-
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    const {
-      shippingAddress,
-      shippingRateId,
-      shippingCost,
-      carrier,
-      serviceLevel
-    } = req.body
-
-    /* 🔥 SAFE ASSIGNMENTS */
-    if (shippingAddress) order.shippingAddress = shippingAddress
-    if (shippingRateId) order.shippingRateId = shippingRateId
-
-    order.shippingCost = Number(shippingCost) || 0
-    order.carrier = carrier || ""
-    order.serviceLevel = serviceLevel || ""
-
-    order.status = "shipping"
-
-    order.timeline.push({
-      status: "shipping",
-      note: "Shipping selected",
-      date: new Date()
-    })
-
-    await order.save()
-
-    sendOrderStatusEmail(order.email, "shipping", order._id, order)
-      .catch(err => console.error("EMAIL FAIL:", err.message))
-
-    req.app.get("io")?.emit("jobUpdated")
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ CHECKOUT CRASH:", err)
-
-    res.status(500).json({
-      message: "Checkout failed",
-      error: err.message
-    })
-  }
-})
-
-/* ================= UPDATE ================= */
-router.patch("/:id", async (req, res) => {
-  try {
-    const update = req.body
-
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      update,
-      { new: true }
-    )
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    /* 🔥 ONLY PUSH TIMELINE IF STATUS EXISTS */
-    if (update?.status) {
-      order.timeline.push({
-        status: update.status,
-        note: "Status updated",
-        date: new Date()
-      })
-
-      await order.save()
-
-      sendOrderStatusEmail(order.email, update.status, order._id, order)
-        .catch(err => console.error("EMAIL FAIL:", err.message))
-
-      req.app.get("io")?.emit("jobUpdated")
-    }
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ PATCH ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= SHIP ================= */
+/* =========================================================
+   🚚 SHIP ORDER
+========================================================= */
 router.post("/ship/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -224,8 +270,7 @@ router.post("/ship/:id", async (req, res) => {
     const shipRes = await axios.post(
       `${BASE_URL}/api/shipping/create-shipment`,
       {
-        address_to: order.shippingAddress,
-        rate_id: order.shippingRateId
+        address_to: order.shippingAddress
       }
     )
 
