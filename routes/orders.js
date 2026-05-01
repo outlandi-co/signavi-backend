@@ -5,6 +5,61 @@ import Order from "../models/Order.js"
 const router = express.Router()
 
 /* =========================================================
+   🛒 CREATE ORDER (FIXES YOUR 404)
+========================================================= */
+router.post("/", async (req, res) => {
+  try {
+    const { email, items } = req.body
+
+    if (!email || !items || items.length === 0) {
+      return res.status(400).json({ message: "Missing order data" })
+    }
+
+    let subtotal = 0
+
+    const cleanItems = items.map(item => {
+      const price = Number(item.price || 0)
+      const quantity = Number(item.quantity || 1)
+
+      subtotal += price * quantity
+
+      return {
+        name: item.name,
+        price,
+        quantity,
+        variant: item.variant || {},
+        cost: item.cost || 0
+      }
+    })
+
+    const TAX_RATE = 0.0825
+    const tax = subtotal * TAX_RATE
+    const finalPrice = subtotal + tax
+
+    const order = await Order.create({
+      email,
+      customerName: "Guest",
+      items: cleanItems,
+      subtotal,
+      tax,
+      finalPrice,
+      status: "payment_required"
+    })
+
+    console.log("✅ ORDER CREATED:", order._id)
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ CREATE ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
    💰 PROFIT SUMMARY
 ========================================================= */
 router.get("/profit-summary", async (req, res) => {
@@ -49,7 +104,6 @@ router.get("/analytics", async (req, res) => {
 
     orders.forEach(order => {
       const total = Number(order.subtotal || order.finalPrice || 0)
-
       const date = new Date(order.createdAt).toISOString().slice(0, 10)
 
       revenueMap[date] = (revenueMap[date] || 0) + total
@@ -94,12 +148,7 @@ router.get("/analytics", async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        revenueByDay,
-        topProducts,
-        lowMarginOrders,
-        orders // 🔥 optional for dashboard drill-down
-      }
+      data: { revenueByDay, topProducts, lowMarginOrders }
     })
 
   } catch (err) {
@@ -109,7 +158,7 @@ router.get("/analytics", async (req, res) => {
 })
 
 /* =========================================================
-   🧠 CUSTOMER LIFETIME VALUE (CLV)
+   🧠 CUSTOMER VALUE
 ========================================================= */
 router.get("/customers-value", async (req, res) => {
   try {
@@ -150,7 +199,7 @@ router.get("/customers-value", async (req, res) => {
 })
 
 /* =========================================================
-   🔁 RECALCULATE PROFIT (FAST + SAFE)
+   🔁 RECALCULATE PROFIT
 ========================================================= */
 router.post("/recalculate-profit", async (req, res) => {
   try {
@@ -189,27 +238,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   👤 CUSTOMER ORDERS
-========================================================= */
-router.get("/my-orders", async (req, res) => {
-  try {
-    const email = req.query?.email?.toLowerCase()
-
-    if (!email) {
-      return res.status(400).json({ message: "Email required" })
-    }
-
-    const orders = await Order.find({ email }).sort({ createdAt: -1 })
-
-    res.json({ success: true, data: orders })
-  } catch (err) {
-    console.error("❌ MY ORDERS ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   📄 GET SINGLE ORDER (LAST)
+   📄 GET SINGLE ORDER (KEEP LAST)
 ========================================================= */
 router.get("/:id", async (req, res) => {
   const { id } = req.params
