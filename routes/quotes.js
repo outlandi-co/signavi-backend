@@ -5,28 +5,63 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* ================= HELPER ================= */
+/* ================= HELPERS ================= */
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
-/* ================= CREATE QUOTE ================= */
+/* 🔥 FALLBACK ESTIMATE (if frontend doesn’t send one) */
+const estimatePrice = (quantity = 1) => {
+  const base = 10
+  const perItem = 5
+  return base + (quantity * perItem)
+}
+
+/* =========================================================
+   🔥 CREATE QUOTE
+========================================================= */
 router.post("/", async (req, res) => {
   try {
-    const { customerName, email, quantity, notes } = req.body
+    const {
+      customerName,
+      email,
+      quantity,
+      notes,
+      price,
+      items,
+      artwork,
+      printType
+    } = req.body
 
     if (!email) {
       return res.status(400).json({ message: "Email required" })
     }
 
+    const qty = Number(quantity) || 1
+
+    /* 🔥 USE FRONTEND PRICE OR FALLBACK */
+    const finalPrice =
+      Number(price) > 0
+        ? Number(price)
+        : estimatePrice(qty)
+
     const quote = new Quote({
       customerName: customerName || "Guest",
       email: email.toLowerCase(),
-      quantity: Number(quantity) || 1,
+      quantity: qty,
       notes: notes || "",
-      price: 0,
+
+      // 🔥 FIXED PRICE SYSTEM
+      price: finalPrice,
+
+      items: items || [],
+      artwork: artwork || "",
+      printType: printType || "screenprint",
+
       shippingCost: 0,
+
       approvalStatus: "pending",
       status: "quotes",
       source: "quote",
+
       timeline: [
         {
           status: "quotes",
@@ -37,6 +72,9 @@ router.post("/", async (req, res) => {
     })
 
     await quote.save()
+
+    console.log("✅ QUOTE CREATED:", quote._id, "Price:", finalPrice)
+
     req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: quote })
@@ -47,7 +85,9 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= GET ALL ================= */
+/* =========================================================
+   🔥 GET ALL
+========================================================= */
 router.get("/", async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 })
@@ -58,7 +98,9 @@ router.get("/", async (req, res) => {
   }
 })
 
-/* ================= GET ONE ================= */
+/* =========================================================
+   🔥 GET ONE
+========================================================= */
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params
@@ -81,7 +123,9 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-/* ================= UPDATE PRICE / FIELDS ================= */
+/* =========================================================
+   🔥 UPDATE (price, shipping, etc.)
+========================================================= */
 router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params
@@ -96,12 +140,10 @@ router.patch("/:id", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    // 🔥 Update price
     if (req.body.price !== undefined) {
       quote.price = Number(req.body.price)
     }
 
-    // 🔥 Update shipping
     if (req.body.shippingCost !== undefined) {
       quote.shippingCost = Number(req.body.shippingCost)
     }
@@ -125,7 +167,7 @@ router.patch("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 APPROVE (FINAL FIXED VERSION)
+   🔥 APPROVE
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
@@ -141,7 +183,6 @@ router.patch("/:id/approve", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    // 🔥 REQUIRE PRICE
     if (!quote.price || quote.price <= 0) {
       return res.status(400).json({
         message: "⚠️ Set price before approving this quote"
@@ -159,7 +200,6 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    // 🔥 EMAIL TRIGGER (CORRECT FLOW)
     console.log("📧 ATTEMPTING EMAIL:", quote.email)
 
     try {
@@ -213,8 +253,6 @@ router.patch("/:id/deny", async (req, res) => {
     })
 
     await quote.save()
-
-    console.log("📧 ATTEMPTING EMAIL (DENY):", quote.email)
 
     try {
       await sendOrderStatusEmail(

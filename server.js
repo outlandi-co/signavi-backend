@@ -20,6 +20,7 @@ import expenseRoutes from "./routes/expenses.js"
 import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
+import squareWebhook from "./routes/squareWebhook.js" // 🔥 NEW
 import shippingRoutes from "./routes/shipping.js"
 
 /* ================= APP ================= */
@@ -28,7 +29,7 @@ const server = http.createServer(app)
 
 console.log("\n🔥 SERVER READY 🚀\n")
 
-/* ================= CORS (🔥 FIXED) ================= */
+/* ================= CORS ================= */
 const allowedOrigins = [
   "https://signavistudio.store",
   "http://localhost:5173"
@@ -36,7 +37,6 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow Postman / server-to-server requests (no origin)
     if (!origin) return callback(null, true)
 
     if (allowedOrigins.includes(origin)) {
@@ -46,18 +46,16 @@ app.use(cors({
       return callback(new Error("Not allowed by CORS"))
     }
   },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Origin",
-    "X-Requested-With",
-    "Content-Type",
-    "Accept",
-    "Authorization"
-  ]
+  credentials: true
 }))
 
-
+/* =========================================================
+   🔥 IMPORTANT: WEBHOOK RAW BODY (BEFORE express.json)
+========================================================= */
+app.use(
+  "/api/square/webhook",
+  express.raw({ type: "application/json" })
+)
 
 /* ================= MIDDLEWARE ================= */
 app.use(express.json())
@@ -74,7 +72,10 @@ app.use("/api/quotes", quoteRoutes)
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
+
 app.use("/api/square", squareRoutes)
+app.use("/api/square", squareWebhook) // 🔥 WEBHOOK ROUTE
+
 app.use("/api/shipping", shippingRoutes)
 
 /* ================= SOCKET ================= */
@@ -89,6 +90,11 @@ app.set("io", io)
 
 io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
+})
+
+/* ================= HEALTH CHECK ================= */
+app.get("/ping", (req, res) => {
+  res.send("pong")
 })
 
 /* ================= START ================= */
