@@ -15,6 +15,15 @@ const itemSchema = new mongoose.Schema({
   }
 }, { _id: false })
 
+/* ================= ARTWORK SCHEMA ================= */
+const artworkSchema = new mongoose.Schema({
+  filename: { type: String, required: true },
+  path: { type: String, required: true }, // uploads/file.ext
+  mimetype: { type: String, default: "" },
+  size: { type: Number, default: 0 },
+  uploadedAt: { type: Date, default: Date.now }
+}, { _id: false })
+
 /* ================= ORDER SCHEMA ================= */
 const orderSchema = new mongoose.Schema({
 
@@ -38,7 +47,12 @@ const orderSchema = new mongoose.Schema({
   /* ================= CORE ================= */
   quantity: { type: Number, default: 1, min: 1 },
   printType: { type: String, default: "screenprint" },
+
+  // 🔥 OLD (keep for backward compatibility)
   artwork: { type: String, default: null },
+
+  // 🔥 NEW MULTI-FILE SYSTEM
+  artworks: { type: [artworkSchema], default: [] },
 
   /* ================= PRICING ================= */
   subtotal: { type: Number, default: 0, min: 0 },
@@ -60,21 +74,21 @@ const orderSchema = new mongoose.Schema({
   },
 
   status: {
-  type: String,
-  enum: [
-    "pending",
-    "payment_required",
-    "ready_for_production", // 🔥 ADD THIS
-    "paid",
-    "production",
-    "shipping",
-    "shipped",
-    "delivered",
-    "archive",
-    "denied"
-  ],
-  default: "payment_required"
-},
+    type: String,
+    enum: [
+      "pending",
+      "payment_required",
+      "ready_for_production",
+      "paid",
+      "production",
+      "shipping",
+      "shipped",
+      "delivered",
+      "archive",
+      "denied"
+    ],
+    default: "payment_required"
+  },
 
   /* ================= SHIPPING ================= */
   trackingNumber: { type: String, default: "" },
@@ -140,12 +154,10 @@ orderSchema.pre("save", function () {
   if (!this.cogs || this.cogs === 0) {
     this.cogs = (this.items || []).reduce((sum, item) => {
 
-      // ✅ Use real cost if provided
       if (item.cost && item.cost > 0) {
         return sum + (item.cost * item.quantity)
       }
 
-      // 🔥 fallback: 40% estimate
       const estimatedCost = item.price * 0.4
       return sum + (estimatedCost * item.quantity)
 
@@ -156,16 +168,14 @@ orderSchema.pre("save", function () {
   this.profit = subtotal - this.cogs
 
   /* ================= MARGIN ================= */
-  if (subtotal > 0) {
-    this.margin = (this.profit / subtotal) * 100
-  } else {
-    this.margin = 0
-  }
+  this.margin = subtotal > 0
+    ? (this.profit / subtotal) * 100
+    : 0
 
   /* ================= NET ================= */
   this.netAmount = subtotal - (this.processingFee || 0)
 
-  /* ================= CLEAN NUMBERS ================= */
+  /* ================= CLEAN ================= */
   this.cogs = Number(this.cogs.toFixed(2))
   this.profit = Number(this.profit.toFixed(2))
   this.margin = Number(this.margin.toFixed(2))
