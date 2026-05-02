@@ -44,7 +44,6 @@ router.post("/", async (req, res) => {
       tax,
       finalPrice,
       status: "payment_required",
-      printStatus: "pending",
       timeline: [
         {
           status: "created",
@@ -54,12 +53,7 @@ router.post("/", async (req, res) => {
       ]
     })
 
-    console.log("✅ ORDER CREATED:", order._id)
-
-    res.json({
-      success: true,
-      data: order
-    })
+    res.json({ success: true, data: order })
 
   } catch (err) {
     console.error("❌ CREATE ORDER ERROR:", err)
@@ -68,162 +62,7 @@ router.post("/", async (req, res) => {
 })
 
 /* =========================================================
-   💰 MARK PAID → PRODUCTION
-========================================================= */
-router.patch("/:id/mark-paid", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    order.status = "production"
-    order.printStatus = "queued"
-
-    if (!order.timeline) order.timeline = []
-
-    order.timeline.push({
-      status: "paid",
-      date: new Date(),
-      note: "Payment received → moved to production"
-    })
-
-    await order.save()
-
-    console.log("🔥 ORDER MOVED TO PRODUCTION:", order._id)
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ MARK PAID ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   🖨️ PRINT CONTROL
-========================================================= */
-router.patch("/:id/print", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    order.printStatus = "printing"
-
-    order.timeline.push({
-      status: "printing",
-      date: new Date(),
-      note: "Printing started"
-    })
-
-    await order.save()
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ PRINT ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-router.patch("/:id/print-complete", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    order.printStatus = "done"
-    order.status = "completed"
-
-    order.timeline.push({
-      status: "completed",
-      date: new Date(),
-      note: "Print completed"
-    })
-
-    await order.save()
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ PRINT COMPLETE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   🧾 INVOICE
-========================================================= */
-router.get("/:id/invoice", async (req, res) => {
-  const { id } = req.params
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).send("Invalid order ID")
-  }
-
-  try {
-    const order = await Order.findById(id)
-
-    if (!order) {
-      return res.status(404).send("Order not found")
-    }
-
-    const html = `
-      <html>
-        <head>
-          <title>Invoice #${order._id}</title>
-          <style>
-            body { font-family: Arial; padding: 20px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border: 1px solid #ccc; padding: 8px; }
-          </style>
-        </head>
-        <body>
-
-          <h1>Signavi Studio Invoice</h1>
-
-          <p><b>Order ID:</b> ${order._id}</p>
-          <p><b>Customer:</b> ${order.customerName}</p>
-          <p><b>Email:</b> ${order.email}</p>
-
-          <table>
-            <tr>
-              <th>Name</th>
-              <th>Qty</th>
-              <th>Price</th>
-            </tr>
-
-            ${order.items.map(item => `
-              <tr>
-                <td>${item.name}</td>
-                <td>${item.quantity}</td>
-                <td>$${item.price}</td>
-              </tr>
-            `).join("")}
-          </table>
-
-          <h2>Total: $${order.finalPrice}</h2>
-
-        </body>
-      </html>
-    `
-
-    res.send(html)
-
-  } catch (err) {
-    console.error("❌ INVOICE ERROR:", err)
-    res.status(500).send("Server error")
-  }
-})
-
-/* =========================================================
-   📦 GET ALL ORDERS
+   📦 GET ALL
 ========================================================= */
 router.get("/", async (req, res) => {
   try {
@@ -236,7 +75,7 @@ router.get("/", async (req, res) => {
 })
 
 /* =========================================================
-   📄 GET SINGLE ORDER
+   📄 GET ONE
 ========================================================= */
 router.get("/:id", async (req, res) => {
   const { id } = req.params
@@ -256,6 +95,92 @@ router.get("/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ GET ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   🔥 UPDATE STATUS (THIS FIXES YOUR ERROR)
+========================================================= */
+router.patch("/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body
+
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const allowedStatuses = [
+      "payment_required",
+      "ready_for_production",
+      "production",
+      "shipping",
+      "shipped",
+      "delivered"
+    ]
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status" })
+    }
+
+    order.status = status
+
+    if (!order.timeline) order.timeline = []
+
+    order.timeline.push({
+      status,
+      date: new Date(),
+      note: `Moved to ${status}`
+    })
+
+    await order.save()
+
+    console.log("🔄 STATUS UPDATED:", order._id, "→", status)
+
+    // 🔥 SOCKET EMIT
+    const io = req.app.get("io")
+    if (io) {
+      io.emit("orderUpdated", order)
+    }
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ STATUS UPDATE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   💰 MARK PAID
+========================================================= */
+router.patch("/:id/mark-paid", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.status = "production"
+
+    order.timeline.push({
+      status: "paid",
+      date: new Date(),
+      note: "Payment received"
+    })
+
+    await order.save()
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ MARK PAID ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
