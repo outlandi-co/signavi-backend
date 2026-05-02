@@ -1,10 +1,16 @@
 import express from "express"
 import mongoose from "mongoose"
 import Order from "../models/Order.js"
+import multer from "multer"
+import fs from "fs"
+import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
 console.log("🔥 ORDERS ROUTES ACTIVE")
+
+/* ================= MULTER ================= */
+const upload = multer({ dest: "temp/" })
 
 /* =========================================================
    🛒 CREATE ORDER
@@ -34,8 +40,7 @@ router.post("/", async (req, res) => {
       }
     })
 
-    const TAX_RATE = 0.0825
-    const tax = subtotal * TAX_RATE
+    const tax = subtotal * 0.0825
     const finalPrice = subtotal + tax
 
     const order = await Order.create({
@@ -55,8 +60,6 @@ router.post("/", async (req, res) => {
       ]
     })
 
-    console.log("🛒 ORDER CREATED:", order._id)
-
     res.json({ success: true, data: order })
 
   } catch (err) {
@@ -66,132 +69,118 @@ router.post("/", async (req, res) => {
 })
 
 /* =========================================================
+   📤 UPLOAD ARTWORK (CLOUDINARY)
+========================================================= */
+router.post("/:id/artwork", upload.array("files", 10), async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "No files uploaded" })
+    }
+
+    const uploadedFiles = []
+
+    for (const file of req.files) {
+      try {
+        const result = await cloudinary.uploader.upload(file.path, {
+          folder: "signavi-artwork",
+          resource_type: "auto"
+        })
+
+        uploadedFiles.push({
+          url: result.secure_url,
+          public_id: result.public_id,
+          filename: file.originalname
+        })
+
+      } finally {
+        if (fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path)
+        }
+      }
+    }
+
+    order.artworks = [...(order.artworks || []), ...uploadedFiles]
+    await order.save()
+
+    res.json({ success: true, data: order.artworks })
+
+  } catch (err) {
+    console.error("❌ CLOUDINARY ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
    📦 GET ALL
 ========================================================= */
 router.get("/", async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ createdAt: -1 })
-    res.json({ success: true, data: orders })
-  } catch (err) {
-    console.error("❌ GET ORDERS ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
+  const orders = await Order.find().sort({ createdAt: -1 })
+  res.json({ success: true, data: orders })
 })
 
 /* =========================================================
    📄 GET ONE
 ========================================================= */
 router.get("/:id", async (req, res) => {
-  const { id } = req.params
+  const id = req.params.id.trim()
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ message: "Invalid order ID" })
   }
 
-  try {
-    const order = await Order.findById(id)
+  const order = await Order.findById(id)
 
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ GET ORDER ERROR:", err)
-    res.status(500).json({ message: err.message })
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" })
   }
+
+  res.json({ success: true, data: order })
 })
-
-
 
 /* =========================================================
    🔥 UPDATE STATUS
 ========================================================= */
 router.patch("/:id/status", async (req, res) => {
-  try {
-    const { status } = req.body
+  const order = await Order.findById(req.params.id)
 
-    if (!status) {
-      return res.status(400).json({ message: "Missing status" })
-    }
-
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    const allowedStatuses = [
-      "payment_required",
-      "ready_for_production",
-      "production",
-      "shipping",
-      "shipped",
-      "delivered"
-    ]
-
-    if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({ message: "Invalid status" })
-    }
-
-    order.status = status
-
-    order.timeline.push({
-      status,
-      date: new Date(),
-      note: `Moved to ${status}`
-    })
-
-    await order.save()
-
-    const io = req.app.get("io")
-    if (io) io.emit("orderUpdated", order)
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ STATUS ERROR:", err)
-    res.status(500).json({ message: err.message })
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" })
   }
+
+  order.status = req.body.status
+
+  order.timeline.push({
+    status: req.body.status,
+    date: new Date(),
+    note: `Moved to ${req.body.status}`
+  })
+
+  await order.save()
+
+  const io = req.app.get("io")
+  if (io) io.emit("orderUpdated", order)
+
+  res.json({ success: true, data: order })
 })
 
 /* =========================================================
-   💳 CHECKOUT + SQUARE PAYMENT
+   💳 CHECKOUT (SQUARE)
 ========================================================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
-    const {
-      shippingAddress,
-      shippingCost,
-      carrier,
-      serviceLevel
-    } = req.body
-
     const order = await Order.findById(req.params.id)
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    /* SAVE SHIPPING */
-    order.shippingAddress = shippingAddress
-    order.shippingCost = Number(shippingCost || 0)
-    order.carrier = carrier
-    order.serviceLevel = serviceLevel
-
-    /* UPDATE TOTAL */
-    order.finalPrice =
-      (order.subtotal || 0) +
-      (order.tax || 0) +
-      order.shippingCost
-
-    await order.save()
-
-    /* 🔥 CALL SQUARE ROUTE */
-    const baseUrl =
-      process.env.BASE_URL ||
-      "http://localhost:5050"
+    const baseUrl = process.env.BASE_URL || "http://localhost:5050"
 
     const paymentRes = await fetch(
       `${baseUrl}/api/square/create-payment/${order._id}`,
@@ -200,19 +189,10 @@ router.patch("/:id/checkout", async (req, res) => {
 
     const paymentData = await paymentRes.json()
 
-    if (!paymentData?.paymentUrl) {
-      throw new Error("Square payment failed")
-    }
-
     order.paymentUrl = paymentData.paymentUrl
     await order.save()
 
-    console.log("💳 PAYMENT LINK:", paymentData.paymentUrl)
-
-    res.json({
-      success: true,
-      paymentUrl: paymentData.paymentUrl
-    })
+    res.json({ success: true, paymentUrl: paymentData.paymentUrl })
 
   } catch (err) {
     console.error("❌ CHECKOUT ERROR:", err)
@@ -224,29 +204,23 @@ router.patch("/:id/checkout", async (req, res) => {
    🚚 SHIP ORDER
 ========================================================= */
 router.post("/ship/:id", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
+  const order = await Order.findById(req.params.id)
 
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    order.status = "shipped"
-
-    order.timeline.push({
-      status: "shipped",
-      date: new Date(),
-      note: "Order shipped"
-    })
-
-    await order.save()
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ SHIP ERROR:", err)
-    res.status(500).json({ message: err.message })
+  if (!order) {
+    return res.status(404).json({ message: "Order not found" })
   }
+
+  order.status = "shipped"
+
+  order.timeline.push({
+    status: "shipped",
+    date: new Date(),
+    note: "Order shipped"
+  })
+
+  await order.save()
+
+  res.json({ success: true, data: order })
 })
 
 export default router

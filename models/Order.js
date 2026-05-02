@@ -1,190 +1,212 @@
+import express from "express"
 import mongoose from "mongoose"
+import Order from "../models/Order.js"
+import multer from "multer"
+import fs from "fs"
+import cloudinary from "../utils/cloudinary.js"
 
-/* ================= ITEM SCHEMA ================= */
-const itemSchema = new mongoose.Schema({
-  name: { type: String, default: "", trim: true },
-  quantity: { type: Number, default: 1, min: 1 },
-  price: { type: Number, default: 0, min: 0 },
+const router = express.Router()
 
-  // 🔥 REAL COST SUPPORT
-  cost: { type: Number, default: 0, min: 0 },
+console.log("🔥 ORDERS ROUTES ACTIVE")
 
-  variant: {
-    color: { type: String, default: "", lowercase: true, trim: true },
-    size: { type: String, default: "", uppercase: true, trim: true }
-  }
-}, { _id: false })
-
-/* ================= ARTWORK SCHEMA ================= */
-const artworkSchema = new mongoose.Schema({
-  filename: { type: String, required: true },
-  path: { type: String, required: true }, // uploads/file.ext
-  mimetype: { type: String, default: "" },
-  size: { type: Number, default: 0 },
-  uploadedAt: { type: Date, default: Date.now }
-}, { _id: false })
-
-/* ================= ORDER SCHEMA ================= */
-const orderSchema = new mongoose.Schema({
-
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    default: null,
-    index: true
-  },
-
-  customerName: { type: String, default: "Unknown", trim: true },
-
-  email: {
-    type: String,
-    default: "",
-    lowercase: true,
-    trim: true,
-    index: true
-  },
-
-  /* ================= CORE ================= */
-  quantity: { type: Number, default: 1, min: 1 },
-  printType: { type: String, default: "screenprint" },
-
-  // 🔥 OLD (keep for backward compatibility)
-  artwork: { type: String, default: null },
-
-  // 🔥 NEW MULTI-FILE SYSTEM
-  artworks: { type: [artworkSchema], default: [] },
-
-  /* ================= PRICING ================= */
-  subtotal: { type: Number, default: 0, min: 0 },
-  tax: { type: Number, default: 0, min: 0 },
-  price: { type: Number, default: 0, min: 0 },
-  finalPrice: { type: Number, default: 0, min: 0 },
-
-  /* ================= PROFIT ENGINE ================= */
-  cogs: { type: Number, default: 0 },
-  profit: { type: Number, default: 0 },
-  margin: { type: Number, default: 0 },
-
-  items: { type: [itemSchema], default: [] },
-
-  source: {
-    type: String,
-    enum: ["store", "quote"],
-    default: "store"
-  },
-
-  status: {
-    type: String,
-    enum: [
-      "pending",
-      "payment_required",
-      "ready_for_production",
-      "paid",
-      "production",
-      "shipping",
-      "shipped",
-      "delivered",
-      "archive",
-      "denied"
-    ],
-    default: "payment_required"
-  },
-
-  /* ================= SHIPPING ================= */
-  trackingNumber: { type: String, default: "" },
-  trackingLink: { type: String, default: "" },
-  shippingLabel: { type: String, default: "" },
-
-  shippingAddress: {
-    name: String,
-    street1: String,
-    city: String,
-    state: String,
-    zip: String,
-    country: String
-  },
-
-  shippingCost: { type: Number, default: 0 },
-
-  weight: { type: Number, default: 1 },
-  length: { type: Number, default: 10 },
-  width: { type: Number, default: 8 },
-  height: { type: Number, default: 2 },
-
-  carrier: { type: String, default: "USPS" },
-  serviceLevel: { type: String, default: "Ground Advantage" },
-
-  /* ================= TIMELINE ================= */
-  timeline: {
-    type: [
-      {
-        status: String,
-        date: { type: Date, default: Date.now },
-        note: String
-      }
-    ],
-    default: []
-  },
-
-  /* ================= PAYMENT ================= */
-  squarePaymentId: { type: String, default: "" },
-  squareOrderId: { type: String, default: "" },
-
-  paymentUrl: { type: String, default: "" },
-
-  currency: { type: String, default: "usd" },
-
-  amountReceived: { type: Number, default: 0 },
-  amountRefunded: { type: Number, default: 0 },
-
-  /* ================= FEES ================= */
-  processingFee: { type: Number, default: 0 },
-  netAmount: { type: Number, default: 0 }
-
-}, { timestamps: true })
+/* ================= MULTER ================= */
+const upload = multer({ dest: "temp/" })
 
 /* =========================================================
-   🔥 AUTO PROFIT + SMART COGS ENGINE
+   🛒 CREATE ORDER
 ========================================================= */
-orderSchema.pre("save", function () {
+router.post("/", async (req, res) => {
+  try {
+    const { email, items } = req.body
 
-  const subtotal = this.subtotal || this.finalPrice || 0
+    if (!email || !items || items.length === 0) {
+      return res.status(400).json({ message: "Missing order data" })
+    }
 
-  /* ================= AUTO COGS ================= */
-  if (!this.cogs || this.cogs === 0) {
-    this.cogs = (this.items || []).reduce((sum, item) => {
+    let subtotal = 0
 
-      if (item.cost && item.cost > 0) {
-        return sum + (item.cost * item.quantity)
+    const cleanItems = items.map(item => {
+      const price = Number(item.price || 0)
+      const quantity = Number(item.quantity || 1)
+
+      subtotal += price * quantity
+
+      return {
+        name: item.name,
+        price,
+        quantity,
+        variant: item.variant || {},
+        cost: item.cost || 0
       }
+    })
 
-      const estimatedCost = item.price * 0.4
-      return sum + (estimatedCost * item.quantity)
+    const TAX_RATE = 0.0825
+    const tax = subtotal * TAX_RATE
+    const finalPrice = subtotal + tax
 
-    }, 0)
+    const order = await Order.create({
+      email,
+      customerName: "Guest",
+      items: cleanItems,
+      subtotal,
+      tax,
+      finalPrice,
+      status: "payment_required",
+      timeline: [
+        {
+          status: "created",
+          date: new Date(),
+          note: "Order created"
+        }
+      ]
+    })
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ CREATE ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
-
-  /* ================= PROFIT ================= */
-  this.profit = subtotal - this.cogs
-
-  /* ================= MARGIN ================= */
-  this.margin = subtotal > 0
-    ? (this.profit / subtotal) * 100
-    : 0
-
-  /* ================= NET ================= */
-  this.netAmount = subtotal - (this.processingFee || 0)
-
-  /* ================= CLEAN ================= */
-  this.cogs = Number(this.cogs.toFixed(2))
-  this.profit = Number(this.profit.toFixed(2))
-  this.margin = Number(this.margin.toFixed(2))
-  this.netAmount = Number(this.netAmount.toFixed(2))
 })
 
-/* ================= INDEXES ================= */
-orderSchema.index({ user: 1, createdAt: -1 })
-orderSchema.index({ email: 1, createdAt: -1 })
-orderSchema.index({ status: 1 })
+/* =========================================================
+   📤 UPLOAD ARTWORK (CLOUDINARY)
+========================================================= */
+router.post("/:id/artwork", upload.array("files", 10), async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
 
-export default mongoose.model("Order", orderSchema)
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const uploadedFiles = []
+
+    for (const file of req.files) {
+      const result = await cloudinary.uploader.upload(file.path, {
+        folder: "signavi-artwork",
+        resource_type: "auto"
+      })
+
+      uploadedFiles.push({
+        url: result.secure_url,
+        public_id: result.public_id,
+        filename: file.originalname
+      })
+
+      fs.unlinkSync(file.path)
+    }
+
+    order.artworks = [...(order.artworks || []), ...uploadedFiles]
+    await order.save()
+
+    res.json({ success: true, data: order.artworks })
+
+  } catch (err) {
+    console.error("❌ CLOUDINARY ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   📦 GET ALL
+========================================================= */
+router.get("/", async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 })
+    res.json({ success: true, data: orders })
+  } catch (err) {
+    console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   📄 GET ONE
+========================================================= */
+router.get("/:id", async (req, res) => {
+  const id = req.params.id.trim()
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "Invalid order ID" })
+  }
+
+  try {
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ GET ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   🔥 UPDATE STATUS
+========================================================= */
+router.patch("/:id/status", async (req, res) => {
+  try {
+    const { status } = req.body
+
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.status = status
+
+    order.timeline.push({
+      status,
+      date: new Date(),
+      note: `Moved to ${status}`
+    })
+
+    await order.save()
+
+    const io = req.app.get("io")
+    if (io) io.emit("orderUpdated", order)
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ STATUS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   🚚 SHIP ORDER
+========================================================= */
+router.post("/ship/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.status = "shipped"
+
+    order.timeline.push({
+      status: "shipped",
+      date: new Date(),
+      note: "Order shipped"
+    })
+
+    await order.save()
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ SHIP ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+export default router

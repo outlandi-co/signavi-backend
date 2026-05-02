@@ -20,60 +20,56 @@ if (process.env.STRIPE_SECRET_KEY) {
 }
 
 /* ================= CREATE CHECKOUT ================= */
-router.post("/create-checkout/:id", async (req, res) => {
+router.patch("/:id/checkout", async (req, res) => {
   try {
-
-    if (!stripe) {
-      return res.status(500).json({ message: "Stripe not configured" })
-    }
-
     const order = await Order.findById(req.params.id)
 
     if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    const amount = Math.round((order.finalPrice || order.price || 0) * 100)
-
-    /* 🚨 VALIDATION */
-    if (!amount || amount <= 0n) {
-      return res.status(400).json({
-        message: "Order must have a price before payment"
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
       })
     }
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
+    /* ================= SAVE SHIPPING ================= */
+    if (req.body?.shippingAddress) {
+      order.shippingAddress = req.body.shippingAddress
+      order.shippingCost = req.body.shippingCost || 0
+      order.carrier = req.body.carrier || ""
+      order.serviceLevel = req.body.serviceLevel || ""
+    }
 
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: `Order ${order._id}`
-            },
-            unit_amount: amount
-          },
-          quantity: 1
-        }
-      ],
+    /* ================= ENSURE TIMELINE EXISTS ================= */
+    if (!Array.isArray(order.timeline)) {
+      order.timeline = []
+    }
 
-      success_url: `${process.env.CLIENT_URL}/success/${order._id}`,
-cancel_url: `${process.env.CLIENT_URL}/admin/orders`,
+    /* ================= GENERATE PAYMENT URL ================= */
+    const paymentUrl = `https://signavistudio.store/checkout/${order._id}`
 
-      metadata: {
-        orderId: order._id.toString()
-      }
+    order.paymentUrl = paymentUrl
+    order.status = "payment_required"
+
+    order.timeline.push({
+      status: "payment_required",
+      date: new Date(),
+      note: "Checkout started"
     })
 
-    console.log("💳 Stripe session created:", session.id)
+    await order.save()
 
-    res.json({ url: session.url })
+    return res.json({
+      success: true,
+      paymentUrl
+    })
 
   } catch (err) {
-    console.error("❌ STRIPE CHECKOUT ERROR:", err)
-    res.status(500).json({ message: err.message })
+    console.error("❌ CHECKOUT ERROR:", err)
+
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Checkout failed"
+    })
   }
 })
 

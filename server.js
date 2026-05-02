@@ -7,6 +7,12 @@ import cookieParser from "cookie-parser"
 import http from "http"
 import { Server } from "socket.io"
 import cors from "cors"
+import path from "path"
+import { fileURLToPath } from "url"
+
+/* ================= PATH SETUP ================= */
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 /* ================= ROUTES ================= */
 import productRoutes from "./routes/products.js"
@@ -22,7 +28,7 @@ import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
 import shippingRoutes from "./routes/shipping.js"
 
-// 🔥 NEW: WEBHOOK ROUTE
+// 🔥 WEBHOOK
 import squareWebhook from "./routes/squareWebhook.js"
 
 /* ================= APP ================= */
@@ -52,17 +58,13 @@ app.use(cors({
 }))
 
 /* =========================================================
-   🔥 CRITICAL: WEBHOOK MUST COME BEFORE JSON PARSER
+   🔥 WEBHOOK MUST COME BEFORE JSON PARSER
 ========================================================= */
-
-// ✅ RAW BODY ONLY FOR WEBHOOK
 app.use("/api/square/webhook", express.raw({ type: "application/json" }))
-
-// ✅ REGISTER WEBHOOK ROUTE FIRST
 app.use("/api/square", squareWebhook)
 
 /* =========================================================
-   🔥 SAFE JSON PARSER (FOR EVERYTHING ELSE)
+   🔥 SAFE JSON PARSER
 ========================================================= */
 app.use(express.json({
   strict: true,
@@ -85,6 +87,11 @@ app.use((err, req, res, next) => {
 /* ================= MIDDLEWARE ================= */
 app.use(cookieParser())
 
+/* =========================================================
+   🔥 STATIC FILES (THIS FIXES YOUR ISSUE)
+========================================================= */
+app.use("/uploads", express.static(path.join(__dirname, "uploads")))
+
 /* ================= ROUTES ================= */
 app.use("/api/products", productRoutes)
 app.use("/api/orders", orderRoutes)
@@ -96,7 +103,7 @@ app.use("/api/quotes", quoteRoutes)
 app.use("/api/expenses", expenseRoutes)
 app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
-app.use("/api/square", squareRoutes) // payment route stays
+app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
 
 /* ================= SOCKET ================= */
