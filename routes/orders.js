@@ -226,4 +226,61 @@ router.post("/ship/:id", async (req, res) => {
   }
 })
 
+/* =========================================================
+   💳 CHECKOUT (SAVE SHIPPING + FINALIZE ORDER)
+========================================================= */
+router.patch("/:id/checkout", async (req, res) => {
+  try {
+    const {
+      shippingAddress,
+      shippingCost,
+      carrier,
+      serviceLevel
+    } = req.body
+
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    // 🔥 SAVE SHIPPING INFO
+    order.shippingAddress = shippingAddress || order.shippingAddress
+    order.shippingCost = Number(shippingCost || 0)
+    order.carrier = carrier || order.carrier
+    order.serviceLevel = serviceLevel || order.serviceLevel
+
+    // 🔥 UPDATE FINAL PRICE
+    order.finalPrice = (order.subtotal || 0) + (order.tax || 0) + order.shippingCost
+
+    // 🔥 MOVE TO PAYMENT REQUIRED (or next step)
+    order.status = "payment_required"
+
+    if (!order.timeline) order.timeline = []
+
+    order.timeline.push({
+      status: "checkout",
+      date: new Date(),
+      note: "Checkout info saved"
+    })
+
+    await order.save()
+
+    console.log("💳 CHECKOUT SAVED:", order._id)
+
+    // 🔥 SOCKET UPDATE
+    const io = req.app.get("io")
+    if (io) io.emit("orderUpdated", order)
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ CHECKOUT ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
 export default router
