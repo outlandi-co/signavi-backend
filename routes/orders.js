@@ -4,9 +4,6 @@ import Order from "../models/Order.js"
 
 const router = express.Router()
 
-/* =========================================================
-   🔥 DEBUG: CONFIRM ROUTE LOADS (VERY IMPORTANT)
-========================================================= */
 console.log("🔥 ORDERS ROUTES ACTIVE")
 
 /* =========================================================
@@ -107,13 +104,11 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 UPDATE STATUS (CORE FIX)
+   🔥 UPDATE STATUS
 ========================================================= */
 router.patch("/:id/status", async (req, res) => {
   try {
     const { status } = req.body
-
-    console.log("📥 STATUS REQUEST:", req.params.id, status)
 
     if (!status) {
       return res.status(400).json({ message: "Missing status" })
@@ -140,8 +135,6 @@ router.patch("/:id/status", async (req, res) => {
 
     order.status = status
 
-    if (!order.timeline) order.timeline = []
-
     order.timeline.push({
       status,
       date: new Date(),
@@ -150,56 +143,84 @@ router.patch("/:id/status", async (req, res) => {
 
     await order.save()
 
-    console.log("🔄 STATUS UPDATED:", order._id, "→", status)
-
-    /* 🔥 SOCKET UPDATE */
     const io = req.app.get("io")
-    if (io) {
-      io.emit("orderUpdated", order)
-    }
+    if (io) io.emit("orderUpdated", order)
 
-    res.json({
-      success: true,
-      data: order
-    })
+    res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ STATUS UPDATE ERROR:", err)
+    console.error("❌ STATUS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   💰 MARK PAID
+   💳 CHECKOUT + SQUARE PAYMENT
 ========================================================= */
-router.patch("/:id/mark-paid", async (req, res) => {
+router.patch("/:id/checkout", async (req, res) => {
   try {
+    const {
+      shippingAddress,
+      shippingCost,
+      carrier,
+      serviceLevel
+    } = req.body
+
     const order = await Order.findById(req.params.id)
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    order.status = "production"
+    /* SAVE SHIPPING */
+    order.shippingAddress = shippingAddress
+    order.shippingCost = Number(shippingCost || 0)
+    order.carrier = carrier
+    order.serviceLevel = serviceLevel
 
-    order.timeline.push({
-      status: "paid",
-      date: new Date(),
-      note: "Payment received"
-    })
+    /* UPDATE TOTAL */
+    order.finalPrice =
+      (order.subtotal || 0) +
+      (order.tax || 0) +
+      order.shippingCost
 
     await order.save()
 
-    console.log("💰 ORDER MARKED PAID:", order._id)
+    /* 🔥 CALL SQUARE ROUTE */
+    const baseUrl =
+      process.env.BASE_URL ||
+      "http://localhost:5050"
 
-    res.json({ success: true, data: order })
+    const paymentRes = await fetch(
+      `${baseUrl}/api/square/create-payment/${order._id}`,
+      { method: "POST" }
+    )
+
+    const paymentData = await paymentRes.json()
+
+    if (!paymentData?.paymentUrl) {
+      throw new Error("Square payment failed")
+    }
+
+    order.paymentUrl = paymentData.paymentUrl
+    await order.save()
+
+    console.log("💳 PAYMENT LINK:", paymentData.paymentUrl)
+
+    res.json({
+      success: true,
+      paymentUrl: paymentData.paymentUrl
+    })
 
   } catch (err) {
-    console.error("❌ MARK PAID ERROR:", err)
+    console.error("❌ CHECKOUT ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
+/* =========================================================
+   🚚 SHIP ORDER
+========================================================= */
 router.post("/ship/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -222,63 +243,6 @@ router.post("/ship/:id", async (req, res) => {
 
   } catch (err) {
     console.error("❌ SHIP ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   💳 CHECKOUT (SAVE SHIPPING + FINALIZE ORDER)
-========================================================= */
-router.patch("/:id/checkout", async (req, res) => {
-  try {
-    const {
-      shippingAddress,
-      shippingCost,
-      carrier,
-      serviceLevel
-    } = req.body
-
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    // 🔥 SAVE SHIPPING INFO
-    order.shippingAddress = shippingAddress || order.shippingAddress
-    order.shippingCost = Number(shippingCost || 0)
-    order.carrier = carrier || order.carrier
-    order.serviceLevel = serviceLevel || order.serviceLevel
-
-    // 🔥 UPDATE FINAL PRICE
-    order.finalPrice = (order.subtotal || 0) + (order.tax || 0) + order.shippingCost
-
-    // 🔥 MOVE TO PAYMENT REQUIRED (or next step)
-    order.status = "payment_required"
-
-    if (!order.timeline) order.timeline = []
-
-    order.timeline.push({
-      status: "checkout",
-      date: new Date(),
-      note: "Checkout info saved"
-    })
-
-    await order.save()
-
-    console.log("💳 CHECKOUT SAVED:", order._id)
-
-    // 🔥 SOCKET UPDATE
-    const io = req.app.get("io")
-    if (io) io.emit("orderUpdated", order)
-
-    res.json({
-      success: true,
-      data: order
-    })
-
-  } catch (err) {
-    console.error("❌ CHECKOUT ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
