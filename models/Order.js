@@ -4,6 +4,7 @@ import Order from "../models/Order.js"
 import multer from "multer"
 import fs from "fs"
 import cloudinary from "../utils/cloudinary.js"
+import fetch from "node-fetch"
 
 const router = express.Router()
 
@@ -176,6 +177,54 @@ router.patch("/:id/status", async (req, res) => {
 
   } catch (err) {
     console.error("❌ STATUS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* =========================================================
+   💳 CHECKOUT (SQUARE PAYMENT LINK)
+========================================================= */
+router.patch("/:id/checkout", async (req, res) => {
+  try {
+    console.log("💳 CHECKOUT HIT:", req.params.id)
+
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    // 🔥 IMPORTANT: use deployed backend in production
+    const baseUrl =
+      process.env.BASE_URL || "http://localhost:5050"
+
+    const paymentRes = await fetch(
+      `${baseUrl}/api/square/create-payment/${order._id}`,
+      {
+        method: "POST"
+      }
+    )
+
+    const paymentData = await paymentRes.json()
+
+    if (!paymentData?.paymentUrl) {
+      console.error("❌ NO PAYMENT URL:", paymentData)
+      return res.status(500).json({ message: "Payment creation failed" })
+    }
+
+    // 🔥 SAVE PAYMENT URL
+    order.paymentUrl = paymentData.paymentUrl
+    await order.save()
+
+    console.log("✅ PAYMENT LINK:", paymentData.paymentUrl)
+
+    res.json({
+      success: true,
+      paymentUrl: paymentData.paymentUrl
+    })
+
+  } catch (err) {
+    console.error("❌ CHECKOUT ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
