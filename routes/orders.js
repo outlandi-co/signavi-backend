@@ -200,4 +200,30 @@ router.patch("/:id/mark-paid", async (req, res) => {
   }
 })
 
+router.post("/ship/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.status = "shipped"
+
+    order.timeline.push({
+      status: "shipped",
+      date: new Date(),
+      note: "Order shipped"
+    })
+
+    await order.save()
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ SHIP ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
 export default router

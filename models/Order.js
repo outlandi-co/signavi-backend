@@ -60,20 +60,21 @@ const orderSchema = new mongoose.Schema({
   },
 
   status: {
-    type: String,
-    enum: [
-      "pending",
-      "payment_required",
-      "paid",
-      "production",
-      "shipping",
-      "shipped",
-      "delivered",
-      "archive",
-      "denied"
-    ],
-    default: "payment_required"
-  },
+  type: String,
+  enum: [
+    "pending",
+    "payment_required",
+    "ready_for_production", // 🔥 ADD THIS
+    "paid",
+    "production",
+    "shipping",
+    "shipped",
+    "delivered",
+    "archive",
+    "denied"
+  ],
+  default: "payment_required"
+},
 
   /* ================= SHIPPING ================= */
   trackingNumber: { type: String, default: "" },
