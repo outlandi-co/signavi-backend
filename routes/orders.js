@@ -5,6 +5,11 @@ import Order from "../models/Order.js"
 const router = express.Router()
 
 /* =========================================================
+   🔥 DEBUG: CONFIRM ROUTE LOADS (VERY IMPORTANT)
+========================================================= */
+console.log("🔥 ORDERS ROUTES ACTIVE")
+
+/* =========================================================
    🛒 CREATE ORDER
 ========================================================= */
 router.post("/", async (req, res) => {
@@ -53,6 +58,8 @@ router.post("/", async (req, res) => {
       ]
     })
 
+    console.log("🛒 ORDER CREATED:", order._id)
+
     res.json({ success: true, data: order })
 
   } catch (err) {
@@ -100,11 +107,17 @@ router.get("/:id", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 UPDATE STATUS (THIS FIXES YOUR ERROR)
+   🔥 UPDATE STATUS (CORE FIX)
 ========================================================= */
 router.patch("/:id/status", async (req, res) => {
   try {
     const { status } = req.body
+
+    console.log("📥 STATUS REQUEST:", req.params.id, status)
+
+    if (!status) {
+      return res.status(400).json({ message: "Missing status" })
+    }
 
     const order = await Order.findById(req.params.id)
 
@@ -139,7 +152,7 @@ router.patch("/:id/status", async (req, res) => {
 
     console.log("🔄 STATUS UPDATED:", order._id, "→", status)
 
-    // 🔥 SOCKET EMIT
+    /* 🔥 SOCKET UPDATE */
     const io = req.app.get("io")
     if (io) {
       io.emit("orderUpdated", order)
@@ -176,6 +189,8 @@ router.patch("/:id/mark-paid", async (req, res) => {
     })
 
     await order.save()
+
+    console.log("💰 ORDER MARKED PAID:", order._id)
 
     res.json({ success: true, data: order })
 
