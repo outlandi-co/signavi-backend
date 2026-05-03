@@ -206,9 +206,7 @@ router.patch("/:id/checkout", async (req, res) => {
       return res.status(404).json({ message: "Order not found" })
     }
 
-    const baseUrl =
-      process.env.BASE_URL ||
-      `${req.protocol}://${req.get("host")}`
+    const baseUrl = "https://signavi-backend.onrender.com"
 
     const response = await fetch(
       `${baseUrl}/api/square/create-payment/${order._id}`,
