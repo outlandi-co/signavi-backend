@@ -6,7 +6,6 @@ const itemSchema = new mongoose.Schema({
   quantity: { type: Number, default: 1, min: 1 },
   price: { type: Number, default: 0, min: 0 },
 
-  // real cost tracking
   cost: { type: Number, default: 0, min: 0 },
 
   variant: {
@@ -39,17 +38,14 @@ const orderSchema = new mongoose.Schema({
   quantity: { type: Number, default: 1, min: 1 },
   printType: { type: String, default: "screenprint" },
 
-  // 🔥 IMPORTANT: artwork storage (Cloudinary)
-  artworks: {
-    type: [
-      {
-        url: String,
-        public_id: String,
-        filename: String
-      }
-    ],
-    default: []
-  },
+  /* ================= ARTWORK ================= */
+  artworks: [
+    {
+      url: { type: String, required: true },
+      public_id: { type: String, default: "" },
+      filename: { type: String, default: "" }
+    }
+  ],
 
   /* ================= PRICING ================= */
   subtotal: { type: Number, default: 0, min: 0 },
@@ -83,7 +79,8 @@ const orderSchema = new mongoose.Schema({
       "archive",
       "denied"
     ],
-    default: "payment_required"
+    default: "payment_required",
+    index: true
   },
 
   /* ================= SHIPPING ================= */
@@ -91,16 +88,13 @@ const orderSchema = new mongoose.Schema({
   trackingLink: { type: String, default: "" },
 
   /* ================= TIMELINE ================= */
-  timeline: {
-    type: [
-      {
-        status: String,
-        date: { type: Date, default: Date.now },
-        note: String
-      }
-    ],
-    default: []
-  },
+  timeline: [
+    {
+      status: { type: String },
+      date: { type: Date, default: Date.now },
+      note: { type: String }
+    }
+  ],
 
   /* ================= PAYMENT ================= */
   paymentUrl: { type: String, default: "" },
@@ -117,7 +111,6 @@ orderSchema.pre("save", function () {
 
   const subtotal = this.subtotal || this.finalPrice || 0
 
-  // calculate COGS if not set
   if (!this.cogs || this.cogs === 0) {
     this.cogs = (this.items || []).reduce((sum, item) => {
 
@@ -125,8 +118,8 @@ orderSchema.pre("save", function () {
         return sum + (item.cost * item.quantity)
       }
 
-      const estimatedCost = item.price * 0.4
-      return sum + (estimatedCost * item.quantity)
+      const estimatedCost = (item.price || 0) * 0.4
+      return sum + (estimatedCost * (item.quantity || 1))
 
     }, 0)
   }
@@ -137,17 +130,15 @@ orderSchema.pre("save", function () {
     ? (this.profit / subtotal) * 100
     : 0
 
-  // clean numbers
   this.cogs = Number(this.cogs.toFixed(2))
   this.profit = Number(this.profit.toFixed(2))
   this.margin = Number(this.margin.toFixed(2))
 })
 
-/* ================= INDEXES ================= */
-orderSchema.index({ email: 1, createdAt: -1 })
-orderSchema.index({ status: 1 })
-
 /* =========================================================
-   ✅ CRITICAL EXPORT (THIS FIXES YOUR ERROR)
+   ✅ SAFE MODEL EXPORT (PREVENTS RE-REGISTER BUG)
 ========================================================= */
-export default mongoose.model("Order", orderSchema)
+const Order =
+  mongoose.models.Order || mongoose.model("Order", orderSchema)
+
+export default Order
