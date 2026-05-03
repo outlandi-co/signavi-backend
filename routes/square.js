@@ -12,7 +12,13 @@ const client = new SquareClient({
   environment: SquareEnvironment.Sandbox
 })
 
+/* 🔥 HARD REQUIRE LOCATION */
 const LOCATION_ID = process.env.SQUARE_SANDBOX_LOCATION_ID
+
+console.log("📍 LOCATION_ID:", LOCATION_ID)
+
+/* 🔥 FORCE SAFE BASE URL */
+const BASE_URL = "https://signavi-backend.onrender.com"
 
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -43,17 +49,13 @@ router.post("/create-payment/:id", async (req, res) => {
           ? await Order.findOne({ quoteId: record._id })
           : record
 
-      const baseUrl =
-        process.env.BASE_URL ||
-        `${req.protocol}://${req.get("host")}`
-
       const invoiceUrl = existingOrder
-        ? `${baseUrl}/api/orders/${existingOrder._id}/invoice`
+        ? `${BASE_URL}/api/orders/${existingOrder._id}/invoice`
         : null
 
       return res.json({
         success: true,
-        paymentUrl: record.paymentUrl, // ✅ FIXED
+        paymentUrl: record.paymentUrl,
         invoiceUrl,
         orderId: existingOrder?._id || null
       })
@@ -79,7 +81,7 @@ router.post("/create-payment/:id", async (req, res) => {
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-payment`,
       order: {
-        locationId: LOCATION_ID,
+        locationId: LOCATION_ID, // 🔥 MUST BE VALID
         note: `ID:${record._id}`,
         lineItems: [
           {
@@ -118,7 +120,7 @@ router.post("/create-payment/:id", async (req, res) => {
           tax,
           finalPrice: total,
           status: "payment_required",
-          quoteId: record._id // 🔥 make sure schema has this
+          quoteId: record._id
         })
 
         console.log("🧾 ORDER CREATED FROM QUOTE:", order._id)
@@ -133,15 +135,11 @@ router.post("/create-payment/:id", async (req, res) => {
 
     console.log("✅ PAYMENT LINK CREATED:", paymentUrl)
 
-    const baseUrl =
-      process.env.BASE_URL ||
-      `${req.protocol}://${req.get("host")}`
-
-    const invoiceUrl = `${baseUrl}/api/orders/${order._id}/invoice`
+    const invoiceUrl = `${BASE_URL}/api/orders/${order._id}/invoice`
 
     res.json({
       success: true,
-      paymentUrl, // ✅ FIXED KEY
+      paymentUrl,
       invoiceUrl,
       orderId: order._id
     })
