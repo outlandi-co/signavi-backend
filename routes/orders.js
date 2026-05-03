@@ -141,7 +141,7 @@ router.patch("/:id/checkout", async (req, res) => {
     // 🔥 EMAIL
     await sendOrderStatusEmail(order.email, "paid", order)
 
-    res.json({
+   res.json({
   success: true,
   paymentUrl: data.paymentUrl,
   orderId: order._id.toString()
