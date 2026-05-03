@@ -1,26 +1,31 @@
 import express from "express"
 import mongoose from "mongoose"
 import Order from "../models/Order.js"
-import multer from "multer"
-import fs from "fs"
-import cloudinary from "../utils/cloudinary.js"
-import fetch from "node-fetch" // ✅ FIX
+import fetch from "node-fetch"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
 console.log("🔥 ORDERS ROUTES ACTIVE")
 
-/* ================= MULTER ================= */
-const upload = multer({ dest: "temp/" })
+/* 🔥 SOCKET EMIT */
+const emitOrderUpdate = (req, order) => {
+  const io = req.app.get("io")
 
-/* =========================================================
-   🛒 CREATE ORDER
-========================================================= */
+  if (io) {
+    io.emit("orderUpdated", {
+      orderId: order._id.toString(),
+      order
+    })
+  }
+}
+
+/* ================= CREATE ORDER ================= */
 router.post("/", async (req, res) => {
   try {
     const { email, items } = req.body
 
-    if (!email || !items || items.length === 0) {
+    if (!email || !items?.length) {
       return res.status(400).json({ message: "Missing order data" })
     }
 
@@ -36,8 +41,7 @@ router.post("/", async (req, res) => {
         name: item.name,
         price,
         quantity,
-        variant: item.variant || {},
-        cost: item.cost || 0
+        variant: item.variant || {}
       }
     })
 
@@ -52,138 +56,53 @@ router.post("/", async (req, res) => {
       tax,
       finalPrice,
       status: "payment_required",
-      timeline: [
-        {
-          status: "created",
-          date: new Date(),
-          note: "Order created"
-        }
-      ]
+      timeline: [{ status: "created", date: new Date() }]
     })
+
+    // 🔥 EMAIL
+    await sendOrderStatusEmail(order.email, "payment_required", order)
 
     res.json({ success: true, data: order })
 
   } catch (err) {
-    console.error("❌ CREATE ORDER ERROR:", err)
+    console.error("❌ CREATE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* =========================================================
-   📤 UPLOAD ARTWORK (CLOUDINARY)
-========================================================= */
-router.post("/:id/artwork", upload.array("files", 10), async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ message: "No files uploaded" })
-    }
-
-    const uploadedFiles = []
-
-    for (const file of req.files) {
-      try {
-        const result = await cloudinary.uploader.upload(file.path, {
-          folder: "signavi-artwork",
-          resource_type: "auto"
-        })
-
-        uploadedFiles.push({
-          url: result.secure_url,
-          public_id: result.public_id,
-          filename: file.originalname
-        })
-
-      } catch (uploadErr) {
-        console.error("❌ UPLOAD FAILED:", uploadErr)
-      } finally {
-        if (fs.existsSync(file.path)) {
-          fs.unlinkSync(file.path)
-        }
-      }
-    }
-
-    if (uploadedFiles.length === 0) {
-      return res.status(500).json({ message: "Upload failed" })
-    }
-
-    order.artworks = [...(order.artworks || []), ...uploadedFiles]
-    await order.save()
-
-    res.json({ success: true, data: order.artworks })
-
-  } catch (err) {
-    console.error("❌ CLOUDINARY ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   📦 GET ALL
-========================================================= */
-router.get("/", async (req, res) => {
-  try {
-    const orders = await Order.find().sort({ createdAt: -1 })
-    res.json({ success: true, data: orders })
-  } catch (err) {
-    console.error("❌ GET ORDERS ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* =========================================================
-   📄 GET ONE
-========================================================= */
+/* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   const id = req.params.id.trim()
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ message: "Invalid order ID" })
+    return res.status(400).json({ message: "Invalid ID" })
   }
 
-  try {
-    const order = await Order.findById(id)
+  const order = await Order.findById(id)
+  if (!order) return res.status(404).json({ message: "Order not found" })
 
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ GET ORDER ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
+  res.json({ success: true, data: order })
 })
 
-/* =========================================================
-   🔥 UPDATE STATUS
-========================================================= */
+/* ================= STATUS UPDATE ================= */
 router.patch("/:id/status", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
+    if (!order) return res.status(404).json({ message: "Order not found" })
 
     order.status = req.body.status
 
     order.timeline.push({
       status: req.body.status,
-      date: new Date(),
-      note: `Moved to ${req.body.status}`
+      date: new Date()
     })
 
     await order.save()
 
-    const io = req.app.get("io")
-    if (io) io.emit("orderUpdated", order)
+    emitOrderUpdate(req, order)
+
+    // 🔥 EMAIL
+    await sendOrderStatusEmail(order.email, order.status, order)
 
     res.json({ success: true, data: order })
 
@@ -193,62 +112,40 @@ router.patch("/:id/status", async (req, res) => {
   }
 })
 
-/* =========================================================
-   💳 CHECKOUT (SQUARE)
-========================================================= */
+/* ================= CHECKOUT ================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
-    console.log("💳 CHECKOUT HIT:", req.params.id)
-
     const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
+    if (!order) return res.status(404).json({ message: "Order not found" })
 
     const baseUrl = "https://signavi-backend.onrender.com"
 
     const response = await fetch(
       `${baseUrl}/api/square/create-payment/${order._id}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        }
-      }
+      { method: "POST" }
     )
-
-    /* 🔥 HANDLE BAD STATUS FIRST */
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error("❌ SQUARE ROUTE ERROR:", errorText)
-
-      return res.status(500).json({
-        message: "Square payment route failed",
-        details: errorText
-      })
-    }
 
     const data = await response.json()
 
     if (!data?.paymentUrl) {
-      console.error("❌ PAYMENT ERROR:", data)
-
-      return res.status(500).json({
-        message: "Payment creation failed",
-        data
-      })
+      return res.status(500).json({ message: "Payment failed" })
     }
 
     order.paymentUrl = data.paymentUrl
+    order.status = "paid"
+
     await order.save()
 
-    console.log("✅ PAYMENT LINK:", data.paymentUrl)
+    emitOrderUpdate(req, order)
+
+    // 🔥 EMAIL
+    await sendOrderStatusEmail(order.email, "paid", order)
 
     res.json({
-      success: true,
-      paymentUrl: data.paymentUrl
-    })
+  success: true,
+  paymentUrl: data.paymentUrl,
+  orderId: order._id.toString()
+})
 
   } catch (err) {
     console.error("❌ CHECKOUT ERROR:", err)
@@ -256,26 +153,25 @@ router.patch("/:id/checkout", async (req, res) => {
   }
 })
 
-/* =========================================================
-   🚚 SHIP ORDER
-========================================================= */
+/* ================= SHIP ================= */
 router.post("/ship/:id", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
+    if (!order) return res.status(404).json({ message: "Order not found" })
 
     order.status = "shipped"
 
     order.timeline.push({
       status: "shipped",
-      date: new Date(),
-      note: "Order shipped"
+      date: new Date()
     })
 
     await order.save()
+
+    emitOrderUpdate(req, order)
+
+    // 🔥 EMAIL
+    await sendOrderStatusEmail(order.email, "shipped", order)
 
     res.json({ success: true, data: order })
 
