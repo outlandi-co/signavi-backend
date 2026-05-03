@@ -8,12 +8,12 @@ const router = express.Router()
 console.log("💳 SQUARE ROUTE LOADED")
 
 const client = new SquareClient({
-  token: process.env.SQUARE_SANDBOX_ACCESS_TOKEN,
-  environment: SquareEnvironment.Sandbox
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Production
 })
 
 /* 🔥 HARD REQUIRE LOCATION */
-const LOCATION_ID = process.env.SQUARE_SANDBOX_LOCATION_ID
+const LOCATION_ID = process.env.SQUARE_LOCATION_ID
 
 console.log("📍 LOCATION_ID:", LOCATION_ID)
 

@@ -20,6 +20,21 @@ const emitOrderUpdate = (req, order) => {
   }
 }
 
+/* ================= GET ALL ORDERS (🔥 FIXES 404) ================= */
+router.get("/", async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 })
+
+    res.json({
+      success: true,
+      data: orders
+    })
+  } catch (err) {
+    console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
 /* ================= CREATE ORDER ================= */
 router.post("/", async (req, res) => {
   try {
@@ -56,11 +71,17 @@ router.post("/", async (req, res) => {
       tax,
       finalPrice,
       status: "payment_required",
-      timeline: [{ status: "created", date: new Date() }]
+      timeline: [
+        { status: "created", date: new Date() }
+      ]
     })
 
-    // 🔥 EMAIL
-    await sendOrderStatusEmail(order.email, "payment_required", order)
+    /* 🔥 EMAIL (SAFE) */
+    try {
+      await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
+    } catch (e) {
+      console.warn("⚠️ Email failed (non-blocking)")
+    }
 
     res.json({ success: true, data: order })
 
@@ -101,8 +122,12 @@ router.patch("/:id/status", async (req, res) => {
 
     emitOrderUpdate(req, order)
 
-    // 🔥 EMAIL
-    await sendOrderStatusEmail(order.email, order.status, order)
+    /* 🔥 EMAIL (SAFE) */
+    try {
+      await sendOrderStatusEmail(order.email, order.status, order._id, order)
+    } catch (e) {
+      console.warn("⚠️ Email failed (non-blocking)")
+    }
 
     res.json({ success: true, data: order })
 
@@ -131,21 +156,28 @@ router.patch("/:id/checkout", async (req, res) => {
       return res.status(500).json({ message: "Payment failed" })
     }
 
+    /* ⚠️ DO NOT MARK PAID YET */
     order.paymentUrl = data.paymentUrl
-    order.status = "paid"
+    order.status = "payment_required"
 
     await order.save()
 
     emitOrderUpdate(req, order)
 
-    // 🔥 EMAIL
-    await sendOrderStatusEmail(order.email, "paid", order)
+    /* 🔥 EMAIL (SAFE) */
+    try {
+      await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
+    } catch (e) {
+      console.warn("⚠️ Email failed (non-blocking)")
+    }
 
-   res.json({
-  success: true,
-  paymentUrl: data.paymentUrl,
-  orderId: order._id.toString()
-})
+    console.log("💳 PAYMENT LINK CREATED:", data.paymentUrl)
+
+    res.json({
+      success: true,
+      paymentUrl: data.paymentUrl,
+      orderId: order._id.toString()
+    })
 
   } catch (err) {
     console.error("❌ CHECKOUT ERROR:", err)
@@ -170,8 +202,12 @@ router.post("/ship/:id", async (req, res) => {
 
     emitOrderUpdate(req, order)
 
-    // 🔥 EMAIL
-    await sendOrderStatusEmail(order.email, "shipped", order)
+    /* 🔥 EMAIL (SAFE) */
+    try {
+      await sendOrderStatusEmail(order.email, "shipped", order._id, order)
+    } catch (e) {
+      console.warn("⚠️ Email failed (non-blocking)")
+    }
 
     res.json({ success: true, data: order })
 
