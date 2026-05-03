@@ -4,6 +4,7 @@ import Order from "../models/Order.js"
 import multer from "multer"
 import fs from "fs"
 import cloudinary from "../utils/cloudinary.js"
+import fetch from "node-fetch" // ✅ FIX
 
 const router = express.Router()
 
@@ -98,11 +99,17 @@ router.post("/:id/artwork", upload.array("files", 10), async (req, res) => {
           filename: file.originalname
         })
 
+      } catch (uploadErr) {
+        console.error("❌ UPLOAD FAILED:", uploadErr)
       } finally {
         if (fs.existsSync(file.path)) {
           fs.unlinkSync(file.path)
         }
       }
+    }
+
+    if (uploadedFiles.length === 0) {
+      return res.status(500).json({ message: "Upload failed" })
     }
 
     order.artworks = [...(order.artworks || []), ...uploadedFiles]
@@ -120,8 +127,13 @@ router.post("/:id/artwork", upload.array("files", 10), async (req, res) => {
    📦 GET ALL
 ========================================================= */
 router.get("/", async (req, res) => {
-  const orders = await Order.find().sort({ createdAt: -1 })
-  res.json({ success: true, data: orders })
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 })
+    res.json({ success: true, data: orders })
+  } catch (err) {
+    console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
 })
 
 /* =========================================================
@@ -134,39 +146,51 @@ router.get("/:id", async (req, res) => {
     return res.status(400).json({ message: "Invalid order ID" })
   }
 
-  const order = await Order.findById(id)
+  try {
+    const order = await Order.findById(id)
 
-  if (!order) {
-    return res.status(404).json({ message: "Order not found" })
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ GET ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
-
-  res.json({ success: true, data: order })
 })
 
 /* =========================================================
    🔥 UPDATE STATUS
 ========================================================= */
 router.patch("/:id/status", async (req, res) => {
-  const order = await Order.findById(req.params.id)
+  try {
+    const order = await Order.findById(req.params.id)
 
-  if (!order) {
-    return res.status(404).json({ message: "Order not found" })
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.status = req.body.status
+
+    order.timeline.push({
+      status: req.body.status,
+      date: new Date(),
+      note: `Moved to ${req.body.status}`
+    })
+
+    await order.save()
+
+    const io = req.app.get("io")
+    if (io) io.emit("orderUpdated", order)
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ STATUS ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
-
-  order.status = req.body.status
-
-  order.timeline.push({
-    status: req.body.status,
-    date: new Date(),
-    note: `Moved to ${req.body.status}`
-  })
-
-  await order.save()
-
-  const io = req.app.get("io")
-  if (io) io.emit("orderUpdated", order)
-
-  res.json({ success: true, data: order })
 })
 
 /* =========================================================
@@ -174,6 +198,8 @@ router.patch("/:id/status", async (req, res) => {
 ========================================================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
+    console.log("💳 CHECKOUT HIT:", req.params.id)
+
     const order = await Order.findById(req.params.id)
 
     if (!order) {
@@ -189,10 +215,20 @@ router.patch("/:id/checkout", async (req, res) => {
 
     const paymentData = await paymentRes.json()
 
+    if (!paymentData?.paymentUrl) {
+      console.error("❌ PAYMENT ERROR:", paymentData)
+      return res.status(500).json({ message: "Payment creation failed" })
+    }
+
     order.paymentUrl = paymentData.paymentUrl
     await order.save()
 
-    res.json({ success: true, paymentUrl: paymentData.paymentUrl })
+    console.log("✅ PAYMENT LINK:", paymentData.paymentUrl)
+
+    res.json({
+      success: true,
+      paymentUrl: paymentData.paymentUrl
+    })
 
   } catch (err) {
     console.error("❌ CHECKOUT ERROR:", err)
@@ -204,23 +240,29 @@ router.patch("/:id/checkout", async (req, res) => {
    🚚 SHIP ORDER
 ========================================================= */
 router.post("/ship/:id", async (req, res) => {
-  const order = await Order.findById(req.params.id)
+  try {
+    const order = await Order.findById(req.params.id)
 
-  if (!order) {
-    return res.status(404).json({ message: "Order not found" })
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    order.status = "shipped"
+
+    order.timeline.push({
+      status: "shipped",
+      date: new Date(),
+      note: "Order shipped"
+    })
+
+    await order.save()
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ SHIP ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
-
-  order.status = "shipped"
-
-  order.timeline.push({
-    status: "shipped",
-    date: new Date(),
-    note: "Order shipped"
-  })
-
-  await order.save()
-
-  res.json({ success: true, data: order })
 })
 
 export default router
