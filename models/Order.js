@@ -145,7 +145,6 @@ orderSchema.pre("save", function () {
 /* =========================================================
    ✅ SAFE MODEL EXPORT (PREVENTS RE-REGISTER BUG)
 ========================================================= */
-const Order =
-  mongoose.models.Order || mongoose.model("Order", orderSchema)
+const Order = mongoose.models.Order || mongoose.model("Order", orderSchema)
 
 export default Order
