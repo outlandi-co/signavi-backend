@@ -38,19 +38,22 @@ router.post("/create-payment/:id", async (req, res) => {
     if (record.paymentUrl) {
       console.log("⚠️ Reusing existing payment link:", record.paymentUrl)
 
-      // 🔥 FIND RELATED ORDER
       let existingOrder =
         type === "quote"
           ? await Order.findOne({ quoteId: record._id })
           : record
 
+      const baseUrl =
+        process.env.BASE_URL ||
+        `${req.protocol}://${req.get("host")}`
+
       const invoiceUrl = existingOrder
-        ? `${process.env.BASE_URL}/api/orders/${existingOrder._id}/invoice`
+        ? `${baseUrl}/api/orders/${existingOrder._id}/invoice`
         : null
 
       return res.json({
         success: true,
-        url: record.paymentUrl,
+        paymentUrl: record.paymentUrl, // ✅ FIXED
         invoiceUrl,
         orderId: existingOrder?._id || null
       })
@@ -72,18 +75,12 @@ router.post("/create-payment/:id", async (req, res) => {
 
     const amount = BigInt(Math.round(total * 100))
 
-    /* ================= IDEMPOTENCY ================= */
-    const idempotencyKey = `${id}-payment`
-
-    /* ================= CREATE PAYMENT LINK ================= */
+    /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
-      idempotencyKey,
+      idempotencyKey: `${id}-payment`,
       order: {
         locationId: LOCATION_ID,
-
-        // 🔥 IMPORTANT FOR WEBHOOK MATCHING
         note: `ID:${record._id}`,
-
         lineItems: [
           {
             name: `${type.toUpperCase()} #${record._id}`,
@@ -100,9 +97,9 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     })
 
-    const url = response?.paymentLink?.url
+    const paymentUrl = response?.paymentLink?.url
 
-    if (!url) {
+    if (!paymentUrl) {
       throw new Error("No payment URL returned")
     }
 
@@ -121,7 +118,7 @@ router.post("/create-payment/:id", async (req, res) => {
           tax,
           finalPrice: total,
           status: "payment_required",
-          quoteId: record._id
+          quoteId: record._id // 🔥 make sure schema has this
         })
 
         console.log("🧾 ORDER CREATED FROM QUOTE:", order._id)
@@ -130,19 +127,21 @@ router.post("/create-payment/:id", async (req, res) => {
       order = record
     }
 
-    /* ================= SAVE PAYMENT LINK ================= */
-    record.paymentUrl = url
+    /* ================= SAVE LINK ================= */
+    record.paymentUrl = paymentUrl
     await record.save()
 
-    console.log("✅ PAYMENT LINK CREATED:", url)
+    console.log("✅ PAYMENT LINK CREATED:", paymentUrl)
 
-    /* ================= INVOICE LINK ================= */
-    const invoiceUrl = `${process.env.BASE_URL}/api/orders/${order._id}/invoice`
+    const baseUrl =
+      process.env.BASE_URL ||
+      `${req.protocol}://${req.get("host")}`
 
-    /* ================= RESPONSE ================= */
+    const invoiceUrl = `${baseUrl}/api/orders/${order._id}/invoice`
+
     res.json({
       success: true,
-      url,
+      paymentUrl, // ✅ FIXED KEY
       invoiceUrl,
       orderId: order._id
     })

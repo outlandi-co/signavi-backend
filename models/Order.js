@@ -33,7 +33,14 @@ const orderSchema = new mongoose.Schema({
     trim: true,
     index: true
   },
-
+  
+  /* 🔥 LINK TO QUOTE */
+quoteId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Quote",
+  default: null,
+  index: true
+},
   /* ================= CORE ================= */
   quantity: { type: Number, default: 1, min: 1 },
   printType: { type: String, default: "screenprint" },

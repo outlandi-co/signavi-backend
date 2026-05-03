@@ -207,29 +207,49 @@ router.patch("/:id/checkout", async (req, res) => {
     }
 
     const baseUrl =
-  process.env.BASE_URL ||
-  `${req.protocol}://${req.get("host")}`
+      process.env.BASE_URL ||
+      `${req.protocol}://${req.get("host")}`
 
-    const paymentRes = await fetch(
+    const response = await fetch(
       `${baseUrl}/api/square/create-payment/${order._id}`,
-      { method: "POST" }
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      }
     )
 
-    const paymentData = await paymentRes.json()
+    /* 🔥 HANDLE BAD STATUS FIRST */
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error("❌ SQUARE ROUTE ERROR:", errorText)
 
-    if (!paymentData?.paymentUrl) {
-      console.error("❌ PAYMENT ERROR:", paymentData)
-      return res.status(500).json({ message: "Payment creation failed" })
+      return res.status(500).json({
+        message: "Square payment route failed",
+        details: errorText
+      })
     }
 
-    order.paymentUrl = paymentData.paymentUrl
+    const data = await response.json()
+
+    if (!data?.paymentUrl) {
+      console.error("❌ PAYMENT ERROR:", data)
+
+      return res.status(500).json({
+        message: "Payment creation failed",
+        data
+      })
+    }
+
+    order.paymentUrl = data.paymentUrl
     await order.save()
 
-    console.log("✅ PAYMENT LINK:", paymentData.paymentUrl)
+    console.log("✅ PAYMENT LINK:", data.paymentUrl)
 
     res.json({
       success: true,
-      paymentUrl: paymentData.paymentUrl
+      paymentUrl: data.paymentUrl
     })
 
   } catch (err) {
