@@ -109,45 +109,40 @@ router.get("/:id", async (req, res) => {
 /* ================= STATUS ================= */
 router.patch("/:id/status", async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id)
-    if (!order) return res.status(404).json({ message: "Order not found" })
-
+    const { id } = req.params
     const { status } = req.body
 
-    if (!status) {
-      return res.status(400).json({ message: "Status required" })
+    const validStatuses = [
+      "payment_required",
+      "ready_for_production",
+      "production",
+      "shipping",
+      "shipped",
+      "denied"
+    ]
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        message: "Invalid status",
+        received: status
+      })
     }
 
-    /* 🔥 FIX: ENSURE TIMELINE EXISTS */
-    if (!order.timeline) {
-      order.timeline = []
-    }
+    const order = await Order.findById(id)
+    if (!order) return res.status(404).json({ message: "Order not found" })
+
+    if (!order.timeline) order.timeline = []
 
     order.status = status
-
-    order.timeline.push({
-      status,
-      date: new Date()
-    })
+    order.timeline.push({ status, date: new Date() })
 
     await order.save()
-
-    emitOrderUpdate(req, order)
-
-    try {
-      await sendOrderStatusEmail(order.email, status, order._id, order)
-    } catch (err) {
-      console.warn("⚠️ Email failed")
-    }
 
     res.json({ success: true, data: order })
 
   } catch (err) {
     console.error("❌ STATUS ERROR:", err)
-    res.status(500).json({
-      message: "Status update failed",
-      error: err.message
-    })
+    res.status(500).json({ message: err.message })
   }
 })
 
