@@ -9,13 +9,13 @@ router.get("/", async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 })
 
-    res.json({
+    return res.json({
       success: true,
       data: quotes
     })
   } catch (error) {
     console.error("❌ GET ALL QUOTES ERROR:", error)
-    res.status(500).json({ message: "Server error" })
+    return res.status(500).json({ message: "Server error" })
   }
 })
 
@@ -24,10 +24,30 @@ router.post("/", async (req, res) => {
   try {
     console.log("📤 SENDING QUOTE JSON:", req.body)
 
+    const {
+      customerName,
+      email,
+      quantity,
+      price
+    } = req.body
+
+    /* 🔥 BASIC VALIDATION */
+    if (!customerName || !email) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields"
+      })
+    }
+
     const quote = new Quote({
       ...req.body,
+      quantity: Number(quantity) || 0,
+      price: Number(price) || 0,
+      finalPrice: Number(price) || 0,
+
       status: "quotes",
       approvalStatus: "pending",
+
       timeline: [
         {
           status: "created",
@@ -40,14 +60,14 @@ router.post("/", async (req, res) => {
 
     console.log("✅ Quote created:", quote._id)
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       data: quote
     })
   } catch (error) {
     console.error("❌ CREATE QUOTE ERROR:", error)
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "Create failed",
       error: error.message
     })
@@ -63,10 +83,10 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    res.json({ success: true, data: quote })
+    return res.json({ success: true, data: quote })
   } catch (error) {
     console.error("❌ GET QUOTE ERROR:", error)
-    res.status(500).json({ message: "Server error" })
+    return res.status(500).json({ message: "Server error" })
   }
 })
 
@@ -81,7 +101,10 @@ router.patch("/:id", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    if (!quote.timeline) quote.timeline = []
+    /* ================= SAFE TIMELINE ================= */
+    if (!Array.isArray(quote.timeline)) {
+      quote.timeline = []
+    }
 
     const prevApproval = quote.approvalStatus
 
@@ -98,7 +121,10 @@ router.patch("/:id", async (req, res) => {
 
     allowedFields.forEach(field => {
       if (req.body[field] !== undefined) {
-        quote[field] = req.body[field]
+        quote[field] =
+          field === "price" || field === "finalPrice" || field === "quantity"
+            ? Number(req.body[field])
+            : req.body[field]
       }
     })
 
@@ -113,12 +139,16 @@ router.patch("/:id", async (req, res) => {
       })
 
       if (prevApproval !== "approved") {
-        await sendOrderStatusEmail(
-          quote.email,
-          "payment_required",
-          quote
-        )
-        console.log("📧 Approval email sent")
+        try {
+          await sendOrderStatusEmail(
+            quote.email,
+            "payment_required",
+            quote
+          )
+          console.log("📧 Approval email sent")
+        } catch (emailErr) {
+          console.error("❌ EMAIL ERROR:", emailErr)
+        }
       }
     }
 
@@ -134,12 +164,16 @@ router.patch("/:id", async (req, res) => {
       })
 
       if (prevApproval !== "denied") {
-        await sendOrderStatusEmail(
-          quote.email,
-          "denied",
-          quote
-        )
-        console.log("📧 Denial email sent")
+        try {
+          await sendOrderStatusEmail(
+            quote.email,
+            "denied",
+            quote
+          )
+          console.log("📧 Denial email sent")
+        } catch (emailErr) {
+          console.error("❌ EMAIL ERROR:", emailErr)
+        }
       }
     }
 
@@ -147,11 +181,14 @@ router.patch("/:id", async (req, res) => {
 
     console.log("✅ Quote updated:", quote._id)
 
-    res.json({ success: true, data: quote })
+    return res.json({
+      success: true,
+      data: quote
+    })
   } catch (error) {
     console.error("❌ UPDATE ERROR:", error)
 
-    res.status(500).json({
+    return res.status(500).json({
       message: "Update failed",
       error: error.message
     })
