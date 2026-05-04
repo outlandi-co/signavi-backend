@@ -4,6 +4,56 @@ import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
+/* ================= GET ALL ================= */
+router.get("/", async (req, res) => {
+  try {
+    const quotes = await Quote.find().sort({ createdAt: -1 })
+
+    res.json({
+      success: true,
+      data: quotes
+    })
+  } catch (error) {
+    console.error("❌ GET ALL QUOTES ERROR:", error)
+    res.status(500).json({ message: "Server error" })
+  }
+})
+
+/* ================= CREATE ================= */
+router.post("/", async (req, res) => {
+  try {
+    console.log("📤 SENDING QUOTE JSON:", req.body)
+
+    const quote = new Quote({
+      ...req.body,
+      status: "quotes",
+      approvalStatus: "pending",
+      timeline: [
+        {
+          status: "created",
+          note: "Quote created"
+        }
+      ]
+    })
+
+    await quote.save()
+
+    console.log("✅ Quote created:", quote._id)
+
+    res.status(201).json({
+      success: true,
+      data: quote
+    })
+  } catch (error) {
+    console.error("❌ CREATE QUOTE ERROR:", error)
+
+    res.status(500).json({
+      message: "Create failed",
+      error: error.message
+    })
+  }
+})
+
 /* ================= GET ONE ================= */
 router.get("/:id", async (req, res) => {
   try {
@@ -31,13 +81,11 @@ router.patch("/:id", async (req, res) => {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    /* ================= SAFE TIMELINE ================= */
     if (!quote.timeline) quote.timeline = []
 
-    /* ================= TRACK ORIGINAL STATE ================= */
     const prevApproval = quote.approvalStatus
 
-    /* ================= GENERIC SAFE UPDATES ================= */
+    /* ================= SAFE UPDATES ================= */
     const allowedFields = [
       "customerName",
       "email",
@@ -54,9 +102,7 @@ router.patch("/:id", async (req, res) => {
       }
     })
 
-    /* ================= APPROVAL LOGIC ================= */
-
-    /* ===== APPROVED ===== */
+    /* ================= APPROVE ================= */
     if (req.body.approvalStatus === "approved") {
       quote.approvalStatus = "approved"
       quote.status = "payment_required"
@@ -66,7 +112,6 @@ router.patch("/:id", async (req, res) => {
         note: "Quote approved — awaiting payment"
       })
 
-      /* 🔥 SEND EMAIL ONLY IF NEW APPROVAL */
       if (prevApproval !== "approved") {
         await sendOrderStatusEmail(
           quote.email,
@@ -77,7 +122,7 @@ router.patch("/:id", async (req, res) => {
       }
     }
 
-    /* ===== DENIED ===== */
+    /* ================= DENY ================= */
     if (req.body.approvalStatus === "denied") {
       quote.approvalStatus = "denied"
       quote.status = "denied"
@@ -88,7 +133,6 @@ router.patch("/:id", async (req, res) => {
         note: quote.denialReason || "Quote denied"
       })
 
-      /* 🔥 SEND EMAIL ONLY IF NEW DENIAL */
       if (prevApproval !== "denied") {
         await sendOrderStatusEmail(
           quote.email,
@@ -99,7 +143,6 @@ router.patch("/:id", async (req, res) => {
       }
     }
 
-    /* ================= SAVE ================= */
     await quote.save()
 
     console.log("✅ Quote updated:", quote._id)
