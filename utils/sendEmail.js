@@ -37,17 +37,28 @@ export const sendOrderStatusEmail = async (to, status, order) => {
       `
     }
 
-    /* ================= PAID ================= */
-    else if (status === "paid") {
-      subject = "🎉 Order Confirmed"
+    /* ================= APPROVED ================= */
+    else if (status === "ready_for_production") {
+      subject = "✅ Order Approved"
 
       html += `
-        <p>Your payment was received!</p>
+        <p>Your order has been approved and is moving to production.</p>
 
         <a href="${trackLink}" target="_blank"
           style="padding:12px 20px;background:#22c55e;color:#000;border-radius:6px;text-decoration:none;">
-          📦 Track Order
+          Track Order
         </a>
+      `
+    }
+
+    /* ================= DENIED ================= */
+    else if (status === "denied") {
+      subject = "❌ Order Update"
+
+      html += `
+        <p>Your order requires changes or was not approved.</p>
+
+        <p>Please review notes in your account.</p>
       `
     }
 
@@ -71,7 +82,7 @@ export const sendOrderStatusEmail = async (to, status, order) => {
     `
 
     const response = await resend.emails.send({
-      from: "SignaVi Studio <onboarding@resend.dev>", // 🔥 use this for testing
+      from: "SignaVi Studio <onboarding@resend.dev>",
       to,
       subject,
       html
