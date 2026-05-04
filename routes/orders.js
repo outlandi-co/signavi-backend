@@ -110,7 +110,7 @@ router.get("/:id", async (req, res) => {
 router.patch("/:id/status", async (req, res) => {
   try {
     const { id } = req.params
-    const { status } = req.body
+    const { status, note } = req.body
 
     const validStatuses = [
       "payment_required",
@@ -131,12 +131,30 @@ router.patch("/:id/status", async (req, res) => {
     const order = await Order.findById(id)
     if (!order) return res.status(404).json({ message: "Order not found" })
 
+    /* 🔥 ENSURE TIMELINE EXISTS */
     if (!order.timeline) order.timeline = []
 
+    /* 🔥 UPDATE STATUS */
     order.status = status
-    order.timeline.push({ status, date: new Date() })
+
+    /* 🔥 ADD TIMELINE ENTRY WITH NOTE */
+    order.timeline.push({
+      status,
+      note: note || "",
+      date: new Date()
+    })
 
     await order.save()
+
+    /* 🔥 REALTIME UPDATE */
+    emitOrderUpdate(req, order)
+
+    /* 🔥 OPTIONAL EMAIL */
+    try {
+      await sendOrderStatusEmail(order.email, status, order._id, order)
+    } catch {
+      console.warn("⚠️ Email failed")
+    }
 
     res.json({ success: true, data: order })
 
