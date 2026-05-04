@@ -195,4 +195,6 @@ router.patch("/:id", async (req, res) => {
   }
 })
 
+console.log("🔥 QUOTES ROUTE LOADED")
+
 export default router
