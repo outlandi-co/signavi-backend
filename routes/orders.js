@@ -112,15 +112,31 @@ router.patch("/:id/status", async (req, res) => {
     const order = await Order.findById(req.params.id)
     if (!order) return res.status(404).json({ message: "Order not found" })
 
-    order.status = req.body.status
-    order.timeline.push({ status: req.body.status, date: new Date() })
+    const { status } = req.body
+
+    if (!status) {
+      return res.status(400).json({ message: "Status required" })
+    }
+
+    /* 🔥 FIX: ENSURE TIMELINE EXISTS */
+    if (!order.timeline) {
+      order.timeline = []
+    }
+
+    order.status = status
+
+    order.timeline.push({
+      status,
+      date: new Date()
+    })
 
     await order.save()
+
     emitOrderUpdate(req, order)
 
     try {
-      await sendOrderStatusEmail(order.email, order.status, order._id, order)
-    } catch {
+      await sendOrderStatusEmail(order.email, status, order._id, order)
+    } catch (err) {
       console.warn("⚠️ Email failed")
     }
 
@@ -128,7 +144,10 @@ router.patch("/:id/status", async (req, res) => {
 
   } catch (err) {
     console.error("❌ STATUS ERROR:", err)
-    res.status(500).json({ message: err.message })
+    res.status(500).json({
+      message: "Status update failed",
+      error: err.message
+    })
   }
 })
 
