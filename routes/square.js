@@ -23,6 +23,7 @@ router.post("/create-payment/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid ID" })
     }
 
+    /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
     let type = "quote"
 
@@ -46,19 +47,31 @@ router.post("/create-payment/:id", async (req, res) => {
       })
     }
 
-    /* ================= FIXED CALCULATION ================= */
-    let subtotal =
-      Number(record.subtotal) ||
-      Number(record.finalPrice) ||   // 🔥 THIS IS THE FIX
-      Number(record.price) ||
-      0
+    /* ================= BULLETPROOF CALC ================= */
+    let subtotal = 0
 
-    let shipping = Number(record.shippingCost || 0)
-    let tax = Number(record.tax || subtotal * 0.0825)
+    if (record.items?.length) {
+      subtotal = record.items.reduce((sum, item) => {
+        const price = Number(item.price || item.selectedVariant?.price || 0)
+        const qty = Number(item.quantity || 1)
+        return sum + (price * qty)
+      }, 0)
+    }
 
+    // fallback if items missing
+    if (!subtotal) {
+      subtotal =
+        Number(record.subtotal) ||
+        Number(record.finalPrice) ||
+        Number(record.price) ||
+        0
+    }
+
+    const shipping = Number(record.shippingCost || 0)
+    const tax = Number(record.tax || subtotal * 0.0825)
     const total = subtotal + shipping + tax
 
-    console.log("💰 CALC DEBUG:", {
+    console.log("💰 FINAL CALC:", {
       subtotal,
       shipping,
       tax,
@@ -77,8 +90,8 @@ router.post("/create-payment/:id", async (req, res) => {
       })
     }
 
-    /* ================= SQUARE FIX ================= */
-    const amount = Math.round(total * 100) // 🔥 remove BigInt
+    /* ================= SQUARE PAYMENT ================= */
+    const amount = Math.round(total * 100) // 🔥 must be integer cents
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-payment`,
@@ -104,9 +117,11 @@ router.post("/create-payment/:id", async (req, res) => {
     const paymentUrl = response?.paymentLink?.url
 
     if (!paymentUrl) {
+      console.error("❌ Square response:", response)
       throw new Error("No payment URL returned")
     }
 
+    /* ================= SAVE ================= */
     record.paymentUrl = paymentUrl
     await record.save()
 
