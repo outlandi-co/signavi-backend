@@ -145,18 +145,36 @@ router.patch("/:id/checkout", async (req, res) => {
 
     const baseUrl = "https://signavi-backend.onrender.com"
 
+    console.log("💳 Creating payment for:", order._id)
+
     const response = await fetch(
       `${baseUrl}/api/square/create-payment/${order._id}`,
       { method: "POST" }
     )
 
+    // 🔥 SAFE RESPONSE HANDLING
+    if (!response.ok) {
+      const text = await response.text()
+      console.error("❌ Square API ERROR:", text)
+
+      return res.status(500).json({
+        message: "Payment provider error",
+        details: text
+      })
+    }
+
     const data = await response.json()
 
     if (!data?.paymentUrl) {
-      return res.status(500).json({ message: "Payment failed" })
+      console.error("❌ No payment URL returned:", data)
+
+      return res.status(500).json({
+        message: "Payment failed",
+        details: data
+      })
     }
 
-    /* ⚠️ DO NOT MARK PAID YET */
+    /* ✅ SAVE ORDER */
     order.paymentUrl = data.paymentUrl
     order.status = "payment_required"
 
