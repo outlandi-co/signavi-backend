@@ -164,6 +164,85 @@ router.patch("/:id/status", async (req, res) => {
   }
 })
 
+/* ================= UPDATE (🔥 UNIVERSAL FIX) ================= */
+router.patch("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+    const { status, finalPrice, note } = req.body
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const order = await Order.findById(id)
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    /* ================= ENSURE TIMELINE ================= */
+    if (!order.timeline) order.timeline = []
+
+    /* ================= UPDATE PRICE ================= */
+    if (finalPrice !== undefined) {
+      const parsed = Number(finalPrice)
+      if (!isNaN(parsed) && parsed > 0) {
+        order.finalPrice = parsed
+      }
+    }
+
+    /* ================= UPDATE STATUS ================= */
+    if (status) {
+      const validStatuses = [
+        "payment_required",
+        "ready_for_production",
+        "production",
+        "shipping",
+        "shipped",
+        "denied"
+      ]
+
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({
+          message: "Invalid status",
+          received: status
+        })
+      }
+
+      order.status = status
+    }
+
+    /* ================= TIMELINE NOTE ================= */
+    if (note) {
+      order.timeline.push({
+        status: status || order.status,
+        note,
+        date: new Date()
+      })
+    }
+
+    await order.save()
+
+    /* ================= REALTIME ================= */
+    emitOrderUpdate(req, order)
+
+    /* ================= EMAIL ================= */
+    try {
+      await sendOrderStatusEmail(order.email, order.status, order._id, order)
+    } catch {
+      console.warn("⚠️ Email failed")
+    }
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ UPDATE ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
 /* ================= CHECKOUT (🔥 FIXED) ================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
