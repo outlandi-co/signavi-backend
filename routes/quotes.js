@@ -1,14 +1,14 @@
 import express from "express"
 import mongoose from "mongoose"
 import Quote from "../models/Quote.js"
+import Order from "../models/Order.js" // 🔥 ADD THIS
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
-
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id)
 
 /* =========================================================
-   🔥 CREATE QUOTE
+   CREATE QUOTE
 ========================================================= */
 router.post("/", async (req, res) => {
   try {
@@ -34,30 +34,20 @@ router.post("/", async (req, res) => {
       email: email.toLowerCase(),
       quantity: Number(quantity) || 1,
       notes: notes || "",
-
-      /* 🔥 CRITICAL */
       price: finalPrice,
-      finalPrice: finalPrice,
-
+      finalPrice,
       items: items || [],
       artwork: artwork || "",
       printType: printType || "screenprint",
-
       approvalStatus: "pending",
       status: "quotes",
       source: "quote",
-
       timeline: [
-        {
-          status: "quotes",
-          note: "Quote submitted",
-          date: new Date()
-        }
+        { status: "quotes", note: "Quote submitted", date: new Date() }
       ]
     })
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: quote })
@@ -69,71 +59,52 @@ router.post("/", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 GET ALL
+   GET ALL
 ========================================================= */
 router.get("/", async (req, res) => {
-  try {
-    const quotes = await Quote.find().sort({ createdAt: -1 })
-    res.json({ success: true, data: quotes })
-  } catch (err) {
-    console.error("❌ GET QUOTES ERROR:", err)
-    res.status(500).json({ message: "Failed to load quotes" })
-  }
+  const quotes = await Quote.find().sort({ createdAt: -1 })
+  res.json({ success: true, data: quotes })
 })
 
 /* =========================================================
-   🔥 UPDATE QUOTE (PRICE + NOTE)
+   UPDATE
 ========================================================= */
 router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params
-    const { price, note, status } = req.body
-
-    if (!isValidId(id)) {
-      return res.status(400).json({ message: "Invalid ID" })
-    }
+    const { price, note } = req.body
 
     const quote = await Quote.findById(id)
 
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
+    if (!quote) return res.status(404).json({ message: "Not found" })
 
-    /* 🔥 FIX PRICE */
     if (price !== undefined) {
-      const newPrice = Number(price)
-      quote.price = newPrice
-      quote.finalPrice = newPrice   // 🔥 THIS FIXES YOUR UI
+      const p = Number(price)
+      quote.price = p
+      quote.finalPrice = p
     }
 
-    /* STATUS */
-    if (status) {
-      quote.status = status
-    }
-
-    /* TIMELINE */
-    if (note || status) {
+    if (note) {
       quote.timeline.push({
-        status: status || quote.status,
-        note: note || "",
+        status: quote.status,
+        note,
         date: new Date()
       })
     }
 
     await quote.save()
-
     req.app.get("io")?.emit("jobUpdated")
 
     res.json({ success: true, data: quote })
 
   } catch (err) {
     console.error("❌ UPDATE ERROR:", err)
-    res.status(500).json({ message: "Update failed" })
+    res.status(500).json({ message: err.message })
   }
 })
 
 /* =========================================================
-   🔥 APPROVE
+   🔥 APPROVE → CREATE ORDER
 ========================================================= */
 router.patch("/:id/approve", async (req, res) => {
   try {
@@ -142,24 +113,19 @@ router.patch("/:id/approve", async (req, res) => {
 
     const quote = await Quote.findById(id)
 
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
+    if (!quote) return res.status(404).json({ message: "Quote not found" })
 
     const finalPrice = Number(price || quote.price || 0)
 
     if (finalPrice <= 0) {
-      return res.status(400).json({
-        message: "Set a price before approving"
-      })
+      return res.status(400).json({ message: "Set price first" })
     }
 
-    /* 🔥 APPLY PRICE */
+    /* ================= UPDATE QUOTE ================= */
     quote.price = finalPrice
     quote.finalPrice = finalPrice
-
     quote.approvalStatus = "approved"
-    quote.status = "payment_required"
+    quote.status = "approved"
 
     quote.timeline.push({
       status: "approved",
@@ -169,16 +135,55 @@ router.patch("/:id/approve", async (req, res) => {
 
     await quote.save()
 
-    /* 🔥 EMAIL */
-    await sendOrderStatusEmail(
-      quote.email,
-      "payment_required",
-      quote
-    )
+    /* ================= CREATE ORDER ================= */
+    const order = new Order({
+      customerName: quote.customerName,
+      email: quote.email,
+      items: quote.items || [],
+      artwork: quote.artwork || "",
+      quantity: quote.quantity || 1,
+      printType: quote.printType || "screenprint",
+
+      finalPrice,
+      subtotal: finalPrice,
+      tax: 0,
+
+      source: "quote",
+      quoteId: quote._id,
+      status: "payment_required",
+
+      timeline: [
+        {
+          status: "payment_required",
+          note: "Order created from approved quote",
+          date: new Date()
+        }
+      ]
+    })
+
+    await order.save()
+
+    console.log("🔥 ORDER CREATED:", order._id)
+
+    /* ================= EMAIL ================= */
+    try {
+      await sendOrderStatusEmail(
+        order.email,
+        "payment_required",
+        order
+      )
+      console.log("📧 EMAIL SENT")
+    } catch (err) {
+      console.error("❌ EMAIL ERROR:", err)
+    }
 
     req.app.get("io")?.emit("jobUpdated")
 
-    res.json({ success: true, data: quote })
+    res.json({
+      success: true,
+      message: "Quote converted to order",
+      order
+    })
 
   } catch (err) {
     console.error("❌ APPROVE ERROR:", err)
@@ -187,25 +192,18 @@ router.patch("/:id/approve", async (req, res) => {
 })
 
 /* =========================================================
-   🔥 DENY
+   DENY
 ========================================================= */
 router.patch("/:id/deny", async (req, res) => {
   try {
-    const { id } = req.params
-    const { note } = req.body
-
-    const quote = await Quote.findById(id)
-
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
+    const quote = await Quote.findById(req.params.id)
 
     quote.approvalStatus = "denied"
     quote.status = "denied"
 
     quote.timeline.push({
       status: "denied",
-      note: note || "Quote denied",
+      note: req.body.note || "Quote denied",
       date: new Date()
     })
 
@@ -219,10 +217,9 @@ router.patch("/:id/deny", async (req, res) => {
 
     req.app.get("io")?.emit("jobUpdated")
 
-    res.json({ success: true, data: quote })
+    res.json({ success: true })
 
   } catch (err) {
-    console.error("❌ DENY ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
