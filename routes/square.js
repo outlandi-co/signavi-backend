@@ -58,7 +58,6 @@ router.post("/create-payment/:id", async (req, res) => {
       }, 0)
     }
 
-    // fallback if items missing
     if (!subtotal) {
       subtotal =
         Number(record.subtotal) ||
@@ -91,7 +90,7 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     /* ================= SQUARE PAYMENT ================= */
-    const amount = Math.round(total * 100) // 🔥 must be integer cents
+    const amount = BigInt(Math.round(total * 100)) // 🔥 FINAL FIX
 
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-payment`,
@@ -103,7 +102,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `${type.toUpperCase()} #${record._id}`,
             quantity: "1",
             basePriceMoney: {
-              amount,
+              amount, // ✅ BigInt now
               currency: "USD"
             }
           }
