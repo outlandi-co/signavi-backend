@@ -12,12 +12,7 @@ const client = new SquareClient({
   environment: SquareEnvironment.Production
 })
 
-/* 🔥 HARD REQUIRE LOCATION */
 const LOCATION_ID = process.env.SQUARE_LOCATION_ID
-
-console.log("📍 LOCATION_ID:", LOCATION_ID)
-
-/* 🔥 FORCE SAFE BASE URL */
 const BASE_URL = "https://signavi-backend.onrender.com"
 
 router.post("/create-payment/:id", async (req, res) => {
@@ -42,46 +37,53 @@ router.post("/create-payment/:id", async (req, res) => {
 
     /* ================= PREVENT DUPLICATE ================= */
     if (record.paymentUrl) {
-      console.log("⚠️ Reusing existing payment link:", record.paymentUrl)
-
-      let existingOrder =
-        type === "quote"
-          ? await Order.findOne({ quoteId: record._id })
-          : record
-
-      const invoiceUrl = existingOrder
-        ? `${BASE_URL}/api/orders/${existingOrder._id}/invoice`
-        : null
+      console.log("⚠️ Reusing payment link:", record.paymentUrl)
 
       return res.json({
         success: true,
         paymentUrl: record.paymentUrl,
-        invoiceUrl,
-        orderId: existingOrder?._id || null
+        orderId: record._id
       })
     }
 
-    /* ================= CALCULATE ================= */
-    let subtotal = Number(record.subtotal || record.price || 0)
+    /* ================= FIXED CALCULATION ================= */
+    let subtotal =
+      Number(record.subtotal) ||
+      Number(record.finalPrice) ||   // 🔥 THIS IS THE FIX
+      Number(record.price) ||
+      0
+
     let shipping = Number(record.shippingCost || 0)
     let tax = Number(record.tax || subtotal * 0.0825)
 
     const total = subtotal + shipping + tax
 
+    console.log("💰 CALC DEBUG:", {
+      subtotal,
+      shipping,
+      tax,
+      total
+    })
+
     if (!total || total <= 0) {
       return res.status(400).json({
         message: "Invalid total",
-        debug: record
+        debug: {
+          subtotal,
+          shipping,
+          tax,
+          record
+        }
       })
     }
 
-    const amount = BigInt(Math.round(total * 100))
+    /* ================= SQUARE FIX ================= */
+    const amount = Math.round(total * 100) // 🔥 remove BigInt
 
-    /* ================= CREATE PAYMENT ================= */
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-payment`,
       order: {
-        locationId: LOCATION_ID, // 🔥 MUST BE VALID
+        locationId: LOCATION_ID,
         note: `ID:${record._id}`,
         lineItems: [
           {
@@ -105,43 +107,15 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("No payment URL returned")
     }
 
-    /* ================= ENSURE ORDER EXISTS ================= */
-    let order = null
-
-    if (type === "quote") {
-      order = await Order.findOne({ quoteId: record._id })
-
-      if (!order) {
-        order = await Order.create({
-          customerName: record.customerName,
-          email: record.email,
-          items: record.items,
-          subtotal,
-          tax,
-          finalPrice: total,
-          status: "payment_required",
-          quoteId: record._id
-        })
-
-        console.log("🧾 ORDER CREATED FROM QUOTE:", order._id)
-      }
-    } else {
-      order = record
-    }
-
-    /* ================= SAVE LINK ================= */
     record.paymentUrl = paymentUrl
     await record.save()
 
     console.log("✅ PAYMENT LINK CREATED:", paymentUrl)
 
-    const invoiceUrl = `${BASE_URL}/api/orders/${order._id}/invoice`
-
     res.json({
       success: true,
       paymentUrl,
-      invoiceUrl,
-      orderId: order._id
+      orderId: record._id
     })
 
   } catch (err) {
