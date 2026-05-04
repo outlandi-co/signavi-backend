@@ -35,49 +35,59 @@ router.post("/", async (req, res) => {
   try {
     const { email, items } = req.body
 
-    if (!email || !items?.length) {
-      return res.status(400).json({ message: "Missing order data" })
+    if (!items || !items.length) {
+      return res.status(400).json({ message: "No items provided" })
     }
 
-    let subtotal = 0
+    /* 🔥 FORCE VALID PRICES */
+    const safeItems = items.map(item => {
+      const price = Number(
+        item.price ||
+        item.selectedVariant?.price ||
+        0
+      )
 
-    const cleanItems = items.map(item => {
-      const price = Number(item.price || 0)
-      const quantity = Number(item.quantity || 1)
-      subtotal += price * quantity
+      if (!price || price <= 0) {
+        console.error("❌ INVALID ITEM PRICE:", item)
+        throw new Error("Invalid item price")
+      }
 
       return {
         name: item.name,
+        quantity: Number(item.quantity || 1),
         price,
-        quantity,
-        variant: item.variant || {}
+        variant: item.variant || item.selectedVariant
       }
     })
+
+    /* 🔥 CALCULATE TOTALS */
+    const subtotal = safeItems.reduce((sum, i) => {
+      return sum + (i.price * i.quantity)
+    }, 0)
 
     const tax = subtotal * 0.0825
     const finalPrice = subtotal + tax
 
     const order = await Order.create({
       email,
-      customerName: "Guest",
-      items: cleanItems,
+      items: safeItems,
       subtotal,
       tax,
       finalPrice,
       status: "payment_required",
-      timeline: [{ status: "created", date: new Date() }]
+      source: "store"
     })
 
-    try {
-      await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
-    } catch {
-      console.warn("⚠️ Email failed")
-    }
+    console.log("🧾 ORDER CREATED:", order._id)
+    console.log("💰 ORDER TOTAL:", { subtotal, tax, finalPrice })
 
-    res.json({ success: true, data: order })
+    res.json({
+      success: true,
+      data: order
+    })
 
   } catch (err) {
-    console.error("❌ CREATE ERROR:", err)
+    console.error("❌ ORDER CREATE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
