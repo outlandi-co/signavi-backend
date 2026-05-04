@@ -8,10 +8,9 @@ const router = express.Router()
 
 console.log("🔥 ORDERS ROUTES ACTIVE")
 
-/* 🔥 SOCKET EMIT */
+/* ================= SOCKET ================= */
 const emitOrderUpdate = (req, order) => {
   const io = req.app.get("io")
-
   if (io) {
     io.emit("orderUpdated", {
       orderId: order._id.toString(),
@@ -20,22 +19,18 @@ const emitOrderUpdate = (req, order) => {
   }
 }
 
-/* ================= GET ALL ORDERS (🔥 FIXES 404) ================= */
+/* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 })
-
-    res.json({
-      success: true,
-      data: orders
-    })
+    res.json({ success: true, data: orders })
   } catch (err) {
     console.error("❌ GET ORDERS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= CREATE ORDER ================= */
+/* ================= CREATE ================= */
 router.post("/", async (req, res) => {
   try {
     const { email, items } = req.body
@@ -49,7 +44,6 @@ router.post("/", async (req, res) => {
     const cleanItems = items.map(item => {
       const price = Number(item.price || 0)
       const quantity = Number(item.quantity || 1)
-
       subtotal += price * quantity
 
       return {
@@ -71,16 +65,13 @@ router.post("/", async (req, res) => {
       tax,
       finalPrice,
       status: "payment_required",
-      timeline: [
-        { status: "created", date: new Date() }
-      ]
+      timeline: [{ status: "created", date: new Date() }]
     })
 
-    /* 🔥 EMAIL (SAFE) */
     try {
       await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
-    } catch (e) {
-      console.warn("⚠️ Email failed (non-blocking)")
+    } catch {
+      console.warn("⚠️ Email failed")
     }
 
     res.json({ success: true, data: order })
@@ -105,28 +96,22 @@ router.get("/:id", async (req, res) => {
   res.json({ success: true, data: order })
 })
 
-/* ================= STATUS UPDATE ================= */
+/* ================= STATUS ================= */
 router.patch("/:id/status", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
     if (!order) return res.status(404).json({ message: "Order not found" })
 
     order.status = req.body.status
-
-    order.timeline.push({
-      status: req.body.status,
-      date: new Date()
-    })
+    order.timeline.push({ status: req.body.status, date: new Date() })
 
     await order.save()
-
     emitOrderUpdate(req, order)
 
-    /* 🔥 EMAIL (SAFE) */
     try {
       await sendOrderStatusEmail(order.email, order.status, order._id, order)
-    } catch (e) {
-      console.warn("⚠️ Email failed (non-blocking)")
+    } catch {
+      console.warn("⚠️ Email failed")
     }
 
     res.json({ success: true, data: order })
@@ -137,7 +122,7 @@ router.patch("/:id/status", async (req, res) => {
   }
 })
 
-/* ================= CHECKOUT ================= */
+/* ================= CHECKOUT (🔥 FIXED) ================= */
 router.patch("/:id/checkout", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -152,7 +137,6 @@ router.patch("/:id/checkout", async (req, res) => {
       { method: "POST" }
     )
 
-    // 🔥 SAFE RESPONSE HANDLING
     if (!response.ok) {
       const text = await response.text()
       console.error("❌ Square API ERROR:", text)
@@ -165,8 +149,17 @@ router.patch("/:id/checkout", async (req, res) => {
 
     const data = await response.json()
 
-    if (!data?.paymentUrl) {
-      console.error("❌ No payment URL returned:", data)
+    console.log("🔥 SQUARE RESPONSE:", data)
+
+    /* 🔥 FLEXIBLE URL HANDLING */
+    const paymentUrl =
+      data?.paymentUrl ||
+      data?.checkoutUrl ||
+      data?.url ||
+      data?.link
+
+    if (!paymentUrl) {
+      console.error("❌ No valid payment URL:", data)
 
       return res.status(500).json({
         message: "Payment failed",
@@ -174,26 +167,23 @@ router.patch("/:id/checkout", async (req, res) => {
       })
     }
 
-    /* ✅ SAVE ORDER */
-    order.paymentUrl = data.paymentUrl
+    order.paymentUrl = paymentUrl
     order.status = "payment_required"
 
     await order.save()
-
     emitOrderUpdate(req, order)
 
-    /* 🔥 EMAIL (SAFE) */
     try {
       await sendOrderStatusEmail(order.email, "payment_required", order._id, order)
-    } catch (e) {
-      console.warn("⚠️ Email failed (non-blocking)")
+    } catch {
+      console.warn("⚠️ Email failed")
     }
 
-    console.log("💳 PAYMENT LINK CREATED:", data.paymentUrl)
+    console.log("💳 PAYMENT LINK CREATED:", paymentUrl)
 
     res.json({
       success: true,
-      paymentUrl: data.paymentUrl,
+      paymentUrl,
       orderId: order._id.toString()
     })
 
@@ -210,21 +200,15 @@ router.post("/ship/:id", async (req, res) => {
     if (!order) return res.status(404).json({ message: "Order not found" })
 
     order.status = "shipped"
-
-    order.timeline.push({
-      status: "shipped",
-      date: new Date()
-    })
+    order.timeline.push({ status: "shipped", date: new Date() })
 
     await order.save()
-
     emitOrderUpdate(req, order)
 
-    /* 🔥 EMAIL (SAFE) */
     try {
       await sendOrderStatusEmail(order.email, "shipped", order._id, order)
-    } catch (e) {
-      console.warn("⚠️ Email failed (non-blocking)")
+    } catch {
+      console.warn("⚠️ Email failed")
     }
 
     res.json({ success: true, data: order })
