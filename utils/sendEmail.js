@@ -1,5 +1,8 @@
 import nodemailer from "nodemailer"
 
+/* 🔥 ONLY SAFE LOG HERE */
+console.log("📧 Email module loaded")
+
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
@@ -8,8 +11,14 @@ const transporter = nodemailer.createTransport({
   }
 })
 
-export const sendOrderStatusEmail = async (to, status, order, invoicePath = null) => {
+export const sendOrderStatusEmail = async (
+  to,
+  status,
+  order,
+  invoicePath = null
+) => {
   try {
+    /* 🔥 LOG INSIDE FUNCTION (CORRECT PLACE) */
     console.log("📧 EMAIL FUNCTION HIT:", { to, status })
 
     let subject = "SignaVi Update"
@@ -32,6 +41,7 @@ export const sendOrderStatusEmail = async (to, status, order, invoicePath = null
       html
     }
 
+    /* 📎 ATTACH INVOICE */
     if (invoicePath) {
       mailOptions.attachments = [
         {
@@ -41,11 +51,17 @@ export const sendOrderStatusEmail = async (to, status, order, invoicePath = null
       ]
     }
 
-    await transporter.sendMail(mailOptions)
+    /* 🔥 TEMP TEST: SEND TO YOURSELF */
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.EMAIL_USER,
+      subject: "TEST EMAIL",
+      text: "If you see this, email works"
+    })
 
-    console.log("📧 EMAIL SENT:", to)
+    console.log("📧 EMAIL SENT SUCCESSFULLY")
 
   } catch (err) {
-    console.error("❌ EMAIL ERROR:", err)
+    console.error("❌ EMAIL ERROR FULL:", err)
   }
 }

@@ -53,7 +53,7 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-/* ================= APPROVE / DENY ================= */
+/* ================= PATCH ================= */
 router.patch("/:id", async (req, res) => {
   try {
     console.log("🔥 PATCH BODY:", req.body)
@@ -79,7 +79,6 @@ router.patch("/:id", async (req, res) => {
         note: "Quote approved → creating order"
       })
 
-      /* 🔥 CREATE ORDER */
       const order = await Order.create({
         customerName: quote.customerName,
         email: quote.email,
