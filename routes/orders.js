@@ -3,6 +3,7 @@ import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import fetch from "node-fetch"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
+import { generateInvoice } from "../utils/generateInvoice.js"
 
 const router = express.Router()
 
@@ -12,10 +13,7 @@ console.log("🔥 ORDERS ROUTES ACTIVE")
 const emitOrderUpdate = (req, order) => {
   const io = req.app.get("io")
   if (io) {
-    io.emit("orderUpdated", {
-      orderId: order._id.toString(),
-      order
-    })
+    io.emit("jobUpdated", order) // 🔥 FIXED (matches frontend)
   }
 }
 
@@ -68,6 +66,10 @@ router.post("/", async (req, res) => {
       source: "store"
     })
 
+    /* 🔥 EMIT NEW ORDER */
+    const io = req.app.get("io")
+    if (io) io.emit("jobCreated", order)
+
     res.json({ success: true, data: order })
 
   } catch (err) {
@@ -76,7 +78,7 @@ router.post("/", async (req, res) => {
   }
 })
 
-/* ================= UPDATE (MAIN FIX) ================= */
+/* ================= UPDATE ================= */
 router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params
@@ -127,11 +129,27 @@ router.patch("/:id", async (req, res) => {
 
     emitOrderUpdate(req, order)
 
-    /* 🔥 FIXED EMAIL CALL */
+    /* ================= EMAIL ================= */
     try {
       await sendOrderStatusEmail(order.email, order.status, order)
     } catch (err) {
       console.warn("⚠️ Email failed:", err.message)
+    }
+
+    /* 🔥 AUTO INVOICE (OPTIONAL BUT POWERFUL) */
+    if (status === "shipped") {
+      try {
+        const invoicePath = await generateInvoice(order)
+
+        await sendOrderStatusEmail(
+          order.email,
+          "invoice",
+          order,
+          invoicePath
+        )
+      } catch (err) {
+        console.warn("⚠️ Invoice generation failed:", err.message)
+      }
     }
 
     res.json({ success: true, data: order })
@@ -172,7 +190,6 @@ router.patch("/:id/checkout", async (req, res) => {
     await order.save()
     emitOrderUpdate(req, order)
 
-    /* 🔥 FIXED EMAIL */
     await sendOrderStatusEmail(order.email, "payment_required", order)
 
     res.json({
@@ -183,6 +200,36 @@ router.patch("/:id/checkout", async (req, res) => {
 
   } catch (err) {
     console.error("❌ CHECKOUT ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= 🧾 INVOICE ROUTE ================= */
+router.get("/:id/invoice", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const invoicePath = await generateInvoice(order)
+
+    await sendOrderStatusEmail(
+      order.email,
+      "invoice",
+      order,
+      invoicePath
+    )
+
+    res.json({
+      success: true,
+      message: "Invoice sent",
+      file: invoicePath
+    })
+
+  } catch (err) {
+    console.error("❌ INVOICE ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -203,7 +250,6 @@ router.post("/ship/:id", async (req, res) => {
     await order.save()
     emitOrderUpdate(req, order)
 
-    /* 🔥 FIXED EMAIL */
     await sendOrderStatusEmail(order.email, "shipped", order)
 
     res.json({ success: true, data: order })

@@ -1,8 +1,14 @@
 import { Resend } from "resend"
+import fs from "fs"
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-export const sendOrderStatusEmail = async (to, status, order) => {
+export const sendOrderStatusEmail = async (
+  to,
+  status,
+  order,
+  invoicePath = null // 👈 NEW
+) => {
   try {
     if (!to) return
     if (!process.env.RESEND_API_KEY) {
@@ -25,7 +31,6 @@ export const sendOrderStatusEmail = async (to, status, order) => {
 
       html += `
         <p>Hello ${order.customerName || "Customer"},</p>
-
         <p>Your order is ready for payment.</p>
 
         <h3>Total: $${Number(order.finalPrice || 0).toFixed(2)}</h3>
@@ -57,7 +62,6 @@ export const sendOrderStatusEmail = async (to, status, order) => {
 
       html += `
         <p>Your order requires changes or was not approved.</p>
-
         <p>Please review notes in your account.</p>
       `
     }
@@ -77,16 +81,44 @@ export const sendOrderStatusEmail = async (to, status, order) => {
       `
     }
 
+    /* ================= 🧾 INVOICE (NEW) ================= */
+    else if (status === "invoice") {
+      subject = "🧾 Your Invoice"
+
+      html += `
+        <p>Hello ${order.customerName || "Customer"},</p>
+        <p>Your invoice is attached to this email.</p>
+      `
+    }
+
     html += `
       <p style="margin-top:20px;">Thank you,<br/>SignaVi Studio</p>
     `
 
-    const response = await resend.emails.send({
+    /* ================= EMAIL CONFIG ================= */
+    const emailData = {
       from: "SignaVi Studio <onboarding@resend.dev>",
       to,
       subject,
       html
-    })
+    }
+
+    /* ================= 📎 ATTACH INVOICE ================= */
+    if (invoicePath) {
+      try {
+        emailData.attachments = [
+          {
+            filename: `invoice-${order._id}.pdf`,
+            content: fs.readFileSync(invoicePath)
+          }
+        ]
+        console.log("📎 Invoice attached")
+      } catch (err) {
+        console.warn("⚠️ Failed to attach invoice:", err.message)
+      }
+    }
+
+    const response = await resend.emails.send(emailData)
 
     if (response?.error) {
       console.error("❌ RESEND ERROR:", response.error)

@@ -1,10 +1,16 @@
 import Order from "../models/Order.js"
+import { sendOrderStatusEmail } from "../utils/sendOrderStatusEmail.js"
 
 /* ================= CREATE ORDER ================= */
 export const createOrder = async (req, res) => {
   try {
     const order = new Order(req.body)
     await order.save()
+
+    /* 🔥 EMIT TO BOARD */
+    if (req.io) {
+      req.io.emit("jobCreated", order)
+    }
 
     res.status(201).json({
       success: true,
@@ -62,7 +68,7 @@ export const getOrderById = async (req, res) => {
   }
 }
 
-/* ================= UPDATE (THIS FIXES YOUR ERROR) ================= */
+/* ================= UPDATE (🔥 THIS IS THE KEY FIX) ================= */
 export const updateOrder = async (req, res) => {
   try {
     const updated = await Order.findByIdAndUpdate(
@@ -78,6 +84,20 @@ export const updateOrder = async (req, res) => {
       })
     }
 
+    /* ================= EMAIL TRIGGERS ================= */
+    if (updated.email && req.body.status) {
+      await sendOrderStatusEmail(
+        updated.email,
+        req.body.status,
+        updated
+      )
+    }
+
+    /* ================= SOCKET UPDATE ================= */
+    if (req.io) {
+      req.io.emit("jobUpdated", updated)
+    }
+
     res.json({
       success: true,
       data: updated
@@ -87,6 +107,38 @@ export const updateOrder = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to update order"
+    })
+  }
+}
+
+/* ================= SEND INVOICE ================= */
+export const sendInvoice = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    /* 📧 SEND INVOICE EMAIL */
+    await sendOrderStatusEmail(
+      order.email,
+      "invoice",
+      order
+    )
+
+    res.json({
+      success: true,
+      message: "Invoice sent"
+    })
+  } catch (err) {
+    console.error("❌ INVOICE ERROR:", err)
+    res.status(500).json({
+      success: false,
+      message: "Invoice failed"
     })
   }
 }
