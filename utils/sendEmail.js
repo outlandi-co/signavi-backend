@@ -1,6 +1,6 @@
 import sgMail from "@sendgrid/mail"
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+sgMail.setApiKey(process.env.SENDGRID_API_KEY) // ✅ FIXED
 
 export const sendOrderStatusEmail = async (
   to,
@@ -10,6 +10,7 @@ export const sendOrderStatusEmail = async (
 ) => {
   try {
     console.log("📧 EMAIL FUNCTION HIT:", { to, status })
+    console.log("📨 SENDING FROM:", process.env.EMAIL_FROM)
 
     let subject = "SignaVi Update"
     let html = `<h2>SignaVi Studio</h2>`
@@ -17,6 +18,7 @@ export const sendOrderStatusEmail = async (
     if (status === "payment_required") {
       subject = "💳 Payment Required"
       html += `
+        <p>Hello ${order.customerName || "Customer"},</p>
         <p>Your order is ready for payment.</p>
         <p><b>Total:</b> $${order.finalPrice || 0}</p>
       `
@@ -34,25 +36,9 @@ export const sendOrderStatusEmail = async (
 
     const msg = {
       to,
-      from: process.env.EMAIL_FROM,
+      from: `SignaVi Studio <${process.env.EMAIL_FROM}>`, // 🔥 branding + domain
       subject,
       html
-    }
-
-    /* 📎 ATTACH INVOICE (optional) */
-    if (invoicePath) {
-      const fs = await import("fs")
-
-      const fileContent = fs.readFileSync(invoicePath).toString("base64")
-
-      msg.attachments = [
-        {
-          content: fileContent,
-          filename: "invoice.pdf",
-          type: "application/pdf",
-          disposition: "attachment"
-        }
-      ]
     }
 
     await sgMail.send(msg)
