@@ -1,76 +1,42 @@
 import express from "express"
 import Quote from "../models/Quote.js"
+import Order from "../models/Order.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
+
+console.log("🔥 QUOTES ROUTE LOADED")
 
 /* ================= GET ALL ================= */
 router.get("/", async (req, res) => {
   try {
     const quotes = await Quote.find().sort({ createdAt: -1 })
-
-    return res.json({
-      success: true,
-      data: quotes
-    })
-  } catch (error) {
-    console.error("❌ GET ALL QUOTES ERROR:", error)
-    return res.status(500).json({ message: "Server error" })
+    res.json({ success: true, data: quotes })
+  } catch (err) {
+    console.error("❌ GET QUOTES ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 
 /* ================= CREATE ================= */
 router.post("/", async (req, res) => {
   try {
-    console.log("📤 SENDING QUOTE JSON:", req.body)
-
-    const {
-      customerName,
-      email,
-      quantity,
-      price
-    } = req.body
-
-    /* 🔥 BASIC VALIDATION */
-    if (!customerName || !email) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields"
-      })
-    }
-
-    const quote = new Quote({
+    const quote = await Quote.create({
       ...req.body,
-      quantity: Number(quantity) || 0,
-      price: Number(price) || 0,
-      finalPrice: Number(price) || 0,
-
+      quantity: Number(req.body.quantity) || 0,
+      price: Number(req.body.price) || 0,
+      finalPrice: Number(req.body.price) || 0,
       status: "quotes",
       approvalStatus: "pending",
-
       timeline: [
-        {
-          status: "created",
-          note: "Quote created"
-        }
+        { status: "created", note: "Quote created" }
       ]
     })
 
-    await quote.save()
-
-    console.log("✅ Quote created:", quote._id)
-
-    return res.status(201).json({
-      success: true,
-      data: quote
-    })
-  } catch (error) {
-    console.error("❌ CREATE QUOTE ERROR:", error)
-
-    return res.status(500).json({
-      message: "Create failed",
-      error: error.message
-    })
+    res.status(201).json({ success: true, data: quote })
+  } catch (err) {
+    console.error("❌ CREATE QUOTE ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 
@@ -78,55 +44,30 @@ router.post("/", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const quote = await Quote.findById(req.params.id)
+    if (!quote) return res.status(404).json({ message: "Quote not found" })
 
-    if (!quote) {
-      return res.status(404).json({ message: "Quote not found" })
-    }
-
-    return res.json({ success: true, data: quote })
-  } catch (error) {
-    console.error("❌ GET QUOTE ERROR:", error)
-    return res.status(500).json({ message: "Server error" })
+    res.json({ success: true, data: quote })
+  } catch (err) {
+    console.error("❌ GET ONE ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 
-/* ================= UPDATE / APPROVE ================= */
+/* ================= APPROVE / DENY ================= */
 router.patch("/:id", async (req, res) => {
   try {
     console.log("🔥 PATCH BODY:", req.body)
 
     const quote = await Quote.findById(req.params.id)
-
     if (!quote) {
       return res.status(404).json({ message: "Quote not found" })
     }
 
-    /* ================= SAFE TIMELINE ================= */
     if (!Array.isArray(quote.timeline)) {
       quote.timeline = []
     }
 
     const prevApproval = quote.approvalStatus
-
-    /* ================= SAFE UPDATES ================= */
-    const allowedFields = [
-      "customerName",
-      "email",
-      "quantity",
-      "price",
-      "finalPrice",
-      "notes",
-      "adminNotes"
-    ]
-
-    allowedFields.forEach(field => {
-      if (req.body[field] !== undefined) {
-        quote[field] =
-          field === "price" || field === "finalPrice" || field === "quantity"
-            ? Number(req.body[field])
-            : req.body[field]
-      }
-    })
 
     /* ================= APPROVE ================= */
     if (req.body.approvalStatus === "approved") {
@@ -135,20 +76,36 @@ router.patch("/:id", async (req, res) => {
 
       quote.timeline.push({
         status: "approved",
-        note: "Quote approved — awaiting payment"
+        note: "Quote approved → creating order"
       })
 
+      /* 🔥 CREATE ORDER */
+      const order = await Order.create({
+        customerName: quote.customerName,
+        email: quote.email,
+        items: [
+          {
+            name: quote.projectType || "Custom Order",
+            quantity: quote.quantity || 1,
+            price: quote.price || 0
+          }
+        ],
+        subtotal: quote.price || 0,
+        tax: (quote.price || 0) * 0.0825,
+        finalPrice: (quote.price || 0) * 1.0825,
+        status: "payment_required",
+        source: "quote"
+      })
+
+      console.log("🔥 ORDER CREATED:", order._id)
+
       if (prevApproval !== "approved") {
-        try {
-          await sendOrderStatusEmail(
-            quote.email,
-            "payment_required",
-            quote
-          )
-          console.log("📧 Approval email sent")
-        } catch (emailErr) {
-          console.error("❌ EMAIL ERROR:", emailErr)
-        }
+        await sendOrderStatusEmail(
+          order.email,
+          "payment_required",
+          order
+        )
+        console.log("📧 EMAIL SENT FROM APPROVAL")
       }
     }
 
@@ -156,45 +113,30 @@ router.patch("/:id", async (req, res) => {
     if (req.body.approvalStatus === "denied") {
       quote.approvalStatus = "denied"
       quote.status = "denied"
-      quote.denialReason = req.body.denialReason || ""
 
       quote.timeline.push({
         status: "denied",
-        note: quote.denialReason || "Quote denied"
+        note: "Quote denied"
       })
 
       if (prevApproval !== "denied") {
-        try {
-          await sendOrderStatusEmail(
-            quote.email,
-            "denied",
-            quote
-          )
-          console.log("📧 Denial email sent")
-        } catch (emailErr) {
-          console.error("❌ EMAIL ERROR:", emailErr)
-        }
+        await sendOrderStatusEmail(
+          quote.email,
+          "denied",
+          quote
+        )
+        console.log("📧 DENIAL EMAIL SENT")
       }
     }
 
     await quote.save()
 
-    console.log("✅ Quote updated:", quote._id)
+    res.json({ success: true, data: quote })
 
-    return res.json({
-      success: true,
-      data: quote
-    })
-  } catch (error) {
-    console.error("❌ UPDATE ERROR:", error)
-
-    return res.status(500).json({
-      message: "Update failed",
-      error: error.message
-    })
+  } catch (err) {
+    console.error("❌ PATCH ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
-
-console.log("🔥 QUOTES ROUTE LOADED")
 
 export default router

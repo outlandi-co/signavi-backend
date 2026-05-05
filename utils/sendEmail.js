@@ -1,5 +1,4 @@
 import nodemailer from "nodemailer"
-import fs from "fs"
 
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -9,24 +8,21 @@ const transporter = nodemailer.createTransport({
   }
 })
 
-export const sendOrderStatusEmail = async (
-  to,
-  status,
-  order,
-  invoicePath = null
-) => {
+export const sendOrderStatusEmail = async (to, status, order, invoicePath = null) => {
   try {
+    console.log("📧 EMAIL FUNCTION HIT:", { to, status })
+
     let subject = "SignaVi Update"
     let html = `<h2>SignaVi Studio</h2>`
-
-    if (status === "invoice") {
-      subject = "🧾 Invoice"
-      html += `<p>Your invoice is attached.</p>`
-    }
 
     if (status === "payment_required") {
       subject = "💳 Payment Required"
       html += `<p>Your order is ready for payment.</p>`
+    }
+
+    if (status === "invoice") {
+      subject = "🧾 Invoice"
+      html += `<p>Your invoice is attached.</p>`
     }
 
     const mailOptions = {
