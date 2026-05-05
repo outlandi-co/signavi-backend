@@ -67,8 +67,6 @@ router.patch("/:id", async (req, res) => {
       quote.timeline = []
     }
 
-    const prevApproval = quote.approvalStatus
-
     /* ================= APPROVE ================= */
     if (req.body.approvalStatus === "approved") {
       quote.approvalStatus = "approved"
@@ -98,14 +96,14 @@ router.patch("/:id", async (req, res) => {
 
       console.log("🔥 ORDER CREATED:", order._id)
 
-      if (prevApproval !== "approved") {
-        await sendOrderStatusEmail(
-          order.email,
-          "payment_required",
-          order
-        )
-        console.log("📧 EMAIL SENT FROM APPROVAL")
-      }
+      /* 🔥 ALWAYS SEND EMAIL (NO CONDITION BLOCK) */
+      await sendOrderStatusEmail(
+        order.email,
+        "payment_required",
+        order
+      )
+
+      console.log("📧 EMAIL TRIGGERED")
     }
 
     /* ================= DENY ================= */
@@ -118,14 +116,14 @@ router.patch("/:id", async (req, res) => {
         note: "Quote denied"
       })
 
-      if (prevApproval !== "denied") {
-        await sendOrderStatusEmail(
-          quote.email,
-          "denied",
-          quote
-        )
-        console.log("📧 DENIAL EMAIL SENT")
-      }
+      /* 🔥 ALWAYS SEND EMAIL */
+      await sendOrderStatusEmail(
+        quote.email,
+        "denied",
+        quote
+      )
+
+      console.log("📧 DENIAL EMAIL TRIGGERED")
     }
 
     await quote.save()

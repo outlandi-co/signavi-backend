@@ -1,15 +1,6 @@
-import nodemailer from "nodemailer"
+import sgMail from "@sendgrid/mail"
 
-/* 🔥 ONLY SAFE LOG HERE */
-console.log("📧 Email module loaded")
-
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-})
+sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 
 export const sendOrderStatusEmail = async (
   to,
@@ -18,7 +9,6 @@ export const sendOrderStatusEmail = async (
   invoicePath = null
 ) => {
   try {
-    /* 🔥 LOG INSIDE FUNCTION (CORRECT PLACE) */
     console.log("📧 EMAIL FUNCTION HIT:", { to, status })
 
     let subject = "SignaVi Update"
@@ -26,7 +16,15 @@ export const sendOrderStatusEmail = async (
 
     if (status === "payment_required") {
       subject = "💳 Payment Required"
-      html += `<p>Your order is ready for payment.</p>`
+      html += `
+        <p>Your order is ready for payment.</p>
+        <p><b>Total:</b> $${order.finalPrice || 0}</p>
+      `
+    }
+
+    if (status === "denied") {
+      subject = "❌ Order Update"
+      html += `<p>Your order was denied or needs revision.</p>`
     }
 
     if (status === "invoice") {
@@ -34,34 +32,34 @@ export const sendOrderStatusEmail = async (
       html += `<p>Your invoice is attached.</p>`
     }
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    const msg = {
       to,
+      from: process.env.EMAIL_FROM,
       subject,
       html
     }
 
-    /* 📎 ATTACH INVOICE */
+    /* 📎 ATTACH INVOICE (optional) */
     if (invoicePath) {
-      mailOptions.attachments = [
+      const fs = await import("fs")
+
+      const fileContent = fs.readFileSync(invoicePath).toString("base64")
+
+      msg.attachments = [
         {
+          content: fileContent,
           filename: "invoice.pdf",
-          path: invoicePath
+          type: "application/pdf",
+          disposition: "attachment"
         }
       ]
     }
 
-    /* 🔥 TEMP TEST: SEND TO YOURSELF */
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
-      to: process.env.EMAIL_USER,
-      subject: "TEST EMAIL",
-      text: "If you see this, email works"
-    })
+    await sgMail.send(msg)
 
     console.log("📧 EMAIL SENT SUCCESSFULLY")
 
   } catch (err) {
-    console.error("❌ EMAIL ERROR FULL:", err)
+    console.error("❌ SENDGRID ERROR:", err.response?.body || err.message)
   }
 }
