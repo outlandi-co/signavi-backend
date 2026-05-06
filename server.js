@@ -27,11 +27,9 @@ import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
 import shippingRoutes from "./routes/shipping.js"
-
-// 🔥 NEW ADMIN ROUTES
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 
-// 🔥 WEBHOOK
+/* ================= WEBHOOK ================= */
 import squareWebhook from "./routes/squareWebhook.js"
 
 /* ================= APP ================= */
@@ -46,19 +44,21 @@ const allowedOrigins = [
   "http://localhost:5173"
 ]
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true)
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true)
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true)
-    } else {
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true)
+      }
+
       console.warn("❌ CORS BLOCKED:", origin)
       return callback(new Error("Not allowed by CORS"))
-    }
-  },
-  credentials: true
-}))
+    },
+    credentials: true
+  })
+)
 
 /* =========================================================
    🔥 WEBHOOK MUST COME BEFORE JSON PARSER
@@ -69,10 +69,12 @@ app.use("/api/square", squareWebhook)
 /* =========================================================
    🔥 SAFE JSON PARSER
 ========================================================= */
-app.use(express.json({
-  strict: true,
-  limit: "2mb"
-}))
+app.use(
+  express.json({
+    strict: true,
+    limit: "2mb"
+  })
+)
 
 /* 🔥 HANDLE BAD JSON */
 app.use((err, req, res, next) => {
@@ -84,16 +86,23 @@ app.use((err, req, res, next) => {
       message: "Invalid JSON format"
     })
   }
+
   next()
 })
 
 /* ================= MIDDLEWARE ================= */
 app.use(cookieParser())
 
-/* =========================================================
-   🔥 STATIC FILES
-========================================================= */
+/* ================= STATIC FILES ================= */
 app.use("/uploads", express.static(path.join(__dirname, "uploads")))
+
+/* ================= HEALTH CHECK ================= */
+app.get("/api/ping", (req, res) => {
+  res.json({
+    success: true,
+    message: "SignaVi backend is running"
+  })
+})
 
 /* ================= ROUTES ================= */
 app.use("/api/products", productRoutes)
@@ -109,8 +118,9 @@ app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
 
-// 🔥 ADMIN EMAIL ROUTE (NEW)
+/* ================= ADMIN ROUTES ================= */
 app.use("/api/admin-email", adminEmailRoutes)
+console.log("📧 ADMIN EMAIL ROUTE MOUNTED: /api/admin-email/send-email")
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
@@ -125,9 +135,15 @@ io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
 })
 
-/* =========================================================
-   🔥 GLOBAL ERROR HANDLER
-========================================================= */
+/* ================= 404 HANDLER ================= */
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Route not found: ${req.method} ${req.originalUrl}`
+  })
+})
+
+/* ================= GLOBAL ERROR HANDLER ================= */
 app.use((err, req, res, next) => {
   console.error("❌ GLOBAL ERROR:", err)
 
@@ -138,7 +154,8 @@ app.use((err, req, res, next) => {
 })
 
 /* ================= START ================= */
-mongoose.connect(process.env.MONGO_URI)
+mongoose
+  .connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ Mongo connected")
 
@@ -148,4 +165,4 @@ mongoose.connect(process.env.MONGO_URI)
       console.log(`🚀 Server running on ${PORT}`)
     })
   })
-  .catch(err => console.error("❌ DB ERROR:", err))
+  .catch((err) => console.error("❌ DB ERROR:", err))
