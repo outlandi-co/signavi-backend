@@ -159,7 +159,7 @@ router.post("/change-password", requireAuth, async (req, res) => {
   }
 })
 
-/* ================= FORGOT PASSWORD (🔥 FIXED) ================= */
+/* ================= FORGOT PASSWORD (FIXED EMAIL) ================= */
 router.post("/forgot-password", async (req, res) => {
   try {
     console.log("🔥 FORGOT PASSWORD HIT:", req.body.email)
@@ -173,35 +173,68 @@ router.post("/forgot-password", async (req, res) => {
     const user = await User.findOne({ email })
 
     if (!user) {
-      return res.json({ message: "If that email exists, a reset link was sent." })
+      return res.json({
+        message: "If that email exists, a reset link was sent."
+      })
     }
 
+    /* 🔐 CREATE TOKEN */
     const rawToken = crypto.randomBytes(32).toString("hex")
-    const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex")
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(rawToken)
+      .digest("hex")
 
     user.resetPasswordToken = hashedToken
-    user.resetPasswordExpire = Date.now() + 1000 * 60 * 15
+    user.resetPasswordExpire = Date.now() + 1000 * 60 * 15 // 15 min
 
     await user.save()
 
-    const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173"
+    /* 🔥 BUILD RESET LINK */
+    const CLIENT_URL =
+      process.env.CLIENT_URL || "http://localhost:5173"
+
     const resetUrl = `${CLIENT_URL}/reset-password/${rawToken}`
 
     console.log("🔐 RESET LINK:", resetUrl)
 
-    await sendOrderStatusEmail(
-      user.email,
-      "reset_password",
-      rawToken,
-      {
-        resetUrl,
-        customerName: user.name
-      }
-    )
+await resend.emails.send({
+  from: "SignaVi Studio <onboarding@resend.dev>", // keep this for now
+  to: user.email,
+  subject: "Reset your SignaVi Studio password",
+  html: `
+    <div style="font-family: Arial, sans-serif; color: #111;">
+      
+      <h2>Reset Your Password</h2>
 
+      <p>Hello ${user.name || "Customer"},</p>
+
+      <p>You requested a password reset.</p>
+
+      <p>
+        Click the link below to reset your password:
+      </p>
+
+      <p>
+        <a href="${resetUrl}" target="_blank">
+          ${resetUrl}
+        </a>
+      </p>
+
+      <br/>
+
+      <p style="font-size: 12px; color: #666;">
+        This link expires in 15 minutes.
+      </p>
+
+    </div>
+  `
+})
     console.log("📧 RESET EMAIL SENT:", user.email)
 
-    res.json({ message: "If that email exists, a reset link was sent." })
+    res.json({
+      message: "If that email exists, a reset link was sent."
+    })
 
   } catch (err) {
     console.error("❌ FORGOT PASSWORD ERROR:", err)
