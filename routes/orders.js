@@ -31,7 +31,9 @@ router.get("/", async (req, res) => {
 /* ================= GET CUSTOMER ORDERS ================= */
 router.get("/my-orders", async (req, res) => {
   try {
-    const { email } = req.query
+    const email = String(req.query.email || "").trim().toLowerCase()
+
+    console.log("📧 MY ORDERS EMAIL:", email)
 
     if (!email) {
       return res.status(400).json({
@@ -41,8 +43,10 @@ router.get("/my-orders", async (req, res) => {
     }
 
     const orders = await Order.find({
-      email: String(email).toLowerCase()
+      email: { $regex: `^${email}$`, $options: "i" }
     }).sort({ createdAt: -1 })
+
+    console.log("📦 MY ORDERS FOUND:", orders.length)
 
     res.json({
       success: true,
@@ -54,7 +58,6 @@ router.get("/my-orders", async (req, res) => {
     res.status(500).json({ message: err.message })
   }
 })
-
 /* ================= CREATE ================= */
 router.post("/", async (req, res) => {
   try {
@@ -87,16 +90,16 @@ router.post("/", async (req, res) => {
     const tax = subtotal * 0.0825
     const finalPrice = subtotal + tax
 
-    const order = await Order.create({
-      email: email?.toLowerCase(),
-      items: safeItems,
-      subtotal,
-      tax,
-      finalPrice,
-      status: "payment_required",
-      source: "store"
-    })
-
+const order = await Order.create({
+  customerName: req.body.customerName || "Customer",
+  email: String(email || "").trim().toLowerCase(),
+  items: safeItems,
+  subtotal,
+  tax,
+  finalPrice,
+  status: "payment_required",
+  source: "store"
+})
     const io = req.app.get("io")
     if (io) io.emit("jobCreated", order)
 
