@@ -2,13 +2,19 @@ import express from "express"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import crypto from "crypto"
-import { Resend } from "resend"
+import sgMail from "@sendgrid/mail"
 
 import User from "../models/User.js"
 import { requireAuth } from "../middleware/requireAuth.js"
 
 const router = express.Router()
-const resend = new Resend(process.env.RESEND_API_KEY)
+
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+  console.log("📧 SendGrid loaded")
+} else {
+  console.warn("⚠️ SENDGRID_API_KEY missing")
+}
 
 console.log("🔐 AUTH ROUTES LOADED")
 
@@ -30,7 +36,6 @@ router.post("/register", async (req, res) => {
     const cleanEmail = email.trim().toLowerCase()
 
     const existingUser = await User.findOne({ email: cleanEmail })
-
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" })
     }
@@ -77,13 +82,11 @@ router.post("/login", async (req, res) => {
     const cleanEmail = email.trim().toLowerCase()
 
     const user = await User.findOne({ email: cleanEmail })
-
     if (!user) {
       return res.status(400).json({ message: "User not found" })
     }
 
     const validPassword = await bcrypt.compare(password, user.password)
-
     if (!validPassword) {
       return res.status(400).json({ message: "Invalid password" })
     }
@@ -179,6 +182,11 @@ router.post("/forgot-password", async (req, res) => {
       return res.status(400).json({ message: "Email required" })
     }
 
+    if (!process.env.SENDGRID_API_KEY) {
+      console.error("❌ Missing SENDGRID_API_KEY")
+      return res.status(500).json({ message: "Email service not configured" })
+    }
+
     const cleanEmail = email.trim().toLowerCase()
 
     const user = await User.findOne({ email: cleanEmail })
@@ -206,9 +214,12 @@ router.post("/forgot-password", async (req, res) => {
 
     console.log("🔐 RESET LINK:", resetUrl)
 
-    await resend.emails.send({
-      from: "SignaVi Studio <onboarding@resend.dev>",
+    const fromEmail =
+      process.env.SENDGRID_FROM_EMAIL || "signavistudio@gmail.com"
+
+    await sgMail.send({
       to: user.email,
+      from: fromEmail,
       subject: "Reset your SignaVi Studio password",
 
       text: `
@@ -249,7 +260,12 @@ This link expires in 15 minutes.
     })
   } catch (err) {
     console.error("❌ FORGOT PASSWORD ERROR:", err)
-    res.status(500).json({ message: "Failed to send reset email" })
+    console.error("❌ SENDGRID ERROR:", err?.response?.body || err?.message)
+
+    res.status(500).json({
+      message: "Failed to send reset email",
+      error: err?.message
+    })
   }
 })
 
