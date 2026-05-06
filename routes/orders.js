@@ -13,7 +13,7 @@ console.log("🔥 ORDERS ROUTES ACTIVE")
 const emitOrderUpdate = (req, order) => {
   const io = req.app.get("io")
   if (io) {
-    io.emit("jobUpdated", order) // 🔥 FIXED (matches frontend)
+    io.emit("jobUpdated", order)
   }
 }
 
@@ -24,6 +24,33 @@ router.get("/", async (req, res) => {
     res.json({ success: true, data: orders })
   } catch (err) {
     console.error("❌ GET ORDERS ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= GET CUSTOMER ORDERS ================= */
+router.get("/my-orders", async (req, res) => {
+  try {
+    const { email } = req.query
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required"
+      })
+    }
+
+    const orders = await Order.find({
+      email: String(email).toLowerCase()
+    }).sort({ createdAt: -1 })
+
+    res.json({
+      success: true,
+      data: orders
+    })
+
+  } catch (err) {
+    console.error("❌ MY ORDERS ERROR:", err)
     res.status(500).json({ message: err.message })
   }
 })
@@ -52,12 +79,16 @@ router.post("/", async (req, res) => {
       }
     })
 
-    const subtotal = safeItems.reduce((sum, i) => sum + (i.price * i.quantity), 0)
+    const subtotal = safeItems.reduce(
+      (sum, i) => sum + (i.price * i.quantity),
+      0
+    )
+
     const tax = subtotal * 0.0825
     const finalPrice = subtotal + tax
 
     const order = await Order.create({
-      email,
+      email: email?.toLowerCase(),
       items: safeItems,
       subtotal,
       tax,
@@ -66,7 +97,6 @@ router.post("/", async (req, res) => {
       source: "store"
     })
 
-    /* 🔥 EMIT NEW ORDER */
     const io = req.app.get("io")
     if (io) io.emit("jobCreated", order)
 
@@ -93,7 +123,6 @@ router.patch("/:id", async (req, res) => {
 
     if (!order.timeline) order.timeline = []
 
-    /* ================= PRICE ================= */
     if (finalPrice !== undefined) {
       const parsed = Number(finalPrice)
       if (!isNaN(parsed) && parsed > 0) {
@@ -101,7 +130,6 @@ router.patch("/:id", async (req, res) => {
       }
     }
 
-    /* ================= STATUS ================= */
     if (status) {
       const validStatuses = [
         "payment_required",
@@ -129,14 +157,12 @@ router.patch("/:id", async (req, res) => {
 
     emitOrderUpdate(req, order)
 
-    /* ================= EMAIL ================= */
     try {
       await sendOrderStatusEmail(order.email, order.status, order)
     } catch (err) {
       console.warn("⚠️ Email failed:", err.message)
     }
 
-    /* 🔥 AUTO INVOICE (OPTIONAL BUT POWERFUL) */
     if (status === "shipped") {
       try {
         const invoicePath = await generateInvoice(order)
@@ -204,7 +230,7 @@ router.patch("/:id/checkout", async (req, res) => {
   }
 })
 
-/* ================= 🧾 INVOICE ROUTE ================= */
+/* ================= INVOICE ROUTE ================= */
 router.get("/:id/invoice", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
