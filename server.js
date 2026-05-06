@@ -28,6 +28,9 @@ import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
 import shippingRoutes from "./routes/shipping.js"
 
+// 🔥 NEW ADMIN ROUTES
+import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
+
 // 🔥 WEBHOOK
 import squareWebhook from "./routes/squareWebhook.js"
 
@@ -88,7 +91,7 @@ app.use((err, req, res, next) => {
 app.use(cookieParser())
 
 /* =========================================================
-   🔥 STATIC FILES (THIS FIXES YOUR ISSUE)
+   🔥 STATIC FILES
 ========================================================= */
 app.use("/uploads", express.static(path.join(__dirname, "uploads")))
 
@@ -105,6 +108,9 @@ app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
+
+// 🔥 ADMIN EMAIL ROUTE (NEW)
+app.use("/api/admin-email", adminEmailRoutes)
 
 /* ================= SOCKET ================= */
 const io = new Server(server, {
