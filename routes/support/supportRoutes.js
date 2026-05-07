@@ -65,6 +65,8 @@ router.post("/", async (req, res) => {
       {
         type: "new-ticket",
 
+        sender: "customer",
+
         ticketId: ticket._id,
 
         message:
@@ -245,6 +247,8 @@ router.post("/:id/reply", async (req, res) => {
       "support:new-message",
       {
         type: "reply",
+
+        sender,
 
         ticketId: ticket._id,
 
