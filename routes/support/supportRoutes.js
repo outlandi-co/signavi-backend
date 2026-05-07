@@ -57,8 +57,8 @@ router.post("/", async (req, res) => {
     const io = req.app.get("io")
 
     console.log(
-  "🚨 EMITTING SOCKET EVENT"
-)
+      "🚨 NEW TICKET SOCKET EVENT"
+    )
 
     io.emit(
       "support:new-message",
@@ -236,6 +236,10 @@ router.post("/:id/reply", async (req, res) => {
     /* ================= SOCKET EMIT ================= */
 
     const io = req.app.get("io")
+
+    console.log(
+      "🚨 EMITTING SOCKET EVENT"
+    )
 
     io.emit(
       "support:new-message",
