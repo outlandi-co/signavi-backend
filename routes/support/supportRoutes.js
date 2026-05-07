@@ -63,9 +63,9 @@ router.post("/", async (req, res) => {
     io.emit(
       "support:new-message",
       {
-        type: "new-ticket",
-
         sender: "customer",
+
+        type: "new-ticket",
 
         ticketId: ticket._id,
 
@@ -206,10 +206,14 @@ router.post("/:id/reply", async (req, res) => {
       })
     }
 
+    const cleanSender =
+      sender === "customer"
+        ? "customer"
+        : "admin"
+
     ticket.replies.push({
 
-      sender:
-        sender || "admin",
+      sender: cleanSender,
 
       message
     })
@@ -217,7 +221,7 @@ router.post("/:id/reply", async (req, res) => {
     /* ================= AUTO STATUS ================= */
 
     if (
-      sender === "customer"
+      cleanSender === "customer"
     ) {
 
       ticket.status = "open"
@@ -246,16 +250,16 @@ router.post("/:id/reply", async (req, res) => {
     io.emit(
       "support:new-message",
       {
-        type: "reply",
+        sender: cleanSender,
 
-        sender,
+        type: "reply",
 
         ticketId: ticket._id,
 
         message:
-          sender === "customer"
+          cleanSender === "customer"
             ? `${ticket.customerName} replied`
-            : `Admin replied to support ticket`
+            : "Admin replied"
       }
     )
 
