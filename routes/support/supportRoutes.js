@@ -150,14 +150,17 @@ router.get("/:id", async (req, res) => {
   }
 })
 
+
 /* ================= REPLY ================= */
 
 router.post("/:id/reply", async (req, res) => {
 
   try {
 
-    const { message } =
-      req.body || {}
+    const {
+      message,
+      sender
+    } = req.body || {}
 
     if (!message?.trim()) {
 
@@ -184,12 +187,101 @@ router.post("/:id/reply", async (req, res) => {
 
     ticket.replies.push({
 
-      sender: "admin",
+      sender:
+        sender || "admin",
 
       message
     })
 
-    /* 🔥 AUTO MOVE TO PENDING */
+/* ================= REPLY ================= */
+
+router.post("/:id/reply", async (req, res) => {
+
+  try {
+
+    const {
+      message,
+      sender
+    } = req.body || {}
+
+    if (!message?.trim()) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Reply message required"
+      })
+    }
+
+    const ticket =
+      await SupportTicket.findById(
+        req.params.id
+      )
+
+    if (!ticket) {
+
+      return res.status(404).json({
+        success: false,
+        message:
+          "Ticket not found"
+      })
+    }
+
+    ticket.replies.push({
+
+      sender:
+        sender || "admin",
+
+      message
+    })
+
+    /* ================= AUTO STATUS ================= */
+
+    if (
+      sender === "customer"
+    ) {
+
+      ticket.status = "open"
+
+    } else {
+
+      if (
+        ticket.status === "open"
+      ) {
+
+        ticket.status =
+          "pending"
+      }
+    }
+
+    await ticket.save()
+
+    console.log(
+      "📨 SUPPORT REPLY:",
+      ticket._id
+    )
+
+    res.json({
+      success: true,
+      data: ticket
+    })
+
+  } catch (err) {
+
+    console.error(
+      "❌ REPLY ERROR:",
+      err
+    )
+
+    res.status(500).json({
+      success: false,
+      message:
+        "Reply failed"
+    })
+  }
+})
+
+/* 🔥 AUTO MOVE TO PENDING */
 
     if (
       ticket.status === "open"
