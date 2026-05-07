@@ -207,8 +207,31 @@ console.log(
 /* ================= SOCKET ================= */
 
 const io = new Server(server, {
+
   cors: {
-    origin: allowedOrigins
+
+    origin: [
+
+      "https://signavistudio.store",
+
+      "http://localhost:5173"
+    ],
+
+    methods: [
+      "GET",
+      "POST"
+    ],
+
+    credentials: true,
+
+methods: [
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS"
+]
   }
 })
 
