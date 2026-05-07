@@ -52,6 +52,22 @@ router.post("/", async (req, res) => {
         status: "open"
       })
 
+    /* ================= SOCKET EMIT ================= */
+
+    const io = req.app.get("io")
+
+    io.emit(
+      "support:new-message",
+      {
+        type: "new-ticket",
+
+        ticketId: ticket._id,
+
+        message:
+          `New support ticket from ${ticket.customerName}`
+      }
+    )
+
     console.log(
       "🛟 SUPPORT TICKET CREATED:",
       ticket._id
@@ -150,49 +166,6 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-
-/* ================= REPLY ================= */
-
-router.post("/:id/reply", async (req, res) => {
-
-  try {
-
-    const {
-      message,
-      sender
-    } = req.body || {}
-
-    if (!message?.trim()) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Reply message required"
-      })
-    }
-
-    const ticket =
-      await SupportTicket.findById(
-        req.params.id
-      )
-
-    if (!ticket) {
-
-      return res.status(404).json({
-        success: false,
-        message:
-          "Ticket not found"
-      })
-    }
-
-    ticket.replies.push({
-
-      sender:
-        sender || "admin",
-
-      message
-    })
-
 /* ================= REPLY ================= */
 
 router.post("/:id/reply", async (req, res) => {
@@ -256,42 +229,23 @@ router.post("/:id/reply", async (req, res) => {
 
     await ticket.save()
 
-    console.log(
-      "📨 SUPPORT REPLY:",
-      ticket._id
+    /* ================= SOCKET EMIT ================= */
+
+    const io = req.app.get("io")
+
+    io.emit(
+      "support:new-message",
+      {
+        type: "reply",
+
+        ticketId: ticket._id,
+
+        message:
+          sender === "customer"
+            ? `${ticket.customerName} replied`
+            : `Admin replied to support ticket`
+      }
     )
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
-  } catch (err) {
-
-    console.error(
-      "❌ REPLY ERROR:",
-      err
-    )
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Reply failed"
-    })
-  }
-})
-
-/* 🔥 AUTO MOVE TO PENDING */
-
-    if (
-      ticket.status === "open"
-    ) {
-
-      ticket.status =
-        "pending"
-    }
-
-    await ticket.save()
 
     console.log(
       "📨 SUPPORT REPLY:",
