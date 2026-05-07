@@ -56,6 +56,10 @@ router.post("/", async (req, res) => {
 
     const io = req.app.get("io")
 
+    console.log(
+  "🚨 EMITTING SOCKET EVENT"
+)
+
     io.emit(
       "support:new-message",
       {
