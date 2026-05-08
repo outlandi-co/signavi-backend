@@ -1,180 +1,65 @@
-import express from "express"
-import SupportTicket from "../../models/SupportTicket.js"
+import express from "express";
+import SupportTicket from "../../models/SupportTicket.js";
 
-const router = express.Router()
+const router = express.Router();
 
 /* ================= CREATE TICKET ================= */
 
 router.post("/", async (req, res) => {
-
   try {
+    const { customerName, email, subject, message } = req.body;
 
-    const {
+    const ticket = await SupportTicket.create({
       customerName,
       email,
       subject,
-      message
-    } = req.body
+      message,
+      status: "open",
+      replies: []
+    });
 
-    const ticket =
-      await SupportTicket.create({
+    const io = req.app.get("io");
+    io.to("admin").emit("support:new-message", {
+      sender: "customer",
+      ticketId: ticket._id,
+      message: `${customerName} created ticket: ${subject}`
+    });
 
-        customerName,
-
-        email,
-
-        subject,
-
-        message,
-
-        status: "open",
-
-        replies: []
-      })
-
-    const io =
-      req.app.get("io")
-
-    io.emit(
-      "support:new-message",
-      {
-        sender: "customer",
-
-        ticketId: ticket._id,
-
-        message:
-          `${customerName} created ticket`
-      }
-    )
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
+    res.json({ success: true, data: ticket });
   } catch (err) {
-
-    console.error(err)
-
-    res.status(500).json({
-      success: false
-    })
+    console.error(err);
+    res.status(500).json({ success: false });
   }
-})
-
-/* ================= GET TICKETS ================= */
-
-router.get("/", async (req, res) => {
-
-  try {
-
-    const { email } =
-      req.query
-
-    let filter = {}
-
-    /* ================= CUSTOMER FILTER ================= */
-
-    if (email) {
-
-      filter.email = email
-    }
-
-    const tickets =
-      await SupportTicket.find(filter)
-        .sort({
-          createdAt: -1
-        })
-
-    res.json({
-      success: true,
-      data: tickets
-    })
-
-  } catch (err) {
-
-    console.error(err)
-
-    res.status(500).json({
-      success: false
-    })
-  }
-})
+});
 
 /* ================= REPLY ================= */
 
 router.post("/:id/reply", async (req, res) => {
-
   try {
+    const { sender, message } = req.body;
 
-    const {
-      sender,
-      message
-    } = req.body
-
-    const ticket =
-      await SupportTicket.findById(
-        req.params.id
-      )
-
+    const ticket = await SupportTicket.findById(req.params.id);
     if (!ticket) {
-
-      return res.status(404).json({
-        success: false,
-        message:
-          "Ticket not found"
-      })
+      return res.status(404).json({ success: false, message: "Ticket not found" });
     }
 
-    const cleanSender =
-      sender === "customer"
-        ? "customer"
-        : "admin"
+    const cleanSender = sender === "customer" ? "customer" : "admin";
+    ticket.replies.push({ sender: cleanSender, message, createdAt: new Date() });
+    await ticket.save();
 
-    ticket.replies.push({
-
+    const io = req.app.get("io");
+    const target = cleanSender === "admin" ? ticket.email : "admin";
+    io.to(target).emit("support:new-message", {
       sender: cleanSender,
+      ticketId: ticket._id,
+      message: cleanSender === "admin" ? "Admin replied" : `${ticket.customerName} replied`
+    });
 
-      message,
-
-      createdAt:
-        new Date()
-    })
-
-    await ticket.save()
-
-    /* ================= SOCKET ================= */
-
-    const io =
-      req.app.get("io")
-
-    io.emit(
-      "support:new-message",
-      {
-        sender: cleanSender,
-
-        ticketId: ticket._id,
-
-        message:
-          cleanSender === "admin"
-            ? "Admin replied"
-            : `${ticket.customerName} replied`
-      }
-    )
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
+    res.json({ success: true, data: ticket });
   } catch (err) {
-
-    console.error(err)
-
-    res.status(500).json({
-      success: false
-    })
+    console.error(err);
+    res.status(500).json({ success: false });
   }
-})
+});
 
-export default router
+export default router;
