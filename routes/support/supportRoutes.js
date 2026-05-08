@@ -13,24 +13,8 @@ router.post("/", async (req, res) => {
       customerName,
       email,
       subject,
-      message,
-      orderNumber,
-      priority
-    } = req.body || {}
-
-    if (
-      !customerName ||
-      !email ||
-      !subject ||
-      !message
-    ) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Missing required fields"
-      })
-    }
+      message
+    } = req.body
 
     const ticket =
       await SupportTicket.create({
@@ -43,40 +27,24 @@ router.post("/", async (req, res) => {
 
         message,
 
-        orderNumber:
-          orderNumber || "",
+        status: "open",
 
-        priority:
-          priority || "medium",
-
-        status: "open"
+        replies: []
       })
 
-    /* ================= SOCKET EMIT ================= */
-
-    const io = req.app.get("io")
-
-    console.log(
-      "🚨 NEW TICKET SOCKET EVENT"
-    )
+    const io =
+      req.app.get("io")
 
     io.emit(
       "support:new-message",
       {
         sender: "customer",
 
-        type: "new-ticket",
-
         ticketId: ticket._id,
 
         message:
-          `New support ticket from ${ticket.customerName}`
+          `${customerName} created ticket`
       }
-    )
-
-    console.log(
-      "🛟 SUPPORT TICKET CREATED:",
-      ticket._id
     )
 
     res.json({
@@ -86,28 +54,34 @@ router.post("/", async (req, res) => {
 
   } catch (err) {
 
-    console.error(
-      "❌ CREATE TICKET ERROR:",
-      err
-    )
+    console.error(err)
 
     res.status(500).json({
-      success: false,
-      message:
-        "Failed to create ticket"
+      success: false
     })
   }
 })
 
-/* ================= GET ALL ================= */
+/* ================= GET TICKETS ================= */
 
 router.get("/", async (req, res) => {
 
   try {
 
+    const { email } =
+      req.query
+
+    let filter = {}
+
+    /* ================= CUSTOMER FILTER ================= */
+
+    if (email) {
+
+      filter.email = email
+    }
+
     const tickets =
-      await SupportTicket
-        .find()
+      await SupportTicket.find(filter)
         .sort({
           createdAt: -1
         })
@@ -119,55 +93,10 @@ router.get("/", async (req, res) => {
 
   } catch (err) {
 
-    console.error(
-      "❌ LOAD TICKETS ERROR:",
-      err
-    )
+    console.error(err)
 
     res.status(500).json({
-      success: false,
-      message:
-        "Failed to load tickets"
-    })
-  }
-})
-
-/* ================= GET SINGLE ================= */
-
-router.get("/:id", async (req, res) => {
-
-  try {
-
-    const ticket =
-      await SupportTicket.findById(
-        req.params.id
-      )
-
-    if (!ticket) {
-
-      return res.status(404).json({
-        success: false,
-        message:
-          "Ticket not found"
-      })
-    }
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
-  } catch (err) {
-
-    console.error(
-      "❌ LOAD TICKET ERROR:",
-      err
-    )
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to load ticket"
+      success: false
     })
   }
 })
@@ -179,18 +108,9 @@ router.post("/:id/reply", async (req, res) => {
   try {
 
     const {
-      message,
-      sender
-    } = req.body || {}
-
-    if (!message?.trim()) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Reply message required"
-      })
-    }
+      sender,
+      message
+    } = req.body
 
     const ticket =
       await SupportTicket.findById(
@@ -215,59 +135,33 @@ router.post("/:id/reply", async (req, res) => {
 
       sender: cleanSender,
 
-      message
+      message,
+
+      createdAt:
+        new Date()
     })
-
-    /* ================= AUTO STATUS ================= */
-
-    if (
-      cleanSender === "customer"
-    ) {
-
-      ticket.status = "open"
-
-    } else {
-
-      if (
-        ticket.status === "open"
-      ) {
-
-        ticket.status =
-          "pending"
-      }
-    }
 
     await ticket.save()
 
-    /* ================= SOCKET EMIT ================= */
+    /* ================= SOCKET ================= */
 
-    const io = req.app.get("io")
-
-    console.log(
-      "🚨 EMITTING SOCKET EVENT"
-    )
+    const io =
+      req.app.get("io")
 
     io.emit(
       "support:new-message",
       {
         sender: cleanSender,
 
-        type: "reply",
-
         ticketId: ticket._id,
 
         message:
-          cleanSender === "customer"
-            ? `${ticket.customerName} replied`
-            : "Admin replied"
+          cleanSender === "admin"
+            ? "Admin replied"
+            : `${ticket.customerName} replied`
       }
     )
 
-    console.log(
-      "📨 SUPPORT REPLY:",
-      ticket._id
-    )
-
     res.json({
       success: true,
       data: ticket
@@ -275,217 +169,10 @@ router.post("/:id/reply", async (req, res) => {
 
   } catch (err) {
 
-    console.error(
-      "❌ REPLY ERROR:",
-      err
-    )
+    console.error(err)
 
     res.status(500).json({
-      success: false,
-      message:
-        "Reply failed"
-    })
-  }
-})
-
-/* ================= STATUS ================= */
-
-router.patch("/:id/status", async (req, res) => {
-
-  try {
-
-    const {
-      status
-    } = req.body || {}
-
-    const valid = [
-      "open",
-      "pending",
-      "resolved"
-    ]
-
-    if (
-      !valid.includes(status)
-    ) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid status"
-      })
-    }
-
-    const ticket =
-      await SupportTicket.findByIdAndUpdate(
-
-        req.params.id,
-
-        {
-          status
-        },
-
-        {
-          new: true
-        }
-      )
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
-  } catch (err) {
-
-    console.error(
-      "❌ STATUS ERROR:",
-      err
-    )
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to update status"
-    })
-  }
-})
-
-/* ================= PRIORITY ================= */
-
-router.patch("/:id/priority", async (req, res) => {
-
-  try {
-
-    const {
-      priority
-    } = req.body || {}
-
-    const valid = [
-      "low",
-      "medium",
-      "high"
-    ]
-
-    if (
-      !valid.includes(priority)
-    ) {
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid priority"
-      })
-    }
-
-    const ticket =
-      await SupportTicket.findByIdAndUpdate(
-
-        req.params.id,
-
-        {
-          priority
-        },
-
-        {
-          new: true
-        }
-      )
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
-  } catch (err) {
-
-    console.error(
-      "❌ PRIORITY ERROR:",
-      err
-    )
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Failed to update priority"
-    })
-  }
-})
-
-/* ================= ARCHIVE ================= */
-
-router.patch("/:id/archive", async (req, res) => {
-
-  try {
-
-    const ticket =
-      await SupportTicket.findByIdAndUpdate(
-
-        req.params.id,
-
-        {
-          archived: true
-        },
-
-        {
-          new: true
-        }
-      )
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
-  } catch (err) {
-
-    console.error(
-      "❌ ARCHIVE ERROR:",
-      err
-    )
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Archive failed"
-    })
-  }
-})
-
-/* ================= UNARCHIVE ================= */
-
-router.patch("/:id/unarchive", async (req, res) => {
-
-  try {
-
-    const ticket =
-      await SupportTicket.findByIdAndUpdate(
-
-        req.params.id,
-
-        {
-          archived: false
-        },
-
-        {
-          new: true
-        }
-      )
-
-    res.json({
-      success: true,
-      data: ticket
-    })
-
-  } catch (err) {
-
-    console.error(
-      "❌ UNARCHIVE ERROR:",
-      err
-    )
-
-    res.status(500).json({
-      success: false,
-      message:
-        "Unarchive failed"
+      success: false
     })
   }
 })
