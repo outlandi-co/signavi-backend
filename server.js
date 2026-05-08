@@ -206,6 +206,8 @@ console.log(
 
 /* ================= SOCKET ================= */
 
+/* ================= SOCKET ================= */
+
 const io = new Server(server, {
 
   cors: {
@@ -228,6 +230,49 @@ const io = new Server(server, {
 
     credentials: true
   }
+})
+
+/* ================= APP SOCKET ACCESS ================= */
+
+app.set("io", io)
+
+/* ================= SOCKET CONNECTION ================= */
+
+io.on("connection", socket => {
+
+  console.log(
+    "🟢 Socket connected:",
+    socket.id
+  )
+
+  /* ================= TEST SUPPORT EVENT ================= */
+
+  socket.on(
+    "support:new-message",
+    (data) => {
+
+      console.log(
+        "🔥 SERVER RECEIVED SOCKET EVENT:",
+        data
+      )
+
+      io.emit(
+        "support:new-message",
+        data
+      )
+    }
+  )
+
+  socket.on(
+    "disconnect",
+    () => {
+
+      console.log(
+        "🔴 Socket disconnected:",
+        socket.id
+      )
+    }
+  )
 })
 /* ================= 404 ================= */
 
