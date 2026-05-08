@@ -32,7 +32,7 @@ import shippingRoutes from "./routes/shipping.js"
 
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 
-/* 🔥 NEW SUPPORT ROUTES */
+/* 🔥 SUPPORT ROUTES */
 import supportRoutes from "./routes/support/supportRoutes.js"
 
 /* ================= WEBHOOK ================= */
@@ -56,6 +56,7 @@ const allowedOrigins = [
 
 app.use(
   cors({
+
     origin: (origin, callback) => {
 
       if (!origin) {
@@ -65,6 +66,7 @@ app.use(
       if (
         allowedOrigins.includes(origin)
       ) {
+
         return callback(null, true)
       }
 
@@ -83,11 +85,12 @@ app.use(
 )
 
 /* =========================================================
-   🔥 WEBHOOK MUST COME BEFORE JSON PARSER
+   🔥 WEBHOOK BEFORE JSON
 ========================================================= */
 
 app.use(
   "/api/square/webhook",
+
   express.raw({
     type: "application/json"
   })
@@ -99,12 +102,14 @@ app.use(
 )
 
 /* =========================================================
-   🔥 SAFE JSON PARSER
+   🔥 SAFE JSON
 ========================================================= */
 
 app.use(
   express.json({
+
     strict: true,
+
     limit: "2mb"
   })
 )
@@ -119,13 +124,16 @@ app.use((err, req, res, next) => {
   ) {
 
     console.error(
-      "❌ BAD JSON RECEIVED:",
+      "❌ BAD JSON:",
       err.message
     )
 
     return res.status(400).json({
+
       success: false,
-      message: "Invalid JSON format"
+
+      message:
+        "Invalid JSON format"
     })
   }
 
@@ -140,6 +148,7 @@ app.use(cookieParser())
 
 app.use(
   "/uploads",
+
   express.static(
     path.join(__dirname, "uploads")
   )
@@ -147,14 +156,20 @@ app.use(
 
 /* ================= HEALTH ================= */
 
-app.get("/api/ping", (req, res) => {
+app.get(
+  "/api/ping",
 
-  res.json({
-    success: true,
-    message:
-      "SignaVi backend is running"
-  })
-})
+  (req, res) => {
+
+    res.json({
+
+      success: true,
+
+      message:
+        "SignaVi backend is running"
+    })
+  }
+)
 
 /* ================= ROUTES ================= */
 
@@ -206,8 +221,6 @@ console.log(
 
 /* ================= SOCKET ================= */
 
-/* ================= SOCKET ================= */
-
 const io = new Server(server, {
 
   cors: {
@@ -238,47 +251,56 @@ app.set("io", io)
 
 /* ================= SOCKET CONNECTION ================= */
 
-io.on("connection", socket => {
+io.on(
+  "connection",
+  socket => {
 
-  console.log(
-    "🟢 Socket connected:",
-    socket.id
-  )
+    console.log(
+      "🟢 Socket connected:",
+      socket.id
+    )
 
-  /* ================= TEST SUPPORT EVENT ================= */
+    /* ================= SUPPORT EVENTS ================= */
 
-  socket.on(
-    "support:new-message",
-    (data) => {
+    socket.on(
+      "support:new-message",
+      (data) => {
 
-      console.log(
-        "🔥 SERVER RECEIVED SOCKET EVENT:",
-        data
-      )
+        console.log(
+          "🔥 SERVER RECEIVED SOCKET EVENT:",
+          data
+        )
 
-      io.emit(
-        "support:new-message",
-        data
-      )
-    }
-  )
+        io.emit(
+          "support:new-message",
+          data
+        )
+      }
+    )
 
-  socket.on(
-    "disconnect",
-    () => {
+    /* ================= DISCONNECT ================= */
 
-      console.log(
-        "🔴 Socket disconnected:",
-        socket.id
-      )
-    }
-  )
-})/* ================= 404 ================= */
+    socket.on(
+      "disconnect",
+      () => {
+
+        console.log(
+          "🔴 Socket disconnected:",
+          socket.id
+        )
+      }
+    )
+  }
+)
+
+/* ================= 404 ================= */
 
 app.use((req, res) => {
 
   res.status(404).json({
+
     success: false,
+
     message:
       `Route not found: ${req.method} ${req.originalUrl}`
   })
@@ -294,8 +316,11 @@ app.use((err, req, res, next) => {
   )
 
   res.status(500).json({
+
     success: false,
-    message: "Server error"
+
+    message:
+      "Server error"
   })
 })
 
@@ -306,17 +331,23 @@ mongoose
 
   .then(() => {
 
-    console.log("✅ Mongo connected")
+    console.log(
+      "✅ Mongo connected"
+    )
 
     const PORT =
       process.env.PORT || 5050
 
-    server.listen(PORT, () => {
+    server.listen(
+      PORT,
 
-      console.log(
-        `🚀 Server running on ${PORT}`
-      )
-    })
+      () => {
+
+        console.log(
+          `🚀 Server running on ${PORT}`
+        )
+      }
+    )
   })
 
   .catch(err => {
