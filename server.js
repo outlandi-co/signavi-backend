@@ -219,32 +219,16 @@ const io = new Server(server, {
 
     methods: [
       "GET",
-      "POST"
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS"
     ],
 
-    credentials: true,
-
-methods: [
-  "GET",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "OPTIONS"
-]
+    credentials: true
   }
 })
-
-app.set("io", io)
-
-io.on("connection", socket => {
-
-  console.log(
-    "🟢 Socket connected:",
-    socket.id
-  )
-})
-
 /* ================= 404 ================= */
 
 app.use((req, res) => {
