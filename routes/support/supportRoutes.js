@@ -259,6 +259,14 @@ router.post(
           "🔥 EMITTING SUPPORT REPLY EVENT"
         )
 
+        console.log(
+  "🔥 ABOUT TO EMIT:",
+  {
+    sender: cleanSender,
+    ticketId: ticket._id
+  }
+)
+
         io.emit(
           "support:new-message",
           {
