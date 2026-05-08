@@ -10,7 +10,9 @@ router.get(
   (req, res) => {
 
     res.json({
+
       success: true,
+
       message:
         "Support routes working"
     })
@@ -92,6 +94,15 @@ router.post(
         message
       } = req.body
 
+      console.log(
+        "📨 NEW SUPPORT TICKET:",
+        {
+          customerName,
+          email,
+          subject
+        }
+      )
+
       const ticket =
         await SupportTicket.create({
 
@@ -108,16 +119,30 @@ router.post(
           replies: []
         })
 
+      /* ================= SOCKET ================= */
+
       const io =
         req.app.get("io")
 
-      if (io) {
+      if (!io) {
+
+        console.log(
+          "❌ IO NOT FOUND"
+        )
+      }
+
+      else {
+
+        console.log(
+          "🔥 EMITTING NEW TICKET EVENT"
+        )
 
         io.emit(
           "support:new-message",
           {
 
-            sender: "customer",
+            sender:
+              "customer",
 
             ticketId:
               ticket._id,
@@ -166,6 +191,14 @@ router.post(
         message
       } = req.body
 
+      console.log(
+        "📨 NEW SUPPORT REPLY:",
+        {
+          sender,
+          message
+        }
+      )
+
       const ticket =
         await SupportTicket.findById(
           req.params.id
@@ -182,10 +215,14 @@ router.post(
         })
       }
 
+      /* ================= CLEAN SENDER ================= */
+
       const cleanSender =
         sender === "customer"
           ? "customer"
           : "admin"
+
+      /* ================= SAVE REPLY ================= */
 
       ticket.replies.push({
 
@@ -200,12 +237,27 @@ router.post(
 
       await ticket.save()
 
+      console.log(
+        "✅ REPLY SAVED"
+      )
+
       /* ================= SOCKET ================= */
 
       const io =
         req.app.get("io")
 
-      if (io) {
+      if (!io) {
+
+        console.log(
+          "❌ IO NOT FOUND"
+        )
+      }
+
+      else {
+
+        console.log(
+          "🔥 EMITTING SUPPORT REPLY EVENT"
+        )
 
         io.emit(
           "support:new-message",
