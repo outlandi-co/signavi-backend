@@ -30,6 +30,8 @@ import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
 import shippingRoutes from "./routes/shipping.js"
 
+/* 🔥 NEW UPLOAD ROUTE */
+import uploadRoutes from "./routes/uploadRoutes.js"
 
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 
@@ -197,6 +199,8 @@ app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 
 app.use("/api/shipping", shippingRoutes)
+
+app.use("/api/upload", uploadRoutes)
 
 /* ================= ADMIN ================= */
 
