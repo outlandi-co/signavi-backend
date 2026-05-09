@@ -19,19 +19,29 @@ const variantSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+
   size: {
     type: String,
     required: true,
     enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"]
   },
+
   stock: {
     type: Number,
     default: 0
   },
+
   price: {
     type: Number,
     default: 0
+  },
+
+  /* 🔥 IMPORTANT: IMAGE PER VARIANT */
+  image: {
+    type: String,
+    default: ""
   }
+
 }, { _id: false })
 
 /* ================= PRODUCT ================= */
@@ -92,7 +102,7 @@ const productSchema = new mongoose.Schema({
   /* 📏 SIZES (UI SUPPORT) */
   sizes: {
     type: [String],
-    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"], // ✅ FIXED
+    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"],
     default: []
   },
 
@@ -102,7 +112,7 @@ const productSchema = new mongoose.Schema({
     default: []
   },
 
-  /* 🖼️ IMAGE */
+  /* 🖼️ DEFAULT IMAGE (fallback) */
   image: {
     type: String,
     default: ""
