@@ -29,23 +29,14 @@ import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
 import shippingRoutes from "./routes/shipping.js"
-
-/* 🔥 NEW UPLOAD ROUTE */
 import uploadRoutes from "./routes/uploadRoutes.js"
-
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
-
-/* 🔥 SUPPORT ROUTES */
 import supportRoutes from "./routes/support/supportRoutes.js"
-
-/* ================= WEBHOOK ================= */
-
 import squareWebhook from "./routes/squareWebhook.js"
 
 /* ================= APP ================= */
 
 const app = express()
-
 const server = http.createServer(app)
 
 console.log("\n🔥 SERVER READY 🚀\n")
@@ -59,60 +50,34 @@ const allowedOrigins = [
 
 app.use(
   cors({
-
     origin: (origin, callback) => {
+      if (!origin) return callback(null, true)
 
-      if (!origin) {
+      if (allowedOrigins.includes(origin)) {
         return callback(null, true)
       }
 
-      if (
-        allowedOrigins.includes(origin)
-      ) {
-
-        return callback(null, true)
-      }
-
-      console.warn(
-        "❌ CORS BLOCKED:",
-        origin
-      )
-
-      return callback(
-        new Error("Not allowed by CORS")
-      )
+      console.warn("❌ CORS BLOCKED:", origin)
+      return callback(new Error("Not allowed by CORS"))
     },
-
     credentials: true
   })
 )
 
-/* =========================================================
-   🔥 WEBHOOK BEFORE JSON
-========================================================= */
+/* ================= WEBHOOK ================= */
 
 app.use(
   "/api/square/webhook",
-
-  express.raw({
-    type: "application/json"
-  })
+  express.raw({ type: "application/json" })
 )
 
-app.use(
-  "/api/square",
-  squareWebhook
-)
+app.use("/api/square", squareWebhook)
 
-/* =========================================================
-   🔥 SAFE JSON
-========================================================= */
+/* ================= JSON ================= */
 
 app.use(
   express.json({
-
     strict: true,
-
     limit: "2mb"
   })
 )
@@ -120,23 +85,12 @@ app.use(
 /* ================= BAD JSON ================= */
 
 app.use((err, req, res, next) => {
-
-  if (
-    err instanceof SyntaxError &&
-    "body" in err
-  ) {
-
-    console.error(
-      "❌ BAD JSON:",
-      err.message
-    )
+  if (err instanceof SyntaxError && "body" in err) {
+    console.error("❌ BAD JSON:", err.message)
 
     return res.status(400).json({
-
       success: false,
-
-      message:
-        "Invalid JSON format"
+      message: "Invalid JSON format"
     })
   }
 
@@ -147,185 +101,96 @@ app.use((err, req, res, next) => {
 
 app.use(cookieParser())
 
-/* ================= STATIC ================= */
+/* ================= 🔥 FIXED STATIC ================= */
 
 app.use(
   "/uploads",
-
   express.static(
-    path.join(__dirname, "uploads")
+    path.join(process.cwd(), "uploads") // ✅ FIX HERE
   )
 )
 
 /* ================= HEALTH ================= */
 
-app.get(
-  "/api/ping",
-
-  (req, res) => {
-
-    res.json({
-
-      success: true,
-
-      message:
-        "SignaVi backend is running"
-    })
-  }
-)
+app.get("/api/ping", (req, res) => {
+  res.json({
+    success: true,
+    message: "SignaVi backend is running"
+  })
+})
 
 /* ================= ROUTES ================= */
 
 app.use("/api/products", productRoutes)
-
 app.use("/api/orders", orderRoutes)
-
 app.use("/api/auth", authRoutes)
-
 app.use("/api/logout", logoutRoutes)
-
 app.use("/api/cart", cartRoutes)
-
 app.use("/api/production", productionRoutes)
-
 app.use("/api/quotes", quoteRoutes)
-
 app.use("/api/expenses", expenseRoutes)
-
 app.use("/api/pricing", pricingRoutes)
-
 app.use("/api/customers", customerRoutes)
-
 app.use("/api/square", squareRoutes)
-
 app.use("/api/shipping", shippingRoutes)
 
+/* 🔥 UPLOAD ROUTE */
 app.use("/api/upload", uploadRoutes)
 
 /* ================= ADMIN ================= */
 
-app.use(
-  "/api/admin-email",
-  adminEmailRoutes
-)
-
-console.log(
-  "📧 ADMIN EMAIL ROUTE MOUNTED"
-)
+app.use("/api/admin-email", adminEmailRoutes)
+console.log("📧 ADMIN EMAIL ROUTE MOUNTED")
 
 /* ================= SUPPORT ================= */
 
-app.use(
-  "/api/support",
-  supportRoutes
-)
-
-console.log(
-  "🛟 SUPPORT ROUTE MOUNTED"
-)
+app.use("/api/support", supportRoutes)
+console.log("🛟 SUPPORT ROUTE MOUNTED")
 
 /* ================= SOCKET ================= */
 
 const io = new Server(server, {
-
   cors: {
-
     origin: [
-
       "https://signavistudio.store",
-
       "http://localhost:5173"
     ],
-
-    methods: [
-      "GET",
-      "POST",
-      "PUT",
-      "PATCH",
-      "DELETE",
-      "OPTIONS"
-    ],
-
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true
   }
 })
 
-/* ================= APP SOCKET ACCESS ================= */
-
 app.set("io", io)
 
-/* ================= SOCKET CONNECTION ================= */
+io.on("connection", socket => {
+  console.log("🟢 Socket connected:", socket.id)
 
-io.on(
-  "connection",
-  socket => {
+  socket.on("support:new-message", data => {
+    io.emit("support:new-message", data)
+  })
 
-    console.log(
-      "🟢 Socket connected:",
-      socket.id
-    )
-
-    /* ================= SUPPORT EVENTS ================= */
-
-    socket.on(
-      "support:new-message",
-      (data) => {
-
-        console.log(
-          "🔥 SERVER RECEIVED SOCKET EVENT:",
-          data
-        )
-
-        io.emit(
-          "support:new-message",
-          data
-        )
-      }
-    )
-
-    /* ================= DISCONNECT ================= */
-
-    socket.on(
-      "disconnect",
-      () => {
-
-        console.log(
-          "🔴 Socket disconnected:",
-          socket.id
-        )
-      }
-    )
-  }
-)
+  socket.on("disconnect", () => {
+    console.log("🔴 Socket disconnected:", socket.id)
+  })
+})
 
 /* ================= 404 ================= */
 
 app.use((req, res) => {
-
   res.status(404).json({
-
     success: false,
-
-    message:
-      `Route not found: ${req.method} ${req.originalUrl}`
+    message: `Route not found: ${req.method} ${req.originalUrl}`
   })
 })
 
-/* ================= GLOBAL ERROR ================= */
+/* ================= ERROR ================= */
 
 app.use((err, req, res, next) => {
-
-  console.error(
-    "❌ GLOBAL ERROR:",
-    err
-  )
+  console.error("❌ GLOBAL ERROR:", err)
 
   res.status(500).json({
-
     success: false,
-
-    message:
-      "Server error"
+    message: "Server error"
   })
 })
 
@@ -333,32 +198,15 @@ app.use((err, req, res, next) => {
 
 mongoose
   .connect(process.env.MONGO_URI)
-
   .then(() => {
+    console.log("✅ Mongo connected")
 
-    console.log(
-      "✅ Mongo connected"
-    )
+    const PORT = process.env.PORT || 5050
 
-    const PORT =
-      process.env.PORT || 5050
-
-    server.listen(
-      PORT,
-
-      () => {
-
-        console.log(
-          `🚀 Server running on ${PORT}`
-        )
-      }
-    )
+    server.listen(PORT, () => {
+      console.log(`🚀 Server running on ${PORT}`)
+    })
   })
-
   .catch(err => {
-
-    console.error(
-      "❌ DB ERROR:",
-      err
-    )
+    console.error("❌ DB ERROR:", err)
   })
