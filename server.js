@@ -8,12 +8,21 @@ import http from "http"
 import { Server } from "socket.io"
 import cors from "cors"
 import path from "path"
+import fs from "fs"
 import { fileURLToPath } from "url"
 
 /* ================= PATH SETUP ================= */
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+/* ================= 🔥 ENSURE UPLOAD DIR ================= */
+
+const uploadDir = path.join(process.cwd(), "uploads")
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true })
+}
 
 /* ================= ROUTES ================= */
 
@@ -93,7 +102,6 @@ app.use((err, req, res, next) => {
       message: "Invalid JSON format"
     })
   }
-
   next()
 })
 
@@ -101,14 +109,9 @@ app.use((err, req, res, next) => {
 
 app.use(cookieParser())
 
-/* ================= 🔥 FIXED STATIC ================= */
+/* ================= 🔥 STATIC UPLOADS (FIXED) ================= */
 
-app.use(
-  "/uploads",
-  express.static(
-    path.join(process.cwd(), "uploads") // ✅ FIX HERE
-  )
-)
+app.use("/uploads", express.static(uploadDir))
 
 /* ================= HEALTH ================= */
 
