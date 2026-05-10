@@ -16,9 +16,10 @@ router.post("/", upload.array("images", 10), (req, res) => {
       return res.status(400).json({ message: "No files uploaded" })
     }
 
-    const urls = req.files.map(file =>
-      `https://dummyimage.com/300x300/000/fff&text=${file.originalname}`
-    )
+    const urls = req.files.map(file => {
+  const base64 = file.buffer.toString("base64")
+  return `data:${file.mimetype};base64,${base64}`
+})
 
     res.json({ success: true, urls })
 
