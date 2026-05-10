@@ -38,13 +38,22 @@ router.post("/", upload.any(), async (req, res) => {
       return res.status(400).json({ message: "Name required" })
     }
 
-    /* 🔥 PARSE ARRAYS FROM FORMDATA */
+    /* 🔥 PARSE ARRAYS */
     const sizes = safeParse(req.body.sizes)
     const variants = safeParse(req.body.variants)
     const colors = safeParse(req.body.colors)
 
+    /* 🔥 CLEAN VARIANTS */
+    const cleanVariants = variants.map(v => ({
+      color: v.color,
+      size: v.size,
+      stock: Number(v.stock) || 0,
+      price: Number(v.price) || 0,
+      images: Array.isArray(v.images) ? v.images : []
+    }))
+
     console.log("🔥 CLEAN SIZES:", sizes)
-    console.log("🔥 CLEAN VARIANTS:", variants)
+    console.log("🔥 CLEAN VARIANTS:", cleanVariants)
 
     const product = await Product.create({
       name,
@@ -53,8 +62,9 @@ router.post("/", upload.any(), async (req, res) => {
       price: Number(price) || 0,
       stock: Number(stock) || 0,
       sizes,
-      variants,
-      colors
+      variants: cleanVariants,
+      colors,
+      active: true // 🔥 IMPORTANT FIX
     })
 
     console.log("✅ PRODUCT CREATED:", product.name)
@@ -75,7 +85,8 @@ router.get("/", async (req, res) => {
   try {
     console.log("🔥 HIT /api/products")
 
-    const products = await Product.find({ active: true })
+    const products = await Product
+      .find() // 🔥 no filter so nothing disappears
       .sort({ createdAt: -1 })
 
     console.log("📦 PRODUCTS FETCHED:", products.length)
@@ -84,9 +95,7 @@ router.get("/", async (req, res) => {
 
   } catch (err) {
     console.error("❌ GET PRODUCTS ERROR:", err)
-    res.status(500).json({
-      message: "Failed to fetch products"
-    })
+    res.status(500).json({ message: "Failed to fetch products" })
   }
 })
 
