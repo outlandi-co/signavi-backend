@@ -138,7 +138,7 @@ app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
 
 /* 🔥 UPLOAD ROUTE */
-app.use("/api/upload", uploadRoutes)
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")))
 
 /* ================= ADMIN ================= */
 
