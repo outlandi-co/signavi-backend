@@ -3,10 +3,7 @@ import multer from "multer"
 
 const router = express.Router()
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }
-})
+const upload = multer({ storage: multer.memoryStorage() })
 
 router.post("/", upload.array("images", 10), (req, res) => {
   try {
@@ -16,10 +13,9 @@ router.post("/", upload.array("images", 10), (req, res) => {
       return res.status(400).json({ message: "No files uploaded" })
     }
 
-    const urls = req.files.map(file => {
-  const base64 = file.buffer.toString("base64")
-  return `data:${file.mimetype};base64,${base64}`
-})
+    const urls = req.files.map(file =>
+      `https://dummyimage.com/300x300/000/fff&text=${file.originalname}`
+    )
 
     res.json({ success: true, urls })
 
