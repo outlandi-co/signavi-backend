@@ -4,10 +4,13 @@ import Product from "../models/Product.js"
 
 const router = express.Router()
 
-/* ================= MULTER ================= */
-const upload = multer({ storage: multer.memoryStorage() })
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024
+  }
+})
 
-/* ================= SAFE PARSER ================= */
 const safeParse = (data, fallback = []) => {
   try {
     return JSON.parse(data || JSON.stringify(fallback))
@@ -16,125 +19,78 @@ const safeParse = (data, fallback = []) => {
   }
 }
 
-/* ================= SIZE NORMALIZER ================= */
 const normalizeSize = (s) => {
   if (!s) return null
-
   const map = {
-    XS: "XS",
-
-    SMALL: "S",
-    S: "S",
-
-    MEDIUM: "M",
-    M: "M",
-
-    LARGE: "L",
-    L: "L",
-
-    XL: "XL",
-    "EXTRA-LARGE": "XL",
-    "X-LARGE": "XL",
-
-    XXL: "2XL",
-    "2XL": "2XL",
-
-    "3XL": "3XL",
-    "4XL": "4XL"
+    SMALL: "S", S: "S",
+    MEDIUM: "M", M: "M",
+    LARGE: "L", L: "L",
+    XL: "XL", "EXTRA-LARGE": "XL",
+    XXL: "2XL", "2XL": "2XL"
   }
-
   return map[String(s).toUpperCase()] || null
 }
 
 /* ================= CREATE PRODUCT ================= */
-router.post("/", upload.any(), async (req, res) => {
+router.post("/", upload.array("images", 20), async (req, res) => {
   try {
-    console.log("📦 RAW BODY:", req.body)
-
-    if (!req.body || Object.keys(req.body).length === 0) {
-      return res.status(400).json({ message: "No form data received" })
-    }
-
     const { name, description, category, price, stock } = req.body
 
-    if (!name) {
-      return res.status(400).json({ message: "Name required" })
-    }
-
-    /* 🔥 PARSE ARRAYS */
-    const rawSizes = safeParse(req.body.sizes)
     const rawVariants = safeParse(req.body.variants)
+    const rawSizes = safeParse(req.body.sizes)
     const colors = safeParse(req.body.colors)
 
-    /* 🔥 NORMALIZE SIZES */
-    const sizes = (rawSizes || [])
-      .map(normalizeSize)
-      .filter(Boolean)
+    const sizes = rawSizes.map(normalizeSize).filter(Boolean)
 
-    /* 🔥 CLEAN VARIANTS */
-    const cleanVariants = (rawVariants || [])
-      .map(v => {
-        const normalizedSize = normalizeSize(v.size)
+    const files = req.files || []
+    const colorInputs = req.body.imageColors || []
 
-        return {
-          color: v.color || "",
-          size: normalizedSize,
-          stock: Number(v.stock) || 0,
-          price: Number(v.price) || 0,
-          images: Array.isArray(v.images)
-            ? v.images.filter(img => typeof img === "string" && img.length > 0)
-            : []
-        }
-      })
-      .filter(v => v.color && v.size) // remove invalid variants
+    const colorMap = {}
 
-    console.log("🔥 FINAL SIZES:", sizes)
-    console.log("🔥 FINAL VARIANTS:", cleanVariants)
+    files.forEach((file, i) => {
+      const color = Array.isArray(colorInputs)
+        ? colorInputs[i]
+        : colorInputs
+
+      if (!colorMap[color]) colorMap[color] = []
+
+      colorMap[color].push(
+        `data:${file.mimetype};base64,${file.buffer.toString("base64")}`
+      )
+    })
+
+    const cleanVariants = rawVariants.map(v => ({
+      color: v.color,
+      size: normalizeSize(v.size),
+      stock: Number(v.stock) || 0,
+      price: Number(v.price) || 0,
+      images: colorMap[v.color] || []
+    })).filter(v => v.color && v.size)
 
     const product = await Product.create({
       name,
       description,
       category,
-      price: Number(price) || 0,
-      stock: Number(stock) || 0,
+      price: Number(price),
+      stock: Number(stock),
       sizes,
       variants: cleanVariants,
       colors,
       active: true
     })
 
-    console.log("✅ PRODUCT CREATED:", product.name)
-
     res.json(product)
 
   } catch (err) {
-    console.error("❌ CREATE ERROR:", err)
-
-    res.status(500).json({
-      message: "Create failed",
-      error: err.message
-    })
+    console.error(err)
+    res.status(500).json({ message: "Create failed" })
   }
 })
 
-/* ================= GET ALL PRODUCTS ================= */
+/* ================= GET ================= */
 router.get("/", async (req, res) => {
-  try {
-    console.log("🔥 HIT /api/products")
-
-    const products = await Product.find().sort({ createdAt: -1 })
-
-    console.log("📦 PRODUCTS FETCHED:", products.length)
-
-    res.json(products)
-
-  } catch (err) {
-    console.error("❌ GET PRODUCTS ERROR:", err)
-
-    res.status(500).json({
-      message: "Failed to fetch products"
-    })
-  }
+  const products = await Product.find().sort({ createdAt: -1 })
+  res.json(products)
 })
 
 export default router

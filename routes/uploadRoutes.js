@@ -3,7 +3,12 @@ import multer from "multer"
 
 const router = express.Router()
 
-const upload = multer({ storage: multer.memoryStorage() })
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fieldSize: 25 * 1024 * 1024 // 🔥 25MB
+  }
+})
 
 router.post("/", upload.array("images", 10), (req, res) => {
   try {
