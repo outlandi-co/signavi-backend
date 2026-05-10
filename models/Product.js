@@ -1,6 +1,6 @@
 import mongoose from "mongoose"
 
-/* ================= NORMALIZE SIZE (MODEL LEVEL) ================= */
+/* ================= NORMALIZE SIZE ================= */
 const normalizeSize = (s) => {
   if (!s) return null
 
@@ -45,7 +45,7 @@ const variantSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: ["XS","S","M","L","XL","2XL","3XL","4XL"],
-    set: normalizeSize // 🔥 AUTO FIX INPUT HERE
+    set: normalizeSize
   },
 
   stock: { type: Number, default: 0 },
@@ -82,7 +82,7 @@ const productSchema = new mongoose.Schema({
   sizes: {
     type: [String],
     enum: ["XS","S","M","L","XL","2XL","3XL","4XL"],
-    set: (arr) => (arr || []).map(normalizeSize).filter(Boolean), // 🔥 AUTO FIX ARRAY
+    set: (arr) => (arr || []).map(normalizeSize).filter(Boolean),
     default: []
   },
 
@@ -94,4 +94,7 @@ const productSchema = new mongoose.Schema({
 
 }, { timestamps: true })
 
-export default mongoose.model("Product", productSchema)
+/* 🔥 IMPORTANT: MAKE SURE THIS EXISTS */
+const Product = mongoose.model("Product", productSchema)
+
+export default Product
