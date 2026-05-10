@@ -6,9 +6,7 @@ const router = express.Router()
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024
-  }
+  limits: { fileSize: 10 * 1024 * 1024 }
 })
 
 const safeParse = (data, fallback = []) => {
@@ -20,18 +18,15 @@ const safeParse = (data, fallback = []) => {
 }
 
 const normalizeSize = (s) => {
-  if (!s) return null
   const map = {
     SMALL: "S", S: "S",
     MEDIUM: "M", M: "M",
     LARGE: "L", L: "L",
-    XL: "XL", "EXTRA-LARGE": "XL",
-    XXL: "2XL", "2XL": "2XL"
+    "X-LARGE": "XL", XL: "XL"
   }
   return map[String(s).toUpperCase()] || null
 }
 
-/* ================= CREATE PRODUCT ================= */
 router.post("/", upload.array("images", 20), async (req, res) => {
   try {
     const { name, description, category, price, stock } = req.body
@@ -59,13 +54,13 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       )
     })
 
-    const cleanVariants = rawVariants.map(v => ({
+    const variants = rawVariants.map(v => ({
       color: v.color,
       size: normalizeSize(v.size),
       stock: Number(v.stock) || 0,
       price: Number(v.price) || 0,
       images: colorMap[v.color] || []
-    })).filter(v => v.color && v.size)
+    }))
 
     const product = await Product.create({
       name,
@@ -74,20 +69,18 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       price: Number(price),
       stock: Number(stock),
       sizes,
-      variants: cleanVariants,
+      variants,
       colors,
       active: true
     })
 
     res.json(product)
-
   } catch (err) {
     console.error(err)
     res.status(500).json({ message: "Create failed" })
   }
 })
 
-/* ================= GET ================= */
 router.get("/", async (req, res) => {
   const products = await Product.find().sort({ createdAt: -1 })
   res.json(products)
