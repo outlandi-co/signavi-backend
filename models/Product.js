@@ -1,45 +1,29 @@
 import mongoose from "mongoose"
 
-/* ================= COLOR SCHEMA ================= */
+/* ================= COLOR ================= */
 const colorSchema = new mongoose.Schema({
   name: { type: String, required: true },
   code: String,
-  hex: String,
-
-  images: {
-    front: String,
-    back: String,
-    lifestyle: String
-  }
+  hex: String
 }, { _id: false })
 
-/* ================= VARIANT SCHEMA ================= */
+/* ================= VARIANT ================= */
 const variantSchema = new mongoose.Schema({
-  color: {
-    type: String,
-    required: true
-  },
+  color: { type: String, required: true },
 
   size: {
     type: String,
     required: true,
-    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"]
+    enum: ["XS","S","M","L","XL","2XL","3XL","4XL"]
   },
 
-  stock: {
-    type: Number,
-    default: 0
-  },
+  stock: { type: Number, default: 0 },
+  price: { type: Number, default: 0 },
 
-  price: {
-    type: Number,
-    default: 0
-  },
-
-  /* 🔥 IMPORTANT: IMAGE PER VARIANT */
-  image: {
-    type: String,
-    default: ""
+  /* 🔥 MULTIPLE IMAGES */
+  images: {
+    type: [String],
+    default: []
   }
 
 }, { _id: false })
@@ -47,17 +31,8 @@ const variantSchema = new mongoose.Schema({
 /* ================= PRODUCT ================= */
 const productSchema = new mongoose.Schema({
 
-  /* 🔥 CORE */
-  name: {
-    type: String,
-    required: true,
-    trim: true
-  },
-
-  description: {
-    type: String,
-    default: ""
-  },
+  name: { type: String, required: true, trim: true },
+  description: { type: String, default: "" },
 
   category: {
     type: String,
@@ -66,63 +41,26 @@ const productSchema = new mongoose.Schema({
     trim: true
   },
 
-  brand: {
-    type: String,
-    default: "Bella Canvas"
-  },
+  brand: { type: String, default: "Bella Canvas" },
+  styleCode: { type: String, default: "" },
 
-  styleCode: {
-    type: String,
-    default: ""
-  },
+  variants: { type: [variantSchema], default: [] },
 
-  /* 🔥 VARIANTS (MAIN SYSTEM) */
-  variants: {
-    type: [variantSchema],
-    default: []
-  },
+  price: { type: Number, default: 0 },
+  stock: { type: Number, default: 0 },
 
-  /* 💰 BASE PRICING (fallback) */
-  price: {
-    type: Number,
-    default: 0
-  },
-
-  cost: {
-    type: Number,
-    default: 0
-  },
-
-  /* 📦 TOTAL STOCK (fallback) */
-  stock: {
-    type: Number,
-    default: 0
-  },
-
-  /* 📏 SIZES (UI SUPPORT) */
   sizes: {
     type: [String],
-    enum: ["XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL"],
+    enum: ["XS","S","M","L","XL","2XL","3XL","4XL"],
     default: []
   },
 
-  /* 🎨 COLORS */
-  colors: {
-    type: [colorSchema],
-    default: []
-  },
+  colors: { type: [colorSchema], default: [] },
 
-  /* 🖼️ DEFAULT IMAGE (fallback) */
-  image: {
-    type: String,
-    default: ""
-  },
+  /* fallback */
+  image: { type: String, default: "" },
 
-  /* ⚙️ CONTROL */
-  active: {
-    type: Boolean,
-    default: true
-  }
+  active: { type: Boolean, default: true }
 
 }, { timestamps: true })
 

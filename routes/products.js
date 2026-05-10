@@ -26,7 +26,7 @@ const upload = multer({ storage })
 /* ================= SAFE PARSER ================= */
 const safeParse = (val, fallback = []) => {
   try {
-    return val ? JSON.parse(val) : fallback
+    return typeof val === "string" ? JSON.parse(val) : val || fallback
   } catch {
     return fallback
   }
@@ -46,82 +46,55 @@ router.get("/", async (req, res) => {
 /* ================= CREATE ================= */
 router.post("/", upload.single("image"), async (req, res) => {
   try {
-    const sizes = safeParse(req.body.sizes)
-
-    const colors = safeParse(req.body.colors).map(c =>
-      typeof c === "string" ? { name: c } : c
-    )
-
-    /* 🔥 FIXED NUMBER HANDLING */
-    const parsedPrice = parseFloat(req.body.price)
-    const parsedCost = parseFloat(req.body.cost)
-    const parsedStock = parseInt(req.body.stock)
-
-    const basePrice = !isNaN(parsedPrice)
-      ? parsedPrice
-      : !isNaN(parsedCost)
-      ? parsedCost
-      : 0
-
-    const baseStock = !isNaN(parsedStock) ? parsedStock : 0
-
-    /* 🔥 BUILD VARIANTS */
-    let variants = []
-
-    colors.forEach(c => {
-      sizes.forEach(size => {
-
-        const colorName = c.name || c
-
-        let price = basePrice
-
-        /* 🔥 SIZE PRICE LOGIC */
-        if (["2XL", "3XL", "4XL"].includes(size)) {
-          price = basePrice + 4
-        }
-
-        variants.push({
-          color: colorName,
-          size,
-          stock: baseStock,
-          price
-        })
-      })
-    })
-
-    const product = await Product.create({
-      name: req.body.name?.trim(),
-      description: req.body.description || "",
-
-      category: (req.body.category || "general")
-        .toLowerCase()
-        .trim(),
-
-      brand: req.body.brand || "Bella Canvas",
-      styleCode: req.body.styleCode || "",
-
-      cost: !isNaN(parsedCost) ? parsedCost : 0,
-      price: basePrice,
-      stock: baseStock,
-
+    const {
+      name,
+      description,
+      image,
+      category,
+      price,
+      stock,
       sizes,
       colors,
-      variants, // 🔥 NEW SYSTEM
+      variants
+    } = req.body
 
-      image: req.file
-        ? `/uploads/${req.file.filename}`
-        : "",
+    if (!name) {
+      return res.status(400).json({ error: "Product name required" })
+    }
 
-      active: req.body.active !== "false"
+    const cleanVariants = Array.isArray(variants)
+      ? variants.map(v => ({
+          color: v.color,
+          size: v.size,
+          stock: Number(v.stock) || 0,
+          price: Number(v.price) || 0,
+          images: Array.isArray(v.images) ? v.images : []
+        }))
+      : []
+
+    let imagePath = ""
+    if (req.file) {
+      imagePath = `/uploads/${req.file.filename}`
+    } else if (image) {
+      imagePath = image
+    }
+
+    const product = await Product.create({
+      name: name.trim(),
+      description: description || "",
+      category: (category || "general").toLowerCase(),
+      price: Number(price) || 0,
+      stock: Number(stock) || 0,
+      sizes: Array.isArray(sizes) ? sizes : [],
+      colors: Array.isArray(colors) ? colors : [],
+      variants: cleanVariants,
+      image: imagePath
     })
-
-    console.log("✅ PRODUCT CREATED:", product.name)
-    console.log("📦 VARIANTS:", variants.length)
 
     res.status(201).json(product)
 
   } catch (err) {
-    console.error("💥 CREATE PRODUCT ERROR:", err)
+    console.error("❌ CREATE ERROR:", err)
     res.status(500).json({ error: err.message })
   }
 })
@@ -129,66 +102,25 @@ router.post("/", upload.single("image"), async (req, res) => {
 /* ================= UPDATE ================= */
 router.put("/:id", upload.single("image"), async (req, res) => {
   try {
-    const sizes = safeParse(req.body.sizes)
 
-    const colors = safeParse(req.body.colors).map(c =>
-      typeof c === "string" ? { name: c } : c
-    )
+    /* 🔥 KEEP EXISTING VARIANTS */
+    const parsedVariants = safeParse(req.body.variants, [])
 
-    const parsedPrice = parseFloat(req.body.price)
-    const parsedCost = parseFloat(req.body.cost)
-    const parsedStock = parseInt(req.body.stock)
-
-    const basePrice = !isNaN(parsedPrice)
-      ? parsedPrice
-      : !isNaN(parsedCost)
-      ? parsedCost
-      : 0
-
-    const baseStock = !isNaN(parsedStock) ? parsedStock : 0
-
-    /* 🔥 REBUILD VARIANTS */
-    let variants = []
-
-    colors.forEach(c => {
-      sizes.forEach(size => {
-
-        const colorName = c.name || c
-
-        let price = basePrice
-
-        if (["2XL", "3XL", "4XL"].includes(size)) {
-          price = basePrice + 4
-        }
-
-        variants.push({
-          color: colorName,
-          size,
-          stock: baseStock,
-          price
-        })
-      })
-    })
+    const variants = parsedVariants.map(v => ({
+      color: v.color,
+      size: v.size,
+      stock: Number(v.stock) || 0,
+      price: Number(v.price) || 0,
+      images: Array.isArray(v.images) ? v.images : []
+    }))
 
     const updateData = {
       name: req.body.name?.trim(),
       description: req.body.description || "",
-
-      category: (req.body.category || "general")
-        .toLowerCase()
-        .trim(),
-
-      brand: req.body.brand || "Bella Canvas",
-      styleCode: req.body.styleCode || "",
-
-      cost: !isNaN(parsedCost) ? parsedCost : 0,
-      price: basePrice,
-      stock: baseStock,
-
-      sizes,
-      colors,
+      category: (req.body.category || "general").toLowerCase().trim(),
+      price: Number(req.body.price) || 0,
+      stock: Number(req.body.stock) || 0,
       variants,
-
       active: req.body.active !== "false"
     }
 
@@ -201,9 +133,6 @@ router.put("/:id", upload.single("image"), async (req, res) => {
       updateData,
       { new: true }
     )
-
-    console.log("🔄 PRODUCT UPDATED:", updated.name)
-    console.log("📦 VARIANTS:", variants.length)
 
     res.json(updated)
 
