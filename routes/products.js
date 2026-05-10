@@ -8,8 +8,9 @@ const router = express.Router()
 
 /* ================= ENSURE UPLOADS DIR ================= */
 const uploadDir = "uploads"
+
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir)
+  fs.mkdirSync(uploadDir, { recursive: true })
 }
 
 /* ================= MULTER STORAGE ================= */
@@ -17,108 +18,515 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir)
   },
+
   filename: (req, file, cb) => {
     const unique = Date.now() + "-" + Math.round(Math.random() * 1e9)
-    cb(null, unique + path.extname(file.originalname))
+    const ext = path.extname(file.originalname || "").toLowerCase()
+
+    cb(null, unique + ext)
   }
 })
 
+/* ================= FILE FILTER ================= */
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/webp",
+    "image/gif"
+  ]
+
+  if (!allowedTypes.includes(file.mimetype)) {
+    return cb(new Error("Only image files are allowed"), false)
+  }
+
+  cb(null, true)
+}
+
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB per file
+  fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024
+  }
 })
 
 /* ================= HELPERS ================= */
 const safeParse = (data, fallback = []) => {
   try {
-    return JSON.parse(data || JSON.stringify(fallback))
+    if (data === undefined || data === null || data === "") {
+      return fallback
+    }
+
+    if (typeof data !== "string") {
+      return data
+    }
+
+    return JSON.parse(data)
   } catch {
     return fallback
   }
 }
 
+const toNumber = (value, fallback = 0) => {
+  const number = Number(value)
+
+  return Number.isFinite(number) ? number : fallback
+}
+
 const normalizeSize = (s) => {
   if (!s) return null
+
+  const value = String(s).trim()
+
+  if (!value) return null
+
+  const key = value.toUpperCase()
+
   const map = {
-    SMALL: "S", S: "S",
-    MEDIUM: "M", M: "M",
-    LARGE: "L", L: "L",
-    "X-LARGE": "XL", XL: "XL"
+    SMALL: "Small",
+    MEDIUM: "Medium",
+    LARGE: "Large",
+
+    S: "S",
+    M: "M",
+    L: "L",
+    XL: "XL",
+    XXL: "XXL",
+    XXXL: "XXXL",
+
+    "X-LARGE": "XL",
+    "EXTRA-LARGE": "XL",
+    "EXTRA LARGE": "XL",
+
+    "2XL": "XXL",
+    "2X": "XXL",
+    "XX-LARGE": "XXL",
+    "XX LARGE": "XXL",
+
+    "3XL": "XXXL",
+    "3X": "XXXL",
+    "XXX-LARGE": "XXXL",
+    "XXX LARGE": "XXXL",
+
+    "ONE SIZE": "One Size",
+    "ONESIZE": "One Size",
+
+    "12 INCH": "12 inch",
+    "12 IN": "12 inch",
+    "12IN": "12 inch",
+    "12\"": "12 inch",
+
+    "18 INCH": "18 inch",
+    "18 IN": "18 inch",
+    "18IN": "18 inch",
+    "18\"": "18 inch",
+
+    "24 INCH": "24 inch",
+    "24 IN": "24 inch",
+    "24IN": "24 inch",
+    "24\"": "24 inch",
+
+    "11 OZ": "11 oz",
+    "11OZ": "11 oz",
+
+    "15 OZ": "15 oz",
+    "15OZ": "15 oz",
+
+    "20 OZ": "20 oz",
+    "20OZ": "20 oz"
   }
-  return map[String(s).toUpperCase()] || null
+
+  return map[key] || value
+}
+
+const normalizeColorName = (color) => {
+  if (!color) return ""
+
+  return String(color).trim()
+}
+
+const normalizeColors = (colors = []) => {
+  if (!Array.isArray(colors)) return []
+
+  return colors
+    .map(color => {
+      if (typeof color === "string") {
+        return {
+          name: normalizeColorName(color)
+        }
+      }
+
+      return {
+        ...color,
+        name: normalizeColorName(color?.name)
+      }
+    })
+    .filter(color => color.name)
 }
 
 /* ================= CREATE PRODUCT ================= */
 router.post("/", upload.array("images", 20), async (req, res) => {
   try {
-    const { name, description, category, price, stock } = req.body
+    const {
+      name,
+      description,
+      category
+    } = req.body
 
-    if (!name) {
-      return res.status(400).json({ message: "Name required" })
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Name required"
+      })
     }
 
-    const rawVariants = safeParse(req.body.variants)
-    const rawSizes = safeParse(req.body.sizes)
-    const colors = safeParse(req.body.colors)
+    if (!category || !String(category).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Category required"
+      })
+    }
 
-    const sizes = rawSizes.map(normalizeSize).filter(Boolean)
+    const price = toNumber(
+      req.body.price || req.body.basePrice || req.body.listPrice,
+      0
+    )
+
+    const basePrice = toNumber(req.body.basePrice || price, price)
+    const listPrice = toNumber(req.body.listPrice || price, price)
+
+    const stock = toNumber(
+      req.body.stock || req.body.quantity,
+      0
+    )
+
+    const quantity = toNumber(req.body.quantity || stock, stock)
+
+    const rawVariants = safeParse(req.body.variants, [])
+    const rawSizes = safeParse(req.body.sizes, [])
+    const rawColors = safeParse(req.body.colors, [])
+
+    const sizes = Array.isArray(rawSizes)
+      ? rawSizes.map(normalizeSize).filter(Boolean)
+      : []
+
+    const colors = normalizeColors(rawColors)
 
     const files = req.files || []
     const colorInputs = req.body.imageColors || []
+
+    console.log("📦 PRODUCT BODY:", {
+      name,
+      category,
+      price,
+      basePrice,
+      listPrice,
+      stock,
+      quantity,
+      sizesCount: sizes.length,
+      colorsCount: colors.length,
+      variantsCount: Array.isArray(rawVariants) ? rawVariants.length : 0
+    })
 
     console.log("📸 FILES RECEIVED:", files.length)
 
     /* ================= MAP IMAGES BY COLOR ================= */
     const colorMap = {}
 
-    files.forEach((file, i) => {
+    files.forEach((file, index) => {
       const color = Array.isArray(colorInputs)
-        ? colorInputs[i]
+        ? colorInputs[index]
         : colorInputs
 
-      if (!colorMap[color]) colorMap[color] = []
+      const normalizedColor = normalizeColorName(color)
 
-      colorMap[color].push(`/uploads/${file.filename}`)
+      if (!normalizedColor) return
+
+      if (!colorMap[normalizedColor]) {
+        colorMap[normalizedColor] = []
+      }
+
+      colorMap[normalizedColor].push(`/uploads/${file.filename}`)
     })
 
     /* ================= BUILD VARIANTS ================= */
-    const variants = rawVariants.map(v => ({
-      color: v.color,
-      size: normalizeSize(v.size),
-      stock: Number(v.stock) || 0,
-      price: Number(v.price) || 0,
-      images: colorMap[v.color] || []
-    })).filter(v => v.color && v.size)
+    const variants = Array.isArray(rawVariants)
+      ? rawVariants
+          .map(variant => {
+            const color = normalizeColorName(variant.color)
+            const size = normalizeSize(variant.size)
+
+            const variantPrice = toNumber(
+              variant.price || variant.basePrice || variant.listPrice || price,
+              price
+            )
+
+            const variantStock = toNumber(
+              variant.stock || variant.quantity || stock,
+              stock
+            )
+
+            return {
+              color,
+              size,
+              stock: variantStock,
+              quantity: toNumber(variant.quantity || variantStock, variantStock),
+              price: variantPrice,
+              basePrice: toNumber(variant.basePrice || variantPrice, variantPrice),
+              listPrice: toNumber(variant.listPrice || variantPrice, variantPrice),
+              images: colorMap[color] || []
+            }
+          })
+          .filter(variant => variant.color && variant.size)
+      : []
+
+    if (!variants.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one valid variant is required"
+      })
+    }
 
     const product = await Product.create({
-      name,
-      description,
-      category,
-      price: Number(price) || 0,
-      stock: Number(stock) || 0,
+      name: String(name).trim(),
+      description: description || "",
+      category: String(category).trim(),
+
+      price,
+      basePrice,
+      listPrice,
+
+      stock,
+      quantity,
+
       sizes,
-      variants,
       colors,
+      variants,
+
       active: true
     })
 
     console.log("✅ PRODUCT CREATED:", product.name)
 
-    res.json(product)
+    return res.status(201).json({
+      success: true,
+      data: product
+    })
 
   } catch (err) {
-    console.error("❌ CREATE ERROR:", err)
-    res.status(500).json({ message: "Create failed", error: err.message })
+    console.error("❌ CREATE PRODUCT ERROR:", err)
+
+    return res.status(500).json({
+      success: false,
+      message: "Create failed",
+      error: err.message
+    })
   }
 })
 
 /* ================= GET PRODUCTS ================= */
 router.get("/", async (req, res) => {
   try {
-    const products = await Product.find().sort({ createdAt: -1 })
-    res.json(products)
+    const products = await Product.find()
+      .sort({ createdAt: -1 })
+
+    return res.json({
+      success: true,
+      data: products
+    })
+
   } catch (err) {
-    res.status(500).json({ message: "Fetch failed" })
+    console.error("❌ FETCH PRODUCTS ERROR:", err)
+
+    return res.status(500).json({
+      success: false,
+      message: "Fetch failed",
+      error: err.message
+    })
+  }
+})
+
+/* ================= GET SINGLE PRODUCT ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id)
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      })
+    }
+
+    return res.json({
+      success: true,
+      data: product
+    })
+
+  } catch (err) {
+    console.error("❌ FETCH PRODUCT ERROR:", err)
+
+    return res.status(500).json({
+      success: false,
+      message: "Fetch product failed",
+      error: err.message
+    })
+  }
+})
+
+/* ================= UPDATE PRODUCT ================= */
+router.patch("/:id", upload.array("images", 20), async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id)
+
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      })
+    }
+
+    const updates = {}
+
+    if (req.body.name !== undefined) {
+      updates.name = String(req.body.name).trim()
+    }
+
+    if (req.body.description !== undefined) {
+      updates.description = req.body.description
+    }
+
+    if (req.body.category !== undefined) {
+      updates.category = req.body.category
+    }
+
+    if (
+      req.body.price !== undefined ||
+      req.body.basePrice !== undefined ||
+      req.body.listPrice !== undefined
+    ) {
+      const price = toNumber(
+        req.body.price || req.body.basePrice || req.body.listPrice,
+        product.price || 0
+      )
+
+      updates.price = price
+      updates.basePrice = toNumber(req.body.basePrice || price, price)
+      updates.listPrice = toNumber(req.body.listPrice || price, price)
+    }
+
+    if (
+      req.body.stock !== undefined ||
+      req.body.quantity !== undefined
+    ) {
+      const stock = toNumber(
+        req.body.stock || req.body.quantity,
+        product.stock || 0
+      )
+
+      updates.stock = stock
+      updates.quantity = toNumber(req.body.quantity || stock, stock)
+    }
+
+    if (req.body.sizes !== undefined) {
+      const rawSizes = safeParse(req.body.sizes, [])
+
+      updates.sizes = Array.isArray(rawSizes)
+        ? rawSizes.map(normalizeSize).filter(Boolean)
+        : []
+    }
+
+    if (req.body.colors !== undefined) {
+      const rawColors = safeParse(req.body.colors, [])
+      updates.colors = normalizeColors(rawColors)
+    }
+
+    if (req.body.variants !== undefined) {
+      const rawVariants = safeParse(req.body.variants, [])
+
+      updates.variants = Array.isArray(rawVariants)
+        ? rawVariants
+            .map(variant => {
+              const color = normalizeColorName(variant.color)
+              const size = normalizeSize(variant.size)
+
+              const variantPrice = toNumber(
+                variant.price || variant.basePrice || variant.listPrice || product.price,
+                product.price || 0
+              )
+
+              const variantStock = toNumber(
+                variant.stock || variant.quantity || product.stock,
+                product.stock || 0
+              )
+
+              return {
+                color,
+                size,
+                stock: variantStock,
+                quantity: toNumber(variant.quantity || variantStock, variantStock),
+                price: variantPrice,
+                basePrice: toNumber(variant.basePrice || variantPrice, variantPrice),
+                listPrice: toNumber(variant.listPrice || variantPrice, variantPrice),
+                images: Array.isArray(variant.images) ? variant.images : []
+              }
+            })
+            .filter(variant => variant.color && variant.size)
+        : []
+    }
+
+    const updated = await Product.findByIdAndUpdate(
+      req.params.id,
+      updates,
+      {
+        new: true,
+        runValidators: true
+      }
+    )
+
+    return res.json({
+      success: true,
+      data: updated
+    })
+
+  } catch (err) {
+    console.error("❌ UPDATE PRODUCT ERROR:", err)
+
+    return res.status(500).json({
+      success: false,
+      message: "Update failed",
+      error: err.message
+    })
+  }
+})
+
+/* ================= DELETE PRODUCT ================= */
+router.delete("/:id", async (req, res) => {
+  try {
+    const deleted = await Product.findByIdAndDelete(req.params.id)
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      })
+    }
+
+    return res.json({
+      success: true,
+      message: "Product deleted"
+    })
+
+  } catch (err) {
+    console.error("❌ DELETE PRODUCT ERROR:", err)
+
+    return res.status(500).json({
+      success: false,
+      message: "Delete failed",
+      error: err.message
+    })
   }
 })
 
