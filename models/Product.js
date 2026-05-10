@@ -1,5 +1,35 @@
 import mongoose from "mongoose"
 
+/* ================= NORMALIZE SIZE (MODEL LEVEL) ================= */
+const normalizeSize = (s) => {
+  if (!s) return null
+
+  const map = {
+    XS: "XS",
+
+    SMALL: "S",
+    S: "S",
+
+    MEDIUM: "M",
+    M: "M",
+
+    LARGE: "L",
+    L: "L",
+
+    XL: "XL",
+    "EXTRA-LARGE": "XL",
+    "X-LARGE": "XL",
+
+    XXL: "2XL",
+    "2XL": "2XL",
+
+    "3XL": "3XL",
+    "4XL": "4XL"
+  }
+
+  return map[String(s).toUpperCase()] || null
+}
+
 /* ================= COLOR ================= */
 const colorSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -14,13 +44,13 @@ const variantSchema = new mongoose.Schema({
   size: {
     type: String,
     required: true,
-    enum: ["XS","S","M","L","XL","2XL","3XL","4XL"]
+    enum: ["XS","S","M","L","XL","2XL","3XL","4XL"],
+    set: normalizeSize // 🔥 AUTO FIX INPUT HERE
   },
 
   stock: { type: Number, default: 0 },
   price: { type: Number, default: 0 },
 
-  /* 🔥 MULTIPLE IMAGES */
   images: {
     type: [String],
     default: []
@@ -52,12 +82,12 @@ const productSchema = new mongoose.Schema({
   sizes: {
     type: [String],
     enum: ["XS","S","M","L","XL","2XL","3XL","4XL"],
+    set: (arr) => (arr || []).map(normalizeSize).filter(Boolean), // 🔥 AUTO FIX ARRAY
     default: []
   },
 
   colors: { type: [colorSchema], default: [] },
 
-  /* fallback */
   image: { type: String, default: "" },
 
   active: { type: Boolean, default: true }
