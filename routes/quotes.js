@@ -57,27 +57,16 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const quantity =
-      Number(req.body.quantity) || 1
-
-    const price =
-      Number(req.body.price) || 0
+    const quantity = Number(req.body.quantity) || 1
+    const price = Number(req.body.price) || 0
 
     const quote = await Quote.create({
       ...req.body,
-
       quantity,
-
       price,
-
-      finalPrice:
-        Number(req.body.finalPrice) ||
-        price,
-
+      finalPrice: Number(req.body.finalPrice) || price,
       status: "quotes",
-
       approvalStatus: "pending",
-
       timeline: [
         {
           status: "created",
@@ -105,8 +94,7 @@ router.post("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const quote =
-      await Quote.findById(req.params.id)
+    const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
       return res.status(404).json({
@@ -135,8 +123,7 @@ router.patch("/:id", async (req, res) => {
   try {
     console.log("🔥 PATCH BODY:", req.body)
 
-    const quote =
-      await Quote.findById(req.params.id)
+    const quote = await Quote.findById(req.params.id)
 
     if (!quote) {
       return res.status(404).json({
@@ -149,20 +136,22 @@ router.patch("/:id", async (req, res) => {
       quote.timeline = []
     }
 
+    const approvalStatus = req.body.approvalStatus
+
     let createdOrder = null
 
-    const approvalStatus =
-      req.body.approvalStatus
-
-    /* ================= PREVENT DUPLICATE PROCESSING ================= */
+    /* ================= DUPLICATE GUARD ================= */
 
     if (
       approvalStatus &&
       (
         quote.approvalStatus === "approved" ||
-        quote.approvalStatus === "denied"
+        quote.approvalStatus === "denied" ||
+        quote.orderId
       )
     ) {
+      console.log("⚠️ QUOTE ALREADY PROCESSED:", quote._id)
+
       return res.json({
         success: true,
         message: "Quote already processed",
@@ -176,16 +165,14 @@ router.patch("/:id", async (req, res) => {
       quote.approvalStatus = "approved"
       quote.status = "payment_required"
 
-      const quantity =
-        Number(quote.quantity) || 1
+      const quantity = Number(quote.quantity) || 1
 
-      const itemPrice =
-        Number(
-          req.body.finalPrice ||
-          quote.finalPrice ||
-          quote.price ||
-          0
-        )
+      const itemPrice = Number(
+        req.body.finalPrice ||
+        quote.finalPrice ||
+        quote.price ||
+        0
+      )
 
       quote.finalPrice = itemPrice
 
@@ -205,10 +192,9 @@ router.patch("/:id", async (req, res) => {
           quote.name ||
           "Customer",
 
-        email:
-          String(quote.email || "")
-            .trim()
-            .toLowerCase(),
+        email: String(quote.email || "")
+          .trim()
+          .toLowerCase(),
 
         items: [
           {
@@ -218,9 +204,7 @@ router.patch("/:id", async (req, res) => {
               "Custom Quote Order",
 
             quantity,
-
             price: itemPrice,
-
             source: "quote"
           }
         ],
@@ -247,8 +231,9 @@ router.patch("/:id", async (req, res) => {
         createdOrder._id
       )
 
-      quote.orderId =
-        createdOrder._id
+      quote.orderId = createdOrder._id
+
+      await quote.save()
 
       await sendOrderStatusEmail(
         createdOrder.email,
@@ -260,6 +245,12 @@ router.patch("/:id", async (req, res) => {
         "📧 PAYMENT EMAIL SENT FOR ORDER:",
         createdOrder._id
       )
+
+      return res.json({
+        success: true,
+        data: quote,
+        order: createdOrder
+      })
     }
 
     /* ================= DENY ================= */
@@ -274,6 +265,8 @@ router.patch("/:id", async (req, res) => {
         date: new Date()
       })
 
+      await quote.save()
+
       await sendOrderStatusEmail(
         quote.email,
         "denied",
@@ -281,6 +274,12 @@ router.patch("/:id", async (req, res) => {
       )
 
       console.log("📧 DENIAL EMAIL TRIGGERED")
+
+      return res.json({
+        success: true,
+        data: quote,
+        order: null
+      })
     }
 
     /* ================= GENERAL PATCH FIELDS ================= */
@@ -289,10 +288,10 @@ router.patch("/:id", async (req, res) => {
       if (
         key !== "_id" &&
         key !== "approvalStatus" &&
-        key !== "status"
+        key !== "status" &&
+        key !== "orderId"
       ) {
-        quote[key] =
-          req.body[key]
+        quote[key] = req.body[key]
       }
     })
 
@@ -301,7 +300,7 @@ router.patch("/:id", async (req, res) => {
     res.json({
       success: true,
       data: quote,
-      order: createdOrder
+      order: null
     })
   } catch (err) {
     console.error("❌ PATCH ERROR:", err)
