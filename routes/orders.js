@@ -58,6 +58,81 @@ router.get("/my-orders", async (req, res) => {
     res.status(500).json({ message: err.message })
   }
 })
+
+/* ================= GET SINGLE ORDER ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID"
+      })
+    }
+
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ GET ORDER BY ID ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch order",
+      error: err.message
+    })
+  }
+})
+
+/* ================= GET SINGLE ORDER ================= */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID"
+      })
+    }
+
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ GET ORDER BY ID ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch order",
+      error: err.message
+    })
+  }
+})
+
 /* ================= CREATE ================= */
 router.post("/", async (req, res) => {
   try {
