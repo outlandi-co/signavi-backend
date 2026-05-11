@@ -8,9 +8,34 @@ const router = express.Router()
 console.log("🔥 QUOTES ROUTE LOADED")
 
 /* ================= GET ALL ================= */
+
 router.get("/", async (req, res) => {
   try {
-    const quotes = await Quote.find().sort({
+    const includeProcessed =
+      req.query.includeProcessed === "true"
+
+    const filter = includeProcessed
+      ? {}
+      : {
+          approvalStatus: {
+            $nin: ["approved", "denied"]
+          },
+          status: {
+            $nin: [
+              "approved",
+              "denied",
+              "payment_required",
+              "ready_for_production",
+              "production",
+              "shipping",
+              "shipped",
+              "closed",
+              "archive"
+            ]
+          }
+        }
+
+    const quotes = await Quote.find(filter).sort({
       createdAt: -1
     })
 
@@ -18,17 +43,18 @@ router.get("/", async (req, res) => {
       success: true,
       data: quotes
     })
-
   } catch (err) {
     console.error("❌ GET QUOTES ERROR:", err)
 
     res.status(500).json({
+      success: false,
       message: err.message
     })
   }
 })
 
 /* ================= CREATE ================= */
+
 router.post("/", async (req, res) => {
   try {
     const quantity =
@@ -48,11 +74,9 @@ router.post("/", async (req, res) => {
         Number(req.body.finalPrice) ||
         price,
 
-      status:
-        "quotes",
+      status: "quotes",
 
-      approvalStatus:
-        "pending",
+      approvalStatus: "pending",
 
       timeline: [
         {
@@ -67,17 +91,18 @@ router.post("/", async (req, res) => {
       success: true,
       data: quote
     })
-
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR:", err)
 
     res.status(500).json({
+      success: false,
       message: err.message
     })
   }
 })
 
 /* ================= GET ONE ================= */
+
 router.get("/:id", async (req, res) => {
   try {
     const quote =
@@ -85,6 +110,7 @@ router.get("/:id", async (req, res) => {
 
     if (!quote) {
       return res.status(404).json({
+        success: false,
         message: "Quote not found"
       })
     }
@@ -93,17 +119,18 @@ router.get("/:id", async (req, res) => {
       success: true,
       data: quote
     })
-
   } catch (err) {
     console.error("❌ GET ONE ERROR:", err)
 
     res.status(500).json({
+      success: false,
       message: err.message
     })
   }
 })
 
 /* ================= PATCH ================= */
+
 router.patch("/:id", async (req, res) => {
   try {
     console.log("🔥 PATCH BODY:", req.body)
@@ -113,6 +140,7 @@ router.patch("/:id", async (req, res) => {
 
     if (!quote) {
       return res.status(404).json({
+        success: false,
         message: "Quote not found"
       })
     }
@@ -123,39 +151,53 @@ router.patch("/:id", async (req, res) => {
 
     let createdOrder = null
 
+    const approvalStatus =
+      req.body.approvalStatus
+
+    /* ================= PREVENT DUPLICATE PROCESSING ================= */
+
+    if (
+      approvalStatus &&
+      (
+        quote.approvalStatus === "approved" ||
+        quote.approvalStatus === "denied"
+      )
+    ) {
+      return res.json({
+        success: true,
+        message: "Quote already processed",
+        data: quote
+      })
+    }
+
     /* ================= APPROVE ================= */
 
-    if (req.body.approvalStatus === "approved") {
-      quote.approvalStatus =
-        "approved"
-
-      quote.status =
-        "payment_required"
-
-      quote.timeline.push({
-        status: "approved",
-        note: "Quote approved and converted into an order",
-        date: new Date()
-      })
+    if (approvalStatus === "approved") {
+      quote.approvalStatus = "approved"
+      quote.status = "payment_required"
 
       const quantity =
         Number(quote.quantity) || 1
 
       const itemPrice =
         Number(
+          req.body.finalPrice ||
           quote.finalPrice ||
           quote.price ||
           0
         )
 
-      const subtotal =
-        itemPrice
+      quote.finalPrice = itemPrice
 
-      const tax =
-        subtotal * 0.0825
+      quote.timeline.push({
+        status: "approved",
+        note: "Quote approved and converted into order",
+        date: new Date()
+      })
 
-      const finalPrice =
-        subtotal + tax
+      const subtotal = itemPrice
+      const tax = subtotal * 0.0825
+      const finalPrice = subtotal + tax
 
       createdOrder = await Order.create({
         customerName:
@@ -177,28 +219,19 @@ router.patch("/:id", async (req, res) => {
 
             quantity,
 
-            price:
-              itemPrice,
+            price: itemPrice,
 
-            source:
-              "quote"
+            source: "quote"
           }
         ],
 
         subtotal,
-
         tax,
-
         finalPrice,
 
-        status:
-          "payment_required",
-
-        source:
-          "quote",
-
-        quoteId:
-          quote._id,
+        status: "payment_required",
+        source: "quote",
+        quoteId: quote._id,
 
         timeline: [
           {
@@ -214,7 +247,6 @@ router.patch("/:id", async (req, res) => {
         createdOrder._id
       )
 
-      /* Optional: only works if Quote schema allows this field */
       quote.orderId =
         createdOrder._id
 
@@ -232,12 +264,9 @@ router.patch("/:id", async (req, res) => {
 
     /* ================= DENY ================= */
 
-    if (req.body.approvalStatus === "denied") {
-      quote.approvalStatus =
-        "denied"
-
-      quote.status =
-        "denied"
+    if (approvalStatus === "denied") {
+      quote.approvalStatus = "denied"
+      quote.status = "denied"
 
       quote.timeline.push({
         status: "denied",
@@ -251,19 +280,19 @@ router.patch("/:id", async (req, res) => {
         quote
       )
 
-      console.log(
-        "📧 DENIAL EMAIL TRIGGERED"
-      )
+      console.log("📧 DENIAL EMAIL TRIGGERED")
     }
 
-    /* ================= GENERAL UPDATES ================= */
+    /* ================= GENERAL PATCH FIELDS ================= */
 
     Object.keys(req.body).forEach(key => {
       if (
+        key !== "_id" &&
         key !== "approvalStatus" &&
-        key !== "_id"
+        key !== "status"
       ) {
-        quote[key] = req.body[key]
+        quote[key] =
+          req.body[key]
       }
     })
 
@@ -274,11 +303,11 @@ router.patch("/:id", async (req, res) => {
       data: quote,
       order: createdOrder
     })
-
   } catch (err) {
     console.error("❌ PATCH ERROR:", err)
 
     res.status(500).json({
+      success: false,
       message: err.message
     })
   }
