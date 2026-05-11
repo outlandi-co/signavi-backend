@@ -335,6 +335,19 @@ router.patch("/:id/reopen", async (req, res) => {
   }
 })
 
+/* ================= ROUTES CHECK ================= */
+
+router.get("/routes-check", (req, res) => {
+  res.json({
+    success: true,
+    routes: [
+      "GET /api/support/test",
+      "GET /api/support/routes-check",
+      "PATCH /api/support/:id/archive"
+    ]
+  })
+})
+
 /* ================= ARCHIVE ================= */
 
 router.patch("/:id/archive", async (req, res) => {
