@@ -361,9 +361,8 @@ router.patch("/:id/archive", async (req, res) => {
       })
     }
 
-    ticket.status = "archive"
     ticket.archived = true
-    ticket.archivedAt = new Date()
+    ticket.status = "closed"
     ticket.unreadAdminCount = 0
     ticket.unreadCustomerCount = 0
 
@@ -373,7 +372,6 @@ router.patch("/:id/archive", async (req, res) => {
 
     if (io) {
       io.emit("support:ticket-updated", ticket)
-
       io.emit("support:ticket-archived", {
         ticketId: ticket._id,
         ticket
@@ -389,7 +387,7 @@ router.patch("/:id/archive", async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to archive support ticket"
+      message: error.message || "Failed to archive support ticket"
     })
   }
 })
