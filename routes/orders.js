@@ -241,7 +241,7 @@ router.patch("/:id", async (req, res) => {
       console.warn("⚠️ Email failed:", err.message)
     }
 
-    if (status === "shipped") {
+    if (status === "payment_required" || status === "shipped") {
       try {
         const invoicePath = await generateInvoice(order)
 

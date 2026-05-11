@@ -149,6 +149,9 @@ app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
 app.use("/api/ai-chat", aiChatRoutes)
 
+console.log("🤖 AI CHAT ROUTE MOUNTED")
+
+
 /* ================= ADMIN ================= */
 
 app.use("/api/admin-email", adminEmailRoutes)
