@@ -75,7 +75,6 @@ const safeParse = (data, fallback = []) => {
 
 const toNumber = (value, fallback = 0) => {
   const number = Number(value)
-
   return Number.isFinite(number) ? number : fallback
 }
 
@@ -97,7 +96,6 @@ const normalizeSize = (s) => {
   if (!s) return null
 
   const value = String(s).trim()
-
   if (!value) return null
 
   const key = value.toUpperCase()
@@ -159,7 +157,6 @@ const normalizeSize = (s) => {
 
 const normalizeColorName = (color) => {
   if (!color) return ""
-
   return String(color).trim()
 }
 
@@ -291,7 +288,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
     console.log("📸 FILES RECEIVED:", files.length)
 
-    /* ================= MAP IMAGES BY COLOR ================= */
+    /* ================= MAP IMAGES BY COLOR / DIGITAL PREVIEW ================= */
 
     const colorMap = {}
 
@@ -310,6 +307,18 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
       colorMap[normalizedColor].push(`/uploads/${file.filename}`)
     })
+
+    const digitalPreviewImage =
+      colorMap.__digital_preview__?.[0] ||
+      digitalProduct.previewImage ||
+      ""
+
+    const finalDigitalProduct = productType === "digital"
+      ? {
+          ...digitalProduct,
+          previewImage: digitalPreviewImage
+        }
+      : digitalProduct
 
     /* ================= BUILD VARIANTS ================= */
 
@@ -358,13 +367,20 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       })
     }
 
+    if (productType === "digital" && !finalDigitalProduct.previewImage) {
+      return res.status(400).json({
+        success: false,
+        message: "Digital preview image is required"
+      })
+    }
+
     const product = await Product.create({
       name: String(name).trim(),
       description: description || "",
       category: String(category).trim(),
 
       productType,
-      digitalProduct,
+      digitalProduct: finalDigitalProduct,
 
       price,
       basePrice,
@@ -376,6 +392,11 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       sizes,
       colors,
       variants,
+
+      image: productType === "digital" ? finalDigitalProduct.previewImage : "",
+      images: productType === "digital" && finalDigitalProduct.previewImage
+        ? [finalDigitalProduct.previewImage]
+        : [],
 
       active: true
     })
@@ -465,6 +486,26 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
 
     const updates = {}
 
+    const files = req.files || []
+    const colorInputs = req.body.imageColors || []
+    const colorMap = {}
+
+    files.forEach((file, index) => {
+      const color = Array.isArray(colorInputs)
+        ? colorInputs[index]
+        : colorInputs
+
+      const normalizedColor = normalizeColorName(color)
+
+      if (!normalizedColor) return
+
+      if (!colorMap[normalizedColor]) {
+        colorMap[normalizedColor] = []
+      }
+
+      colorMap[normalizedColor].push(`/uploads/${file.filename}`)
+    })
+
     if (req.body.name !== undefined) {
       updates.name = String(req.body.name).trim()
     }
@@ -482,9 +523,23 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
     }
 
     if (req.body.digitalProduct !== undefined) {
-      updates.digitalProduct = normalizeDigitalProduct(
+      const parsedDigitalProduct = normalizeDigitalProduct(
         safeParse(req.body.digitalProduct, {})
       )
+
+      const digitalPreviewImage =
+        colorMap.__digital_preview__?.[0] ||
+        parsedDigitalProduct.previewImage ||
+        product.digitalProduct?.previewImage ||
+        ""
+
+      updates.digitalProduct = {
+        ...parsedDigitalProduct,
+        previewImage: digitalPreviewImage
+      }
+
+      updates.image = digitalPreviewImage
+      updates.images = digitalPreviewImage ? [digitalPreviewImage] : []
     }
 
     if (
