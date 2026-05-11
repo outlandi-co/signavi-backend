@@ -24,6 +24,8 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true })
 }
 
+console.log("📁 Upload directory:", uploadDir)
+
 /* ================= ROUTES ================= */
 
 import productRoutes from "./routes/products.js"
@@ -38,7 +40,6 @@ import pricingRoutes from "./routes/pricing.js"
 import customerRoutes from "./routes/customers.js"
 import squareRoutes from "./routes/square.js"
 import shippingRoutes from "./routes/shipping.js"
-import uploadRoutes from "./routes/uploadRoutes.js"
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 import supportRoutes from "./routes/support/supportRoutes.js"
 import squareWebhook from "./routes/squareWebhook.js"
@@ -67,6 +68,7 @@ app.use(
       }
 
       console.warn("❌ CORS BLOCKED:", origin)
+
       return callback(new Error("Not allowed by CORS"))
     },
     credentials: true
@@ -91,6 +93,12 @@ app.use(
   })
 )
 
+app.use(
+  express.urlencoded({
+    extended: true
+  })
+)
+
 /* ================= BAD JSON ================= */
 
 app.use((err, req, res, next) => {
@@ -102,6 +110,7 @@ app.use((err, req, res, next) => {
       message: "Invalid JSON format"
     })
   }
+
   next()
 })
 
@@ -109,7 +118,8 @@ app.use((err, req, res, next) => {
 
 app.use(cookieParser())
 
-/* ================= 🔥 STATIC UPLOADS (FIXED) ================= */
+/* ================= 🔥 STATIC UPLOADS ================= */
+/* ✅ Only use this one uploads route */
 
 app.use("/uploads", express.static(uploadDir))
 
@@ -136,9 +146,6 @@ app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
-
-/* 🔥 UPLOAD ROUTE */
-app.use("/uploads", express.static("uploads"))
 
 /* ================= ADMIN ================= */
 
