@@ -43,6 +43,7 @@ import shippingRoutes from "./routes/shipping.js"
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 import supportRoutes from "./routes/support/supportRoutes.js"
 import squareWebhook from "./routes/squareWebhook.js"
+import aiChatRoutes from "./routes/aiChat.js"
 
 /* ================= APP ================= */
 
@@ -146,6 +147,7 @@ app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
+app.use("/api/ai-chat", aiChatRoutes)
 
 /* ================= ADMIN ================= */
 
