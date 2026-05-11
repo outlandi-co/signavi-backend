@@ -79,6 +79,20 @@ const toNumber = (value, fallback = 0) => {
   return Number.isFinite(number) ? number : fallback
 }
 
+const toBoolean = (value, fallback = false) => {
+  if (value === undefined || value === null || value === "") {
+    return fallback
+  }
+
+  if (typeof value === "boolean") return value
+
+  if (typeof value === "string") {
+    return value.toLowerCase() === "true"
+  }
+
+  return Boolean(value)
+}
+
 const normalizeSize = (s) => {
   if (!s) return null
 
@@ -103,14 +117,14 @@ const normalizeSize = (s) => {
     "2X": "XXL",
     "XX-LARGE": "XXL",
     "XX LARGE": "XXL",
-    "XXLARGE": "XXL",
+    XXLARGE: "XXL",
 
     "3XL": "3XL",
     "3X": "3XL",
     XXXL: "3XL",
     "XXX-LARGE": "3XL",
     "XXX LARGE": "3XL",
-    "XXXLARGE": "3XL",
+    XXXLARGE: "3XL",
 
     "ONE SIZE": "One Size",
     ONESIZE: "One Size",
@@ -168,6 +182,40 @@ const normalizeColors = (colors = []) => {
     .filter(color => color.name)
 }
 
+const normalizeProductType = (type) => {
+  const value = String(type || "physical").trim().toLowerCase()
+
+  if (["physical", "digital", "service"].includes(value)) {
+    return value
+  }
+
+  return "physical"
+}
+
+const normalizeDigitalProduct = (data = {}) => {
+  const digitalData = typeof data === "object" && data !== null
+    ? data
+    : {}
+
+  const fileFormats = Array.isArray(digitalData.fileFormats)
+    ? digitalData.fileFormats
+    : String(digitalData.fileFormats || "")
+        .split(",")
+        .map(format => format.trim())
+        .filter(Boolean)
+
+  return {
+    previewImage: digitalData.previewImage || "",
+    downloadFile: digitalData.downloadFile || "",
+    licenseType: digitalData.licenseType || "personal-use",
+    dpi: toNumber(digitalData.dpi, 300),
+    printSize: digitalData.printSize || "",
+    fileFormats,
+    downloadLimit: toNumber(digitalData.downloadLimit, 3),
+    licenseRequired: toBoolean(digitalData.licenseRequired, true)
+  }
+}
+
 /* ================= CREATE PRODUCT ================= */
 
 router.post("/", upload.array("images", 20), async (req, res) => {
@@ -191,6 +239,12 @@ router.post("/", upload.array("images", 20), async (req, res) => {
         message: "Category required"
       })
     }
+
+    const productType = normalizeProductType(req.body.productType)
+
+    const digitalProduct = normalizeDigitalProduct(
+      safeParse(req.body.digitalProduct, {})
+    )
 
     const price = toNumber(
       req.body.price || req.body.basePrice || req.body.listPrice,
@@ -223,6 +277,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
     console.log("📦 PRODUCT BODY:", {
       name,
       category,
+      productType,
       price,
       basePrice,
       listPrice,
@@ -296,7 +351,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
           .filter(variant => variant.color && variant.size)
       : []
 
-    if (!variants.length) {
+    if (productType === "physical" && !variants.length) {
       return res.status(400).json({
         success: false,
         message: "At least one valid variant is required"
@@ -307,6 +362,9 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       name: String(name).trim(),
       description: description || "",
       category: String(category).trim(),
+
+      productType,
+      digitalProduct,
 
       price,
       basePrice,
@@ -417,6 +475,16 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
 
     if (req.body.category !== undefined) {
       updates.category = String(req.body.category).trim()
+    }
+
+    if (req.body.productType !== undefined) {
+      updates.productType = normalizeProductType(req.body.productType)
+    }
+
+    if (req.body.digitalProduct !== undefined) {
+      updates.digitalProduct = normalizeDigitalProduct(
+        safeParse(req.body.digitalProduct, {})
+      )
     }
 
     if (
