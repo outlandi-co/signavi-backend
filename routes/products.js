@@ -79,7 +79,6 @@ const normalizeSize = (s) => {
   if (!s) return null
 
   const value = String(s).trim()
-
   if (!value) return null
 
   const key = value.toUpperCase()
@@ -94,24 +93,20 @@ const normalizeSize = (s) => {
     L: "L",
     XL: "XL",
     XXL: "XXL",
-    XXXL: "XXXL",
-
-    "X-LARGE": "XL",
-    "EXTRA-LARGE": "XL",
-    "EXTRA LARGE": "XL",
 
     "2XL": "XXL",
     "2X": "XXL",
     "XX-LARGE": "XXL",
     "XX LARGE": "XXL",
 
-    "3XL": "XXXL",
-    "3X": "XXXL",
-    "XXX-LARGE": "XXXL",
-    "XXX LARGE": "XXXL",
+    "3XL": "3XL",
+    "3X": "3XL",
+    XXXL: "3XL",
+    "XXX-LARGE": "3XL",
+    "XXX LARGE": "3XL",
 
     "ONE SIZE": "One Size",
-    "ONESIZE": "One Size",
+    ONESIZE: "One Size",
 
     "12 INCH": "12 inch",
     "12 IN": "12 inch",
