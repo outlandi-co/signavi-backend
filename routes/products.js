@@ -7,13 +7,15 @@ import Product from "../models/Product.js"
 const router = express.Router()
 
 /* ================= ENSURE UPLOADS DIR ================= */
-const uploadDir = "uploads"
+
+const uploadDir = path.resolve("uploads")
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true })
 }
 
 /* ================= MULTER STORAGE ================= */
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir)
@@ -28,6 +30,7 @@ const storage = multer.diskStorage({
 })
 
 /* ================= FILE FILTER ================= */
+
 const fileFilter = (req, file, cb) => {
   const allowedTypes = [
     "image/jpeg",
@@ -53,6 +56,7 @@ const upload = multer({
 })
 
 /* ================= HELPERS ================= */
+
 const safeParse = (data, fallback = []) => {
   try {
     if (data === undefined || data === null || data === "") {
@@ -79,6 +83,7 @@ const normalizeSize = (s) => {
   if (!s) return null
 
   const value = String(s).trim()
+
   if (!value) return null
 
   const key = value.toUpperCase()
@@ -98,12 +103,14 @@ const normalizeSize = (s) => {
     "2X": "XXL",
     "XX-LARGE": "XXL",
     "XX LARGE": "XXL",
+    "XXLARGE": "XXL",
 
     "3XL": "3XL",
     "3X": "3XL",
     XXXL: "3XL",
     "XXX-LARGE": "3XL",
     "XXX LARGE": "3XL",
+    "XXXLARGE": "3XL",
 
     "ONE SIZE": "One Size",
     ONESIZE: "One Size",
@@ -162,6 +169,7 @@ const normalizeColors = (colors = []) => {
 }
 
 /* ================= CREATE PRODUCT ================= */
+
 router.post("/", upload.array("images", 20), async (req, res) => {
   try {
     const {
@@ -220,7 +228,8 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       listPrice,
       stock,
       quantity,
-      sizesCount: sizes.length,
+      rawSizes,
+      sizes,
       colorsCount: colors.length,
       variantsCount: Array.isArray(rawVariants) ? rawVariants.length : 0
     })
@@ -228,6 +237,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
     console.log("📸 FILES RECEIVED:", files.length)
 
     /* ================= MAP IMAGES BY COLOR ================= */
+
     const colorMap = {}
 
     files.forEach((file, index) => {
@@ -247,11 +257,20 @@ router.post("/", upload.array("images", 20), async (req, res) => {
     })
 
     /* ================= BUILD VARIANTS ================= */
+
     const variants = Array.isArray(rawVariants)
       ? rawVariants
-          .map(variant => {
+          .map((variant, index) => {
             const color = normalizeColorName(variant.color)
             const size = normalizeSize(variant.size)
+
+            if (!size) {
+              console.warn("⚠️ INVALID VARIANT SIZE:", {
+                index,
+                rawSize: variant.size,
+                variant
+              })
+            }
 
             const variantPrice = toNumber(
               variant.price || variant.basePrice || variant.listPrice || price,
@@ -322,6 +341,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 })
 
 /* ================= GET PRODUCTS ================= */
+
 router.get("/", async (req, res) => {
   try {
     const products = await Product.find()
@@ -344,6 +364,7 @@ router.get("/", async (req, res) => {
 })
 
 /* ================= GET SINGLE PRODUCT ================= */
+
 router.get("/:id", async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
@@ -372,6 +393,7 @@ router.get("/:id", async (req, res) => {
 })
 
 /* ================= UPDATE PRODUCT ================= */
+
 router.patch("/:id", upload.array("images", 20), async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
@@ -394,7 +416,7 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
     }
 
     if (req.body.category !== undefined) {
-      updates.category = req.body.category
+      updates.category = String(req.body.category).trim()
     }
 
     if (
@@ -443,9 +465,17 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
 
       updates.variants = Array.isArray(rawVariants)
         ? rawVariants
-            .map(variant => {
+            .map((variant, index) => {
               const color = normalizeColorName(variant.color)
               const size = normalizeSize(variant.size)
+
+              if (!size) {
+                console.warn("⚠️ INVALID UPDATE VARIANT SIZE:", {
+                  index,
+                  rawSize: variant.size,
+                  variant
+                })
+              }
 
               const variantPrice = toNumber(
                 variant.price || variant.basePrice || variant.listPrice || product.price,
@@ -498,6 +528,7 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
 })
 
 /* ================= DELETE PRODUCT ================= */
+
 router.delete("/:id", async (req, res) => {
   try {
     const deleted = await Product.findByIdAndDelete(req.params.id)
