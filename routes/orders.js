@@ -33,8 +33,6 @@ router.get("/my-orders", async (req, res) => {
   try {
     const email = String(req.query.email || "").trim().toLowerCase()
 
-    console.log("📧 MY ORDERS EMAIL:", email)
-
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -46,6 +44,7 @@ router.get("/my-orders", async (req, res) => {
       email: { $regex: `^${email}$`, $options: "i" }
     }).sort({ createdAt: -1 })
 
+    console.log("📧 MY ORDERS EMAIL:", email)
     console.log("📦 MY ORDERS FOUND:", orders.length)
 
     res.json({
@@ -147,13 +146,8 @@ router.post("/", async (req, res) => {
 
     const order = await Order.create({
       customerName: String(customerName).trim(),
-
-      email: String(email)
-        .trim()
-        .toLowerCase(),
-
-      phone: String(phone || "")
-        .trim(),
+      email: String(email).trim().toLowerCase(),
+      phone: String(phone || "").trim(),
 
       address: {
         street: address?.street || "",
@@ -391,6 +385,159 @@ router.post("/ship/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ SHIP ERROR:", err)
     res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= PACKING SLIP ================= */
+router.get("/:id/packing-slip", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).send("Order not found")
+    }
+
+    const address = order.address || {}
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Packing Slip</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 40px;
+              color: #111;
+            }
+
+            h1 {
+              margin-bottom: 5px;
+            }
+
+            .section {
+              margin-top: 25px;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 15px;
+            }
+
+            th, td {
+              border: 1px solid #ccc;
+              padding: 10px;
+              text-align: left;
+            }
+
+            th {
+              background: #f2f2f2;
+            }
+
+            .print-btn {
+              margin-bottom: 20px;
+              padding: 10px 14px;
+              cursor: pointer;
+            }
+
+            @media print {
+              .print-btn {
+                display: none;
+              }
+            }
+          </style>
+        </head>
+
+        <body>
+          <button class="print-btn" onclick="window.print()">
+            Print Packing Slip
+          </button>
+
+          <h1>SignaVi Studio</h1>
+
+          <p><strong>Packing Slip</strong></p>
+          <p>Order #${order._id.toString().slice(-6)}</p>
+
+          <div class="section">
+            <h2>Customer</h2>
+            <p>${order.customerName || "Customer"}</p>
+            <p>${order.email || ""}</p>
+            <p>${order.phone || ""}</p>
+          </div>
+
+          <div class="section">
+            <h2>Ship To</h2>
+            <p>${address.street || ""}</p>
+            <p>${address.city || ""}, ${address.state || ""} ${address.zip || ""}</p>
+            <p>${address.country || "US"}</p>
+          </div>
+
+          <div class="section">
+            <h2>Items</h2>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Variant</th>
+                  <th>Qty</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                ${(order.items || []).map(item => `
+                  <tr>
+                    <td>${item.name || "Item"}</td>
+                    <td>${item.variant?.color || "-"} / ${item.variant?.size || "-"}</td>
+                    <td>${item.quantity || 1}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        </body>
+      </html>
+    `
+
+    res.setHeader("Content-Type", "text/html")
+    res.send(html)
+
+  } catch (err) {
+    console.error("❌ PACKING SLIP ERROR:", err)
+    res.status(500).send("Packing slip failed")
+  }
+})
+
+/* ================= PRINT ALL ================= */
+router.get("/:id/print-all", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    const baseUrl =
+      process.env.SERVER_URL ||
+      "https://signavi-backend.onrender.com"
+
+    res.json({
+      success: true,
+      label: order.trackingLabelUrl || "",
+      packingSlip: `${baseUrl}/api/orders/${order._id}/packing-slip`
+    })
+
+  } catch (err) {
+    console.error("❌ PRINT ALL ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    })
   }
 })
 
