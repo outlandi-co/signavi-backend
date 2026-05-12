@@ -446,6 +446,151 @@ router.post("/custom", async (req, res) => {
   }
 })
 
+/* ================= DOWNLOAD RECEIPT ================= */
+
+router.get("/:id/receipt", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID"
+      })
+    }
+
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    order.receiptCreatedAt = order.receiptCreatedAt || new Date()
+    await order.save()
+
+    const html = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Receipt</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              padding: 40px;
+              color: #111;
+            }
+
+            h1 {
+              margin-bottom: 4px;
+            }
+
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 20px;
+            }
+
+            th, td {
+              border: 1px solid #ccc;
+              padding: 10px;
+              text-align: left;
+            }
+
+            th {
+              background: #f2f2f2;
+            }
+
+            .total {
+              margin-top: 20px;
+              font-size: 18px;
+              font-weight: bold;
+            }
+
+            .print-btn {
+              margin-bottom: 20px;
+              padding: 10px 14px;
+              cursor: pointer;
+            }
+
+            @media print {
+              .print-btn {
+                display: none;
+              }
+            }
+          </style>
+        </head>
+
+        <body>
+          <button class="print-btn" onclick="window.print()">
+            Print / Save Receipt
+          </button>
+
+          <h1>SignaVi Studio</h1>
+
+          <p><strong>Receipt</strong></p>
+          <p>Order #${order._id.toString().slice(-6)}</p>
+          <p>Date Created: ${order.createdAt ? new Date(order.createdAt).toLocaleString() : ""}</p>
+          <p>Receipt Created: ${order.receiptCreatedAt ? new Date(order.receiptCreatedAt).toLocaleString() : ""}</p>
+
+          <h2>Customer</h2>
+          <p>${order.customerName || "Customer"}</p>
+          <p>${order.email || ""}</p>
+          <p>${order.phone || ""}</p>
+
+          <h2>Items</h2>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Qty</th>
+                <th>Price</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${(order.items || []).map(item => `
+                <tr>
+                  <td>${item.name || "Item"}</td>
+                  <td>${item.quantity || 1}</td>
+                  <td>$${Number(item.price || 0).toFixed(2)}</td>
+                  <td>$${Number((item.price || 0) * (item.quantity || 1)).toFixed(2)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+
+          <p>Subtotal: $${Number(order.subtotal || 0).toFixed(2)}</p>
+          <p>Tax: $${Number(order.tax || 0).toFixed(2)}</p>
+          <p>Shipping: $${Number(order.shipping || 0).toFixed(2)}</p>
+
+          <p class="total">
+            Total Paid: $${Number(order.finalPrice || 0).toFixed(2)}
+          </p>
+
+          <p>Status: ${order.status || ""}</p>
+          <p>Payment Method: ${order.paymentMethod || "Online"}</p>
+        </body>
+      </html>
+    `
+
+    res.setHeader("Content-Type", "text/html")
+    res.send(html)
+
+  } catch (err) {
+    console.error("❌ RECEIPT ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate receipt",
+      error: err.message
+    })
+  }
+})
 
 /* ================= GET SINGLE ORDER ================= */
 

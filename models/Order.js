@@ -144,6 +144,31 @@ shipping: {
     default: []
   },
 
+  invoiceCreatedAt: {
+  type: Date,
+  default: null
+},
+
+receiptCreatedAt: {
+  type: Date,
+  default: null
+},
+
+paidAt: {
+  type: Date,
+  default: null
+},
+
+customQuotePaidAt: {
+  type: Date,
+  default: null
+},
+
+paymentUrlCreatedAt: {
+  type: Date,
+  default: null
+},
+
   paymentUrl: { type: String, default: "" },
   squarePaymentId: { type: String, default: "" },
 
