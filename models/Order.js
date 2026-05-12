@@ -81,11 +81,36 @@ const orderSchema = new mongoose.Schema({
 
   items: { type: [itemSchema], default: [] },
 
-  source: {
-    type: String,
-    enum: ["store", "quote"],
-    default: "store"
-  },
+  orderType: {
+  type: String,
+  enum: ["store", "custom"],
+  default: "store",
+  index: true
+},
+
+source: {
+  type: String,
+  enum: ["store", "quote", "admin", "custom"],
+  default: "store"
+},
+
+paymentMethod: {
+  type: String,
+  default: "",
+  trim: true
+},
+
+notes: {
+  type: String,
+  default: "",
+  trim: true
+},
+
+shipping: {
+  type: Number,
+  default: 0,
+  min: 0
+},
 
   status: {
     type: String,
@@ -140,7 +165,7 @@ orderSchema.pre("save", function () {
   }
 
   this.tax = this.subtotal * 0.0825
-  this.finalPrice = this.subtotal + this.tax
+ this.finalPrice = this.subtotal + this.tax + Number(this.shipping || 0)
 
   if (!this.timeline) {
     this.timeline = []
