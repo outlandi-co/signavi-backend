@@ -302,6 +302,151 @@ router.post("/:id/send-invoice", async (req, res) => {
   }
 })
 
+/* ================= CREATE CUSTOM ORDER ================= */
+
+router.post("/custom", async (req, res) => {
+  try {
+
+    const {
+      customerName,
+      email,
+      phone,
+      address,
+      items,
+      shipping,
+      paymentMethod,
+      notes,
+      status
+    } = req.body
+
+    if (!customerName) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer name is required"
+      })
+    }
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer email is required"
+      })
+    }
+
+    if (!items || !items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one item is required"
+      })
+    }
+
+    const safeItems = items.map(item => ({
+      name: item.name || "Custom Service",
+
+      quantity: Number(item.quantity || 1),
+
+      price: Number(item.price || 0),
+
+      cost: Number(item.cost || 0),
+
+      variant: item.variant || {}
+    }))
+
+    const subtotal = safeItems.reduce(
+      (sum, item) =>
+        sum + (item.price * item.quantity),
+      0
+    )
+
+    const tax = subtotal * 0.0825
+
+    const finalPrice =
+      subtotal +
+      tax +
+      Number(shipping || 0)
+
+    const order = await Order.create({
+
+      customerName:
+        String(customerName).trim(),
+
+      email:
+        String(email)
+          .trim()
+          .toLowerCase(),
+
+      phone:
+        String(phone || "").trim(),
+
+      address: {
+
+        street:
+          address?.street || "",
+
+        city:
+          address?.city || "",
+
+        state:
+          address?.state || "",
+
+        zip:
+          address?.zip || "",
+
+        country:
+          address?.country || "US"
+      },
+
+      items: safeItems,
+
+      subtotal,
+
+      tax,
+
+      shipping:
+        Number(shipping || 0),
+
+      finalPrice,
+
+      paymentMethod:
+        paymentMethod || "",
+
+      notes:
+        notes || "",
+
+      orderType: "custom",
+
+      source: "admin",
+
+      status:
+        status || "payment_required"
+    })
+
+    const io = req.app.get("io")
+
+    if (io) {
+      io.emit("jobCreated", order)
+    }
+
+    res.status(201).json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+
+    console.error(
+      "❌ CREATE CUSTOM ORDER ERROR:",
+      err
+    )
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    })
+  }
+})
+
+
 /* ================= GET SINGLE ORDER ================= */
 
 router.get("/:id", async (req, res) => {
