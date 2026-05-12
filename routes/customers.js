@@ -12,41 +12,92 @@ const safeEmail = (value) => {
   return value.trim().toLowerCase()
 }
 
+const getOrderTotal = (order) => {
+  return Number(
+    order?.finalPrice ||
+    order?.total ||
+    order?.subtotal ||
+    order?.price ||
+    0
+  )
+}
+
 /* ================= GET ALL CUSTOMERS ================= */
 
 router.get("/", async (req, res) => {
   try {
     const users = await User.find({ role: "customer" }).lean()
+    const orders = await Order.find().lean()
 
-    const customers = await Promise.all(
-      users.map(async (user) => {
-        const userEmail = safeEmail(user?.email)
+    const customerMap = new Map()
 
-        if (!userEmail) {
-          return {
-            _id: user?._id,
-            name: user?.name || "",
-            email: "",
-            totalOrders: 0,
-            totalSpent: 0
-          }
-        }
+    users.forEach(user => {
+      const email = safeEmail(user?.email)
+      if (!email) return
 
-        const orders = await Order.find({ email: userEmail }).lean()
-
-        const totalSpent = orders.reduce((sum, o) => {
-          return sum + Number(o?.finalPrice || o?.price || 0)
-        }, 0)
-
-        return {
-          _id: user._id,
-          name: user?.name || "",
-          email: userEmail,
-          totalOrders: orders.length,
-          totalSpent
-        }
+      customerMap.set(email, {
+        _id: String(user._id),
+        userId: user._id,
+        name: user.name || "",
+        email,
+        phone: user.phone || "",
+        role: user.role || "customer",
+        customerType: "registered",
+        totalOrders: 0,
+        totalSpent: 0,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
       })
-    )
+    })
+
+    orders.forEach(order => {
+      const email = safeEmail(order?.email)
+      if (!email) return
+
+      const existing = customerMap.get(email) || {
+        _id: email,
+        userId: null,
+        name:
+          order.customerName ||
+          order.name ||
+          "Guest Customer",
+        email,
+        phone: order.phone || "",
+        role: "guest",
+        customerType: "order",
+        totalOrders: 0,
+        totalSpent: 0,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt
+      }
+
+      existing.name =
+        existing.name ||
+        order.customerName ||
+        order.name ||
+        "Guest Customer"
+
+      existing.phone =
+        existing.phone ||
+        order.phone ||
+        ""
+
+      existing.totalOrders += 1
+      existing.totalSpent += getOrderTotal(order)
+
+      if (!existing.lastOrderAt || order.createdAt > existing.lastOrderAt) {
+        existing.lastOrderAt = order.createdAt
+      }
+
+      customerMap.set(email, existing)
+    })
+
+    const customers = Array.from(customerMap.values()).sort((a, b) => {
+      const dateA = new Date(a.lastOrderAt || a.createdAt || 0).getTime()
+      const dateB = new Date(b.lastOrderAt || b.createdAt || 0).getTime()
+
+      return dateB - dateA
+    })
 
     res.json({
       success: true,
@@ -93,55 +144,81 @@ router.get("/orders/:email", async (req, res) => {
   }
 })
 
-/* ================= GET CUSTOMER BY ID ================= */
+/* ================= GET CUSTOMER BY ID OR EMAIL ================= */
 /* Keep this AFTER /orders/:email */
 
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    let user = null
+    let email = null
+
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      user = await User.findOne({
+        _id: id,
+        role: "customer"
+      }).lean()
+
+      email = safeEmail(user?.email)
+    } else {
+      email = safeEmail(decodeURIComponent(id))
+    }
+
+    if (!email) {
       return res.status(400).json({
         success: false,
-        message: "Invalid customer id"
+        message: "Invalid customer id or email"
       })
     }
 
-    const user = await User.findOne({
-      _id: id,
-      role: "customer"
-    }).lean()
+    const orders = await Order.find({ email })
+      .sort({ createdAt: -1 })
+      .lean()
 
     if (!user) {
+      user = await User.findOne({
+        email,
+        role: "customer"
+      }).lean()
+    }
+
+    if (!user && orders.length === 0) {
       return res.status(404).json({
         success: false,
         message: "Customer not found"
       })
     }
 
-    const email = safeEmail(user.email)
-
-    const orders = email
-      ? await Order.find({ email }).sort({ createdAt: -1 }).lean()
-      : []
-
-    const totalSpent = orders.reduce((sum, o) => {
-      return sum + Number(o?.finalPrice || o?.price || 0)
+    const totalSpent = orders.reduce((sum, order) => {
+      return sum + getOrderTotal(order)
     }, 0)
+
+    const firstOrder = orders[0]
 
     res.json({
       success: true,
       data: {
-        _id: user._id,
-        name: user.name || "",
-        email: email || "",
-        phone: user.phone || "",
-        role: user.role,
+        _id: user?._id || email,
+        userId: user?._id || null,
+        name:
+          user?.name ||
+          firstOrder?.customerName ||
+          firstOrder?.name ||
+          "Guest Customer",
+        email,
+        phone:
+          user?.phone ||
+          firstOrder?.phone ||
+          "",
+        role: user?.role || "guest",
+        customerType: user ? "registered" : "order",
+        status: user ? "Standard" : "Guest",
         totalOrders: orders.length,
         totalSpent,
         orders,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt
+        createdAt: user?.createdAt || firstOrder?.createdAt,
+        updatedAt: user?.updatedAt || firstOrder?.updatedAt
       }
     })
   } catch (err) {
