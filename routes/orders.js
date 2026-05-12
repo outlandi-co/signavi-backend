@@ -10,6 +10,7 @@ const router = express.Router()
 console.log("🔥 ORDERS ROUTES ACTIVE")
 
 /* ================= SOCKET ================= */
+
 const emitOrderUpdate = (req, order) => {
   const io = req.app.get("io")
   if (io) {
@@ -18,6 +19,7 @@ const emitOrderUpdate = (req, order) => {
 }
 
 /* ================= GET ALL ================= */
+
 router.get("/", async (req, res) => {
   try {
     const orders = await Order.find().sort({ createdAt: -1 })
@@ -29,6 +31,7 @@ router.get("/", async (req, res) => {
 })
 
 /* ================= GET CUSTOMER ORDERS ================= */
+
 router.get("/my-orders", async (req, res) => {
   try {
     const email = String(req.query.email || "").trim().toLowerCase()
@@ -58,337 +61,8 @@ router.get("/my-orders", async (req, res) => {
   }
 })
 
-/* ================= GET SINGLE ORDER ================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid order ID"
-      })
-    }
-
-    const order = await Order.findById(id)
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found"
-      })
-    }
-
-    res.json({
-      success: true,
-      data: order
-    })
-
-  } catch (err) {
-    console.error("❌ GET ORDER BY ID ERROR:", err)
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch order",
-      error: err.message
-    })
-  }
-})
-
-/* ================= CREATE ================= */
-router.post("/", async (req, res) => {
-  try {
-    const {
-      customerName,
-      email,
-      phone,
-      address,
-      items
-    } = req.body
-
-    if (!customerName || !email) {
-      return res.status(400).json({
-        success: false,
-        message: "Customer name and email are required"
-      })
-    }
-
-    if (!items || !items.length) {
-      return res.status(400).json({
-        success: false,
-        message: "No items provided"
-      })
-    }
-
-    const safeItems = items.map(item => {
-      const price = Number(item.price || item.selectedVariant?.price || 0)
-
-      if (!price || price <= 0) {
-        throw new Error("Invalid item price")
-      }
-
-      return {
-        name: item.name || "",
-        quantity: Number(item.quantity || 1),
-        price,
-        cost: Number(item.cost || 0),
-        variant: item.variant || item.selectedVariant || {}
-      }
-    })
-
-    const subtotal = safeItems.reduce(
-      (sum, item) => sum + (item.price * item.quantity),
-      0
-    )
-
-    const tax = subtotal * 0.0825
-    const finalPrice = subtotal + tax
-
-    const order = await Order.create({
-      customerName: String(customerName).trim(),
-      email: String(email).trim().toLowerCase(),
-      phone: String(phone || "").trim(),
-
-      address: {
-        street: address?.street || "",
-        city: address?.city || "",
-        state: address?.state || "",
-        zip: address?.zip || "",
-        country: address?.country || "US"
-      },
-
-      items: safeItems,
-      subtotal,
-      tax,
-      finalPrice,
-      status: "payment_required",
-      source: "store"
-    })
-
-    const io = req.app.get("io")
-    if (io) io.emit("jobCreated", order)
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ ORDER CREATE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= UPDATE ================= */
-router.patch("/:id", async (req, res) => {
-  try {
-    const { id } = req.params
-    const {
-      status,
-      finalPrice,
-      note,
-      customerName,
-      email,
-      phone,
-      address
-    } = req.body
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ message: "Invalid ID" })
-    }
-
-    const order = await Order.findById(id)
-    if (!order) return res.status(404).json({ message: "Order not found" })
-
-    if (!order.timeline) order.timeline = []
-
-    if (customerName !== undefined) {
-      order.customerName = String(customerName).trim()
-    }
-
-    if (email !== undefined) {
-      order.email = String(email || "").trim().toLowerCase()
-    }
-
-    if (phone !== undefined) {
-      order.phone = String(phone || "").trim()
-    }
-
-    if (address !== undefined) {
-      order.address = {
-        street: address?.street || order.address?.street || "",
-        city: address?.city || order.address?.city || "",
-        state: address?.state || order.address?.state || "",
-        zip: address?.zip || order.address?.zip || "",
-        country: address?.country || order.address?.country || "US"
-      }
-    }
-
-    if (finalPrice !== undefined) {
-      const parsed = Number(finalPrice)
-      if (!isNaN(parsed) && parsed > 0) {
-        order.finalPrice = parsed
-      }
-    }
-
-    if (status) {
-      const validStatuses = [
-        "quotes",
-        "payment_required",
-        "ready_for_production",
-        "paid",
-        "production",
-        "shipping",
-        "shipped",
-        "delivered",
-        "archive",
-        "denied"
-      ]
-
-      if (!validStatuses.includes(status)) {
-        return res.status(400).json({ message: "Invalid status" })
-      }
-
-      order.status = status
-
-      order.timeline.push({
-        status,
-        note: note || "",
-        date: new Date()
-      })
-    }
-
-    await order.save()
-
-    emitOrderUpdate(req, order)
-
-    try {
-      await sendOrderStatusEmail(order.email, order.status, order)
-    } catch (err) {
-      console.warn("⚠️ Email failed:", err.message)
-    }
-
-    if (status === "payment_required" || status === "shipped") {
-      try {
-        const invoicePath = await generateInvoice(order)
-
-        await sendOrderStatusEmail(
-          order.email,
-          "invoice",
-          order,
-          invoicePath
-        )
-      } catch (err) {
-        console.warn("⚠️ Invoice generation failed:", err.message)
-      }
-    }
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ UPDATE ORDER ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= CHECKOUT ================= */
-router.patch("/:id/checkout", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-    if (!order) return res.status(404).json({ message: "Order not found" })
-
-    const baseUrl = "https://signavi-backend.onrender.com"
-
-    const response = await fetch(
-      `${baseUrl}/api/square/create-payment/${order._id}`,
-      { method: "POST" }
-    )
-
-    const data = await response.json()
-
-    const paymentUrl =
-      data?.paymentUrl ||
-      data?.checkoutUrl ||
-      data?.url
-
-    if (!paymentUrl) {
-      return res.status(500).json({ message: "Payment failed" })
-    }
-
-    order.paymentUrl = paymentUrl
-    order.status = "payment_required"
-
-    await order.save()
-    emitOrderUpdate(req, order)
-
-    await sendOrderStatusEmail(order.email, "payment_required", order)
-
-    res.json({
-      success: true,
-      paymentUrl,
-      orderId: order._id.toString()
-    })
-
-  } catch (err) {
-    console.error("❌ CHECKOUT ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= INVOICE ROUTE ================= */
-router.get("/:id/invoice", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    const invoicePath = await generateInvoice(order)
-
-    await sendOrderStatusEmail(
-      order.email,
-      "invoice",
-      order,
-      invoicePath
-    )
-
-    res.json({
-      success: true,
-      message: "Invoice sent",
-      file: invoicePath
-    })
-
-  } catch (err) {
-    console.error("❌ INVOICE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
-/* ================= SHIP ================= */
-router.post("/ship/:id", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-    if (!order) return res.status(404).json({ message: "Order not found" })
-
-    order.status = "shipped"
-
-    order.timeline.push({
-      status: "shipped",
-      date: new Date()
-    })
-
-    await order.save()
-    emitOrderUpdate(req, order)
-
-    await sendOrderStatusEmail(order.email, "shipped", order)
-
-    res.json({ success: true, data: order })
-
-  } catch (err) {
-    console.error("❌ SHIP ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
 /* ================= PACKING SLIP ================= */
+
 router.get("/:id/packing-slip", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -510,6 +184,7 @@ router.get("/:id/packing-slip", async (req, res) => {
 })
 
 /* ================= PRINT ALL ================= */
+
 router.get("/:id/print-all", async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -538,6 +213,359 @@ router.get("/:id/print-all", async (req, res) => {
       success: false,
       message: err.message
     })
+  }
+})
+
+/* ================= GET SINGLE ORDER ================= */
+
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID"
+      })
+    }
+
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    res.json({
+      success: true,
+      data: order
+    })
+
+  } catch (err) {
+    console.error("❌ GET ORDER BY ID ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch order",
+      error: err.message
+    })
+  }
+})
+
+/* ================= CREATE ================= */
+
+router.post("/", async (req, res) => {
+  try {
+    const {
+      customerName,
+      email,
+      phone,
+      address,
+      items
+    } = req.body
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer email is required"
+      })
+    }
+
+    if (!items || !items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No items provided"
+      })
+    }
+
+    const safeItems = items.map(item => {
+      const rawPrice =
+        item.price ??
+        item.selectedVariant?.price ??
+        0
+
+      const price = Number(rawPrice)
+
+      console.log("🛒 ORDER ITEM:", {
+        name: item.name,
+        rawPrice,
+        parsedPrice: price
+      })
+
+      if (isNaN(price)) {
+        throw new Error(
+          `Invalid item price for ${item.name || "item"}`
+        )
+      }
+
+      return {
+        name: item.name || "",
+        quantity: Number(item.quantity || 1),
+        price,
+        cost: Number(item.cost || 0),
+        variant: item.variant || item.selectedVariant || {}
+      }
+    })
+
+    const subtotal = safeItems.reduce(
+      (sum, item) => sum + (item.price * item.quantity),
+      0
+    )
+
+    const tax = subtotal * 0.0825
+    const finalPrice = subtotal + tax
+
+    const order = await Order.create({
+      customerName: String(customerName || "Customer").trim(),
+      email: String(email).trim().toLowerCase(),
+      phone: String(phone || "").trim(),
+
+      address: {
+        street: address?.street || "",
+        city: address?.city || "",
+        state: address?.state || "",
+        zip: address?.zip || "",
+        country: address?.country || "US"
+      },
+
+      items: safeItems,
+      subtotal,
+      tax,
+      finalPrice,
+      status: "payment_required",
+      source: "store"
+    })
+
+    const io = req.app.get("io")
+    if (io) io.emit("jobCreated", order)
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ ORDER CREATE ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    })
+  }
+})
+
+/* ================= UPDATE ================= */
+
+router.patch("/:id", async (req, res) => {
+  try {
+    const { id } = req.params
+    const {
+      status,
+      finalPrice,
+      note,
+      customerName,
+      email,
+      phone,
+      address
+    } = req.body
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid ID" })
+    }
+
+    const order = await Order.findById(id)
+    if (!order) return res.status(404).json({ message: "Order not found" })
+
+    if (!order.timeline) order.timeline = []
+
+    if (customerName !== undefined) {
+      order.customerName = String(customerName).trim()
+    }
+
+    if (email !== undefined) {
+      order.email = String(email || "").trim().toLowerCase()
+    }
+
+    if (phone !== undefined) {
+      order.phone = String(phone || "").trim()
+    }
+
+    if (address !== undefined) {
+      order.address = {
+        street: address?.street || order.address?.street || "",
+        city: address?.city || order.address?.city || "",
+        state: address?.state || order.address?.state || "",
+        zip: address?.zip || order.address?.zip || "",
+        country: address?.country || order.address?.country || "US"
+      }
+    }
+
+    if (finalPrice !== undefined) {
+      const parsed = Number(finalPrice)
+      if (!isNaN(parsed) && parsed > 0) {
+        order.finalPrice = parsed
+      }
+    }
+
+    if (status) {
+      const validStatuses = [
+        "quotes",
+        "payment_required",
+        "ready_for_production",
+        "paid",
+        "production",
+        "shipping",
+        "shipped",
+        "delivered",
+        "archive",
+        "denied"
+      ]
+
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ message: "Invalid status" })
+      }
+
+      order.status = status
+
+      order.timeline.push({
+        status,
+        note: note || "",
+        date: new Date()
+      })
+    }
+
+    await order.save()
+
+    emitOrderUpdate(req, order)
+
+    try {
+      await sendOrderStatusEmail(order.email, order.status, order)
+    } catch (err) {
+      console.warn("⚠️ Email failed:", err.message)
+    }
+
+    if (status === "payment_required" || status === "shipped") {
+      try {
+        const invoicePath = await generateInvoice(order)
+
+        await sendOrderStatusEmail(
+          order.email,
+          "invoice",
+          order,
+          invoicePath
+        )
+      } catch (err) {
+        console.warn("⚠️ Invoice generation failed:", err.message)
+      }
+    }
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ UPDATE ORDER ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= CHECKOUT ================= */
+
+router.patch("/:id/checkout", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+    if (!order) return res.status(404).json({ message: "Order not found" })
+
+    const baseUrl = "https://signavi-backend.onrender.com"
+
+    const response = await fetch(
+      `${baseUrl}/api/square/create-payment/${order._id}`,
+      { method: "POST" }
+    )
+
+    const data = await response.json()
+
+    const paymentUrl =
+      data?.paymentUrl ||
+      data?.checkoutUrl ||
+      data?.url
+
+    if (!paymentUrl) {
+      return res.status(500).json({ message: "Payment failed" })
+    }
+
+    order.paymentUrl = paymentUrl
+    order.status = "payment_required"
+
+    await order.save()
+    emitOrderUpdate(req, order)
+
+    await sendOrderStatusEmail(order.email, "payment_required", order)
+
+    res.json({
+      success: true,
+      paymentUrl,
+      orderId: order._id.toString()
+    })
+
+  } catch (err) {
+    console.error("❌ CHECKOUT ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= INVOICE ROUTE ================= */
+
+router.get("/:id/invoice", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" })
+    }
+
+    const invoicePath = await generateInvoice(order)
+
+    await sendOrderStatusEmail(
+      order.email,
+      "invoice",
+      order,
+      invoicePath
+    )
+
+    res.json({
+      success: true,
+      message: "Invoice sent",
+      file: invoicePath
+    })
+
+  } catch (err) {
+    console.error("❌ INVOICE ERROR:", err)
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/* ================= SHIP ================= */
+
+router.post("/ship/:id", async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+    if (!order) return res.status(404).json({ message: "Order not found" })
+
+    order.status = "shipped"
+
+    order.timeline.push({
+      status: "shipped",
+      date: new Date()
+    })
+
+    await order.save()
+    emitOrderUpdate(req, order)
+
+    await sendOrderStatusEmail(order.email, "shipped", order)
+
+    res.json({ success: true, data: order })
+
+  } catch (err) {
+    console.error("❌ SHIP ERROR:", err)
+    res.status(500).json({ message: err.message })
   }
 })
 
