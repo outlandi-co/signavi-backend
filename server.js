@@ -11,6 +11,10 @@ import path from "path"
 import fs from "fs"
 import { fileURLToPath } from "url"
 
+/* ================= MODELS ================= */
+
+import Order from "./models/Order.js"
+
 /* ================= PATH SETUP ================= */
 
 const __filename = fileURLToPath(import.meta.url)
@@ -120,7 +124,6 @@ app.use((err, req, res, next) => {
 app.use(cookieParser())
 
 /* ================= 🔥 STATIC UPLOADS ================= */
-/* ✅ Only use this one uploads route */
 
 app.use("/uploads", express.static(uploadDir))
 
@@ -131,6 +134,139 @@ app.get("/api/ping", (req, res) => {
     success: true,
     message: "SignaVi backend is running"
   })
+})
+
+/* ================= CSV HELPERS ================= */
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return ""
+
+  const stringValue = String(value).replace(/"/g, '""')
+
+  return `"${stringValue}"`
+}
+
+const sendCSV = (res, filename, rows) => {
+  const csv = rows.map(row => row.map(csvEscape).join(",")).join("\n")
+
+  res.setHeader("Content-Type", "text/csv")
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filename}"`
+  )
+
+  res.send(csv)
+}
+
+/* ================= EXPORT ORDERS CSV ================= */
+
+app.get("/api/orders/export", async (req, res) => {
+  try {
+    const orders = await Order.find().sort({ createdAt: -1 })
+
+    const rows = [
+      [
+        "Order ID",
+        "Customer Name",
+        "Email",
+        "Phone",
+        "Status",
+        "Subtotal",
+        "Tax",
+        "Shipping",
+        "Final Price",
+        "Profit",
+        "Created At"
+      ],
+
+      ...orders.map(order => [
+        order._id,
+        order.customerName || "",
+        order.email || "",
+        order.phone || "",
+        order.status || "",
+        Number(order.subtotal || 0).toFixed(2),
+        Number(order.tax || 0).toFixed(2),
+        Number(order.shipping || 0).toFixed(2),
+        Number(order.finalPrice || order.price || 0).toFixed(2),
+        Number(order.profit || 0).toFixed(2),
+        order.createdAt
+          ? new Date(order.createdAt).toLocaleString()
+          : ""
+      ])
+    ]
+
+    sendCSV(res, "signavi-orders.csv", rows)
+
+  } catch (err) {
+    console.error("❌ ORDERS CSV ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to export orders CSV",
+      error: err.message
+    })
+  }
+})
+
+/* ================= EXPORT TAX CSV ================= */
+
+app.get("/api/export-taxes", async (req, res) => {
+  try {
+    const orders = await Order.find({
+      status: {
+        $in: [
+          "paid",
+          "ready_for_production",
+          "production",
+          "shipping",
+          "shipped",
+          "delivered"
+        ]
+      }
+    }).sort({ createdAt: -1 })
+
+    const rows = [
+      [
+        "Date",
+        "Order ID",
+        "Customer",
+        "Email",
+        "Subtotal",
+        "Tax Collected",
+        "Shipping",
+        "Total Paid",
+        "Estimated Profit",
+        "Status"
+      ],
+
+      ...orders.map(order => [
+        order.createdAt
+          ? new Date(order.createdAt).toLocaleDateString()
+          : "",
+        order._id,
+        order.customerName || "",
+        order.email || "",
+        Number(order.subtotal || 0).toFixed(2),
+        Number(order.tax || 0).toFixed(2),
+        Number(order.shipping || 0).toFixed(2),
+        Number(order.finalPrice || order.price || 0).toFixed(2),
+        Number(order.profit || 0).toFixed(2),
+        order.status || ""
+      ])
+    ]
+
+    sendCSV(res, "signavi-tax-report.csv", rows)
+
+  } catch (err) {
+    console.error("❌ TAX CSV ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to export tax CSV",
+      error: err.message
+    })
+  }
 })
 
 /* ================= ROUTES ================= */
@@ -150,7 +286,6 @@ app.use("/api/shipping", shippingRoutes)
 app.use("/api/ai-chat", aiChatRoutes)
 
 console.log("🤖 AI CHAT ROUTE MOUNTED")
-
 
 /* ================= ADMIN ================= */
 
