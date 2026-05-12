@@ -96,50 +96,29 @@ router.get("/:id", async (req, res) => {
   }
 })
 
-/* ================= GET SINGLE ORDER ================= */
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid order ID"
-      })
-    }
-
-    const order = await Order.findById(id)
-
-    if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found"
-      })
-    }
-
-    res.json({
-      success: true,
-      data: order
-    })
-
-  } catch (err) {
-    console.error("❌ GET ORDER BY ID ERROR:", err)
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch order",
-      error: err.message
-    })
-  }
-})
-
 /* ================= CREATE ================= */
 router.post("/", async (req, res) => {
   try {
-    const { email, items } = req.body
+    const {
+      customerName,
+      email,
+      phone,
+      address,
+      items
+    } = req.body
+
+    if (!customerName || !email) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer name and email are required"
+      })
+    }
 
     if (!items || !items.length) {
-      return res.status(400).json({ message: "No items provided" })
+      return res.status(400).json({
+        success: false,
+        message: "No items provided"
+      })
     }
 
     const safeItems = items.map(item => {
@@ -150,31 +129,48 @@ router.post("/", async (req, res) => {
       }
 
       return {
-        name: item.name,
+        name: item.name || "",
         quantity: Number(item.quantity || 1),
         price,
-        variant: item.variant || item.selectedVariant
+        cost: Number(item.cost || 0),
+        variant: item.variant || item.selectedVariant || {}
       }
     })
 
     const subtotal = safeItems.reduce(
-      (sum, i) => sum + (i.price * i.quantity),
+      (sum, item) => sum + (item.price * item.quantity),
       0
     )
 
     const tax = subtotal * 0.0825
     const finalPrice = subtotal + tax
 
-const order = await Order.create({
-  customerName: req.body.customerName || "Customer",
-  email: String(email || "").trim().toLowerCase(),
-  items: safeItems,
-  subtotal,
-  tax,
-  finalPrice,
-  status: "payment_required",
-  source: "store"
-})
+    const order = await Order.create({
+      customerName: String(customerName).trim(),
+
+      email: String(email)
+        .trim()
+        .toLowerCase(),
+
+      phone: String(phone || "")
+        .trim(),
+
+      address: {
+        street: address?.street || "",
+        city: address?.city || "",
+        state: address?.state || "",
+        zip: address?.zip || "",
+        country: address?.country || "US"
+      },
+
+      items: safeItems,
+      subtotal,
+      tax,
+      finalPrice,
+      status: "payment_required",
+      source: "store"
+    })
+
     const io = req.app.get("io")
     if (io) io.emit("jobCreated", order)
 
@@ -190,7 +186,15 @@ const order = await Order.create({
 router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params
-    const { status, finalPrice, note } = req.body
+    const {
+      status,
+      finalPrice,
+      note,
+      customerName,
+      email,
+      phone,
+      address
+    } = req.body
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ message: "Invalid ID" })
@@ -201,6 +205,28 @@ router.patch("/:id", async (req, res) => {
 
     if (!order.timeline) order.timeline = []
 
+    if (customerName !== undefined) {
+      order.customerName = String(customerName).trim()
+    }
+
+    if (email !== undefined) {
+      order.email = String(email || "").trim().toLowerCase()
+    }
+
+    if (phone !== undefined) {
+      order.phone = String(phone || "").trim()
+    }
+
+    if (address !== undefined) {
+      order.address = {
+        street: address?.street || order.address?.street || "",
+        city: address?.city || order.address?.city || "",
+        state: address?.state || order.address?.state || "",
+        zip: address?.zip || order.address?.zip || "",
+        country: address?.country || order.address?.country || "US"
+      }
+    }
+
     if (finalPrice !== undefined) {
       const parsed = Number(finalPrice)
       if (!isNaN(parsed) && parsed > 0) {
@@ -210,11 +236,15 @@ router.patch("/:id", async (req, res) => {
 
     if (status) {
       const validStatuses = [
+        "quotes",
         "payment_required",
         "ready_for_production",
+        "paid",
         "production",
         "shipping",
         "shipped",
+        "delivered",
+        "archive",
         "denied"
       ]
 
