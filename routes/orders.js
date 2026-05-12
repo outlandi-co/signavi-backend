@@ -203,7 +203,8 @@ router.get("/:id/print-all", async (req, res) => {
     res.json({
       success: true,
       label: order.trackingLabelUrl || "",
-      packingSlip: `${baseUrl}/api/orders/${order._id}/packing-slip`
+      packingSlip: `${baseUrl}/api/orders/${order._id}/packing-slip`,
+      invoice: `${baseUrl}/api/orders/${order._id}/invoice`
     })
 
   } catch (err) {
@@ -212,6 +213,91 @@ router.get("/:id/print-all", async (req, res) => {
     res.status(500).json({
       success: false,
       message: err.message
+    })
+  }
+})
+
+/* ================= DOWNLOAD INVOICE ================= */
+
+router.get("/:id/invoice", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID"
+      })
+    }
+
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    const invoicePath = await generateInvoice(order)
+    const fileName = `signavi-invoice-${order._id.toString().slice(-6)}.pdf`
+
+    res.download(invoicePath, fileName)
+
+  } catch (err) {
+    console.error("❌ INVOICE DOWNLOAD ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to download invoice",
+      error: err.message
+    })
+  }
+})
+
+/* ================= EMAIL INVOICE ================= */
+
+router.post("/:id/send-invoice", async (req, res) => {
+  try {
+    const { id } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID"
+      })
+    }
+
+    const order = await Order.findById(id)
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      })
+    }
+
+    const invoicePath = await generateInvoice(order)
+
+    await sendOrderStatusEmail(
+      order.email,
+      "invoice",
+      order,
+      invoicePath
+    )
+
+    res.json({
+      success: true,
+      message: "Invoice sent successfully"
+    })
+
+  } catch (err) {
+    console.error("❌ SEND INVOICE ERROR:", err)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to send invoice",
+      error: err.message
     })
   }
 })
@@ -511,37 +597,6 @@ router.patch("/:id/checkout", async (req, res) => {
   }
 })
 
-/* ================= INVOICE ROUTE ================= */
-
-router.get("/:id/invoice", async (req, res) => {
-  try {
-    const order = await Order.findById(req.params.id)
-
-    if (!order) {
-      return res.status(404).json({ message: "Order not found" })
-    }
-
-    const invoicePath = await generateInvoice(order)
-
-    await sendOrderStatusEmail(
-      order.email,
-      "invoice",
-      order,
-      invoicePath
-    )
-
-    res.json({
-      success: true,
-      message: "Invoice sent",
-      file: invoicePath
-    })
-
-  } catch (err) {
-    console.error("❌ INVOICE ERROR:", err)
-    res.status(500).json({ message: err.message })
-  }
-})
-
 /* ================= SHIP ================= */
 
 router.post("/ship/:id", async (req, res) => {
@@ -550,6 +605,8 @@ router.post("/ship/:id", async (req, res) => {
     if (!order) return res.status(404).json({ message: "Order not found" })
 
     order.status = "shipped"
+
+    if (!order.timeline) order.timeline = []
 
     order.timeline.push({
       status: "shipped",
