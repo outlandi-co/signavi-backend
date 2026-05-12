@@ -73,6 +73,7 @@ const orderSchema = new mongoose.Schema({
 
   subtotal: { type: Number, default: 0, min: 0 },
   tax: { type: Number, default: 0, min: 0 },
+  shipping: { type: Number, default: 0, min: 0 },
   finalPrice: { type: Number, default: 0, min: 0 },
 
   cogs: { type: Number, default: 0 },
@@ -82,35 +83,36 @@ const orderSchema = new mongoose.Schema({
   items: { type: [itemSchema], default: [] },
 
   orderType: {
-  type: String,
-  enum: ["store", "custom"],
-  default: "store",
-  index: true
-},
+    type: String,
+    enum: ["store", "custom"],
+    default: "store",
+    index: true
+  },
 
-source: {
-  type: String,
-  enum: ["store", "quote", "admin", "custom"],
-  default: "store"
-},
+  source: {
+    type: String,
+    enum: ["store", "quote", "admin", "custom"],
+    default: "store"
+  },
 
-paymentMethod: {
-  type: String,
-  default: "",
-  trim: true
-},
+  paymentMethod: {
+    type: String,
+    default: "",
+    trim: true
+  },
 
-notes: {
-  type: String,
-  default: "",
-  trim: true
-},
+  paymentStatus: {
+    type: String,
+    enum: ["unpaid", "paid", "refunded"],
+    default: "unpaid",
+    index: true
+  },
 
-shipping: {
-  type: Number,
-  default: 0,
-  min: 0
-},
+  notes: {
+    type: String,
+    default: "",
+    trim: true
+  },
 
   status: {
     type: String,
@@ -130,6 +132,11 @@ shipping: {
     index: true
   },
 
+  printStatus: {
+    type: String,
+    default: ""
+  },
+
   trackingNumber: { type: String, default: "" },
   trackingLink: { type: String, default: "" },
 
@@ -145,29 +152,39 @@ shipping: {
   },
 
   invoiceCreatedAt: {
-  type: Date,
-  default: null
-},
+    type: Date,
+    default: null
+  },
 
-receiptCreatedAt: {
-  type: Date,
-  default: null
-},
+  receiptCreatedAt: {
+    type: Date,
+    default: null
+  },
 
-paidAt: {
-  type: Date,
-  default: null
-},
+  receiptEmailSent: {
+    type: Boolean,
+    default: false
+  },
 
-customQuotePaidAt: {
-  type: Date,
-  default: null
-},
+  receiptEmailSentAt: {
+    type: Date,
+    default: null
+  },
 
-paymentUrlCreatedAt: {
-  type: Date,
-  default: null
-},
+  paidAt: {
+    type: Date,
+    default: null
+  },
+
+  customQuotePaidAt: {
+    type: Date,
+    default: null
+  },
+
+  paymentUrlCreatedAt: {
+    type: Date,
+    default: null
+  },
 
   paymentUrl: { type: String, default: "" },
   squarePaymentId: { type: String, default: "" },
@@ -180,7 +197,6 @@ paymentUrlCreatedAt: {
    AUTO ENGINE
 ========================================================= */
 orderSchema.pre("save", function () {
-
   if (this.items?.length) {
     this.subtotal = this.items.reduce((sum, item) => {
       const price = Number(item.price || 0)
@@ -190,7 +206,7 @@ orderSchema.pre("save", function () {
   }
 
   this.tax = this.subtotal * 0.0825
- this.finalPrice = this.subtotal + this.tax + Number(this.shipping || 0)
+  this.finalPrice = this.subtotal + this.tax + Number(this.shipping || 0)
 
   if (!this.timeline) {
     this.timeline = []
@@ -199,20 +215,19 @@ orderSchema.pre("save", function () {
   if (this.timeline.length === 0) {
     this.timeline.push({
       status: this.status,
-      date: new Date()
+      date: new Date(),
+      note: "Order created"
     })
   }
 
   if (!this.cogs || this.cogs === 0) {
     this.cogs = (this.items || []).reduce((sum, item) => {
-
       if (item.cost && item.cost > 0) {
         return sum + (item.cost * item.quantity)
       }
 
       const estimatedCost = (item.price || 0) * 0.4
       return sum + (estimatedCost * (item.quantity || 1))
-
     }, 0)
   }
 
