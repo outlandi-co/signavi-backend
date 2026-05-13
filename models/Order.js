@@ -1,19 +1,52 @@
 import mongoose from "mongoose"
 
 /* ================= ITEM SCHEMA ================= */
+
 const itemSchema = new mongoose.Schema({
-  name: { type: String, default: "", trim: true },
-  quantity: { type: Number, default: 1, min: 1 },
-  price: { type: Number, default: 0, min: 0 },
-  cost: { type: Number, default: 0, min: 0 },
+  name: {
+    type: String,
+    default: "",
+    trim: true
+  },
+
+  quantity: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+
+  price: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  cost: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
 
   variant: {
-    color: { type: String, default: "", lowercase: true, trim: true },
-    size: { type: String, default: "", uppercase: true, trim: true }
+    color: {
+      type: String,
+      default: "",
+      lowercase: true,
+      trim: true
+    },
+
+    size: {
+      type: String,
+      default: "",
+      uppercase: true,
+      trim: true
+    }
   }
+
 }, { _id: false })
 
 /* ================= ORDER SCHEMA ================= */
+
 const orderSchema = new mongoose.Schema({
 
   user: {
@@ -44,11 +77,35 @@ const orderSchema = new mongoose.Schema({
   },
 
   address: {
-    street: { type: String, default: "", trim: true },
-    city: { type: String, default: "", trim: true },
-    state: { type: String, default: "", trim: true },
-    zip: { type: String, default: "", trim: true },
-    country: { type: String, default: "US", trim: true }
+    street: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    city: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    state: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    zip: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    country: {
+      type: String,
+      default: "US",
+      trim: true
+    }
   },
 
   quoteId: {
@@ -58,29 +115,84 @@ const orderSchema = new mongoose.Schema({
     index: true
   },
 
-  quantity: { type: Number, default: 1, min: 1 },
-  printType: { type: String, default: "screenprint" },
+  quantity: {
+    type: Number,
+    default: 1,
+    min: 1
+  },
+
+  printType: {
+    type: String,
+    default: "screenprint"
+  },
 
   artworks: [
     {
-      url: { type: String, required: true },
-      public_id: { type: String, default: "" },
-      filename: { type: String, default: "" }
+      url: {
+        type: String,
+        required: true
+      },
+
+      public_id: {
+        type: String,
+        default: ""
+      },
+
+      filename: {
+        type: String,
+        default: ""
+      }
     }
   ],
 
-  artwork: { type: String, default: "" },
+  artwork: {
+    type: String,
+    default: ""
+  },
 
-  subtotal: { type: Number, default: 0, min: 0 },
-  tax: { type: Number, default: 0, min: 0 },
-  shipping: { type: Number, default: 0, min: 0 },
-  finalPrice: { type: Number, default: 0, min: 0 },
+  subtotal: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
 
-  cogs: { type: Number, default: 0 },
-  profit: { type: Number, default: 0 },
-  margin: { type: Number, default: 0 },
+  tax: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
 
-  items: { type: [itemSchema], default: [] },
+  shipping: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  finalPrice: {
+    type: Number,
+    default: 0,
+    min: 0
+  },
+
+  cogs: {
+    type: Number,
+    default: 0
+  },
+
+  profit: {
+    type: Number,
+    default: 0
+  },
+
+  margin: {
+    type: Number,
+    default: 0
+  },
+
+  items: {
+    type: [itemSchema],
+    default: []
+  },
 
   orderType: {
     type: String,
@@ -128,6 +240,7 @@ const orderSchema = new mongoose.Schema({
       "archive",
       "denied"
     ],
+
     default: "payment_required",
     index: true
   },
@@ -137,17 +250,34 @@ const orderSchema = new mongoose.Schema({
     default: ""
   },
 
-  trackingNumber: { type: String, default: "" },
-  trackingLink: { type: String, default: "" },
+  trackingNumber: {
+    type: String,
+    default: ""
+  },
+
+  trackingLink: {
+    type: String,
+    default: ""
+  },
 
   timeline: {
     type: [
       {
-        status: { type: String },
-        date: { type: Date, default: Date.now },
-        note: { type: String }
+        status: {
+          type: String
+        },
+
+        date: {
+          type: Date,
+          default: Date.now
+        },
+
+        note: {
+          type: String
+        }
       }
     ],
+
     default: []
   },
 
@@ -186,33 +316,74 @@ const orderSchema = new mongoose.Schema({
     default: null
   },
 
-  paymentUrl: { type: String, default: "" },
-  squarePaymentId: { type: String, default: "" },
+  shippingStartedAt: {
+    type: Date,
+    default: null
+  },
 
-  currency: { type: String, default: "usd" }
+  shippedAt: {
+    type: Date,
+    default: null
+  },
+
+  deliveredAt: {
+    type: Date,
+    default: null
+  },
+
+  archivedAt: {
+    type: Date,
+    default: null
+  },
+
+  paymentUrl: {
+    type: String,
+    default: ""
+  },
+
+  squarePaymentId: {
+    type: String,
+    default: ""
+  },
+
+  currency: {
+    type: String,
+    default: "usd"
+  }
 
 }, { timestamps: true })
 
 /* =========================================================
    AUTO ENGINE
 ========================================================= */
+
 orderSchema.pre("save", function () {
+
   if (this.items?.length) {
+
     this.subtotal = this.items.reduce((sum, item) => {
+
       const price = Number(item.price || 0)
       const qty = Number(item.quantity || 1)
+
       return sum + (price * qty)
+
     }, 0)
   }
 
   this.tax = this.subtotal * 0.0825
-  this.finalPrice = this.subtotal + this.tax + Number(this.shipping || 0)
+
+  this.finalPrice =
+    this.subtotal +
+    this.tax +
+    Number(this.shipping || 0)
 
   if (!this.timeline) {
     this.timeline = []
   }
 
   if (this.timeline.length === 0) {
+
     this.timeline.push({
       status: this.status,
       date: new Date(),
@@ -221,13 +392,21 @@ orderSchema.pre("save", function () {
   }
 
   if (!this.cogs || this.cogs === 0) {
+
     this.cogs = (this.items || []).reduce((sum, item) => {
+
       if (item.cost && item.cost > 0) {
         return sum + (item.cost * item.quantity)
       }
 
-      const estimatedCost = (item.price || 0) * 0.4
-      return sum + (estimatedCost * (item.quantity || 1))
+      const estimatedCost =
+        (item.price || 0) * 0.4
+
+      return sum + (
+        estimatedCost *
+        (item.quantity || 1)
+      )
+
     }, 0)
   }
 
@@ -240,8 +419,11 @@ orderSchema.pre("save", function () {
   this.cogs = Number(this.cogs.toFixed(2))
   this.profit = Number(this.profit.toFixed(2))
   this.margin = Number(this.margin.toFixed(2))
+
 })
 
-const Order = mongoose.models.Order || mongoose.model("Order", orderSchema)
+const Order =
+  mongoose.models.Order ||
+  mongoose.model("Order", orderSchema)
 
 export default Order

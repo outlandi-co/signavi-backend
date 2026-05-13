@@ -20,7 +20,7 @@ import Order from "./models/Order.js"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-/* ================= 🔥 ENSURE UPLOAD DIR ================= */
+/* ================= ENSURE UPLOAD DIR ================= */
 
 const uploadDir = path.join(process.cwd(), "uploads")
 
@@ -48,6 +48,7 @@ import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 import supportRoutes from "./routes/support/supportRoutes.js"
 import squareWebhook from "./routes/squareWebhook.js"
 import aiChatRoutes from "./routes/aiChat.js"
+import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
 
 /* ================= APP ================= */
 
@@ -73,14 +74,13 @@ app.use(
       }
 
       console.warn("❌ CORS BLOCKED:", origin)
-
       return callback(new Error("Not allowed by CORS"))
     },
     credentials: true
   })
 )
 
-/* ================= WEBHOOK ================= */
+/* ================= SQUARE WEBHOOK RAW BODY ================= */
 
 app.use(
   "/api/square/webhook",
@@ -123,7 +123,7 @@ app.use((err, req, res, next) => {
 
 app.use(cookieParser())
 
-/* ================= 🔥 STATIC UPLOADS ================= */
+/* ================= STATIC UPLOADS ================= */
 
 app.use("/uploads", express.static(uploadDir))
 
@@ -144,6 +144,16 @@ const csvEscape = (value) => {
   const stringValue = String(value).replace(/"/g, '""')
 
   return `"${stringValue}"`
+}
+
+const formatCSVDateTime = (value) => {
+  if (!value) return ""
+  return new Date(value).toLocaleString()
+}
+
+const formatCSVDate = (value) => {
+  if (!value) return ""
+  return new Date(value).toLocaleDateString()
 }
 
 const sendCSV = (res, filename, rows) => {
@@ -171,12 +181,23 @@ app.get("/api/orders/export", async (req, res) => {
         "Email",
         "Phone",
         "Status",
+        "Payment Status",
+        "Payment Method",
+        "Square Payment ID",
         "Subtotal",
         "Tax",
         "Shipping",
         "Final Price",
+        "COGS",
         "Profit",
-        "Created At"
+        "Margin %",
+        "Created At",
+        "Paid At",
+        "Production Started At",
+        "Shipping Started At",
+        "Shipped At",
+        "Delivered At",
+        "Archived At"
       ],
 
       ...orders.map(order => [
@@ -185,14 +206,23 @@ app.get("/api/orders/export", async (req, res) => {
         order.email || "",
         order.phone || "",
         order.status || "",
+        order.paymentStatus || "",
+        order.paymentMethod || "",
+        order.squarePaymentId || "",
         Number(order.subtotal || 0).toFixed(2),
         Number(order.tax || 0).toFixed(2),
         Number(order.shipping || 0).toFixed(2),
         Number(order.finalPrice || order.price || 0).toFixed(2),
+        Number(order.cogs || 0).toFixed(2),
         Number(order.profit || 0).toFixed(2),
-        order.createdAt
-          ? new Date(order.createdAt).toLocaleString()
-          : ""
+        Number(order.margin || 0).toFixed(2),
+        formatCSVDateTime(order.createdAt),
+        formatCSVDateTime(order.paidAt),
+        formatCSVDateTime(order.customQuotePaidAt),
+        formatCSVDateTime(order.shippingStartedAt),
+        formatCSVDateTime(order.shippedAt),
+        formatCSVDateTime(order.deliveredAt),
+        formatCSVDateTime(order.archivedAt)
       ])
     ]
 
@@ -214,44 +244,60 @@ app.get("/api/orders/export", async (req, res) => {
 app.get("/api/export-taxes", async (req, res) => {
   try {
     const orders = await Order.find({
-      status: {
-        $in: [
-          "paid",
-          "ready_for_production",
-          "production",
-          "shipping",
-          "shipped",
-          "delivered"
-        ]
-      }
-    }).sort({ createdAt: -1 })
+      $or: [
+        { paymentStatus: "paid" },
+        { paidAt: { $ne: null } },
+        {
+          status: {
+            $in: [
+              "paid",
+              "ready_for_production",
+              "production",
+              "shipping",
+              "shipped",
+              "delivered"
+            ]
+          }
+        }
+      ]
+    }).sort({ paidAt: -1, createdAt: -1 })
 
     const rows = [
       [
-        "Date",
+        "Paid Date",
+        "Created Date",
         "Order ID",
         "Customer",
         "Email",
+        "Payment Status",
+        "Payment Method",
+        "Square Payment ID",
         "Subtotal",
         "Tax Collected",
         "Shipping",
         "Total Paid",
+        "COGS",
         "Estimated Profit",
+        "Margin %",
         "Status"
       ],
 
       ...orders.map(order => [
-        order.createdAt
-          ? new Date(order.createdAt).toLocaleDateString()
-          : "",
+        formatCSVDate(order.paidAt),
+        formatCSVDate(order.createdAt),
         order._id,
         order.customerName || "",
         order.email || "",
+        order.paymentStatus || "",
+        order.paymentMethod || "",
+        order.squarePaymentId || "",
         Number(order.subtotal || 0).toFixed(2),
         Number(order.tax || 0).toFixed(2),
         Number(order.shipping || 0).toFixed(2),
         Number(order.finalPrice || order.price || 0).toFixed(2),
+        Number(order.cogs || 0).toFixed(2),
         Number(order.profit || 0).toFixed(2),
+        Number(order.margin || 0).toFixed(2),
         order.status || ""
       ])
     ]
@@ -283,8 +329,9 @@ app.use("/api/pricing", pricingRoutes)
 app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
-app.use("/api/ai-chat", aiChatRoutes)
+app.use("/api/order-workflow", orderWorkflowRoutes)
 
+app.use("/api/ai-chat", aiChatRoutes)
 console.log("🤖 AI CHAT ROUTE MOUNTED")
 
 /* ================= ADMIN ================= */
