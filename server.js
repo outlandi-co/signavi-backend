@@ -61,7 +61,9 @@ console.log("\n🔥 SERVER READY 🚀\n")
 
 const allowedOrigins = [
   "https://signavistudio.store",
-  "http://localhost:5173"
+  "https://signavi.store",
+  "http://localhost:5173",
+  "http://localhost:5174"
 ]
 
 app.use(
@@ -349,9 +351,11 @@ console.log("🛟 SUPPORT ROUTE MOUNTED")
 const io = new Server(server, {
   cors: {
     origin: [
-      "https://signavistudio.store",
-      "http://localhost:5173"
-    ],
+  "https://signavistudio.store",
+  "https://signavi.store",
+  "http://localhost:5173",
+  "http://localhost:5174"
+],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true
   }
