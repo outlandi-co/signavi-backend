@@ -421,13 +421,81 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
 /* ================= GET PRODUCTS ================= */
 
+
+
 router.get("/", async (req, res) => {
   try {
-    const products = await Product.find()
+    const {
+      storefrontVisible,
+      storefront,
+      category,
+      search
+    } = req.query
+
+    const filter = {}
+
+    const andFilters = []
+
+    /* ================= STOREFRONT VISIBILITY ================= */
+
+    if (storefrontVisible === "true") {
+      filter.storefrontVisible = true
+    }
+
+    /* ================= STOREFRONT TARGET ================= */
+
+    if (storefront) {
+      andFilters.push({
+        $or: [
+          { storefront },
+          { storefront: "both" }
+        ]
+      })
+    }
+
+    /* ================= CATEGORY ================= */
+
+    if (category) {
+      filter.category = category
+    }
+
+    /* ================= SEARCH ================= */
+
+    if (search) {
+      andFilters.push({
+        $or: [
+          {
+            name: {
+              $regex: search,
+              $options: "i"
+            }
+          },
+          {
+            description: {
+              $regex: search,
+              $options: "i"
+            }
+          },
+          {
+            category: {
+              $regex: search,
+              $options: "i"
+            }
+          }
+        ]
+      })
+    }
+
+    if (andFilters.length > 0) {
+      filter.$and = andFilters
+    }
+
+    const products = await Product.find(filter)
       .sort({ createdAt: -1 })
 
     return res.json({
       success: true,
+      count: products.length,
       data: products
     })
 
