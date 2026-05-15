@@ -59,13 +59,8 @@ const upload = multer({
 
 const safeParse = (data, fallback = []) => {
   try {
-    if (data === undefined || data === null || data === "") {
-      return fallback
-    }
-
-    if (typeof data !== "string") {
-      return data
-    }
+    if (data === undefined || data === null || data === "") return fallback
+    if (typeof data !== "string") return data
 
     return JSON.parse(data)
   } catch {
@@ -79,10 +74,7 @@ const toNumber = (value, fallback = 0) => {
 }
 
 const toBoolean = (value, fallback = false) => {
-  if (value === undefined || value === null || value === "") {
-    return fallback
-  }
-
+  if (value === undefined || value === null || value === "") return fallback
   if (typeof value === "boolean") return value
 
   if (typeof value === "string") {
@@ -90,6 +82,19 @@ const toBoolean = (value, fallback = false) => {
   }
 
   return Boolean(value)
+}
+
+const generateSku = (name = "PRODUCT") => {
+  const cleanName = String(name || "PRODUCT")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 20)
+
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase()
+
+  return `${cleanName || "PRODUCT"}-${Date.now()}-${random}`
 }
 
 const normalizeSize = (s) => {
@@ -104,50 +109,40 @@ const normalizeSize = (s) => {
     SMALL: "Small",
     MEDIUM: "Medium",
     LARGE: "Large",
-
     S: "S",
     M: "M",
     L: "L",
     XL: "XL",
     XXL: "XXL",
-
     "2XL": "XXL",
     "2X": "XXL",
     "XX-LARGE": "XXL",
     "XX LARGE": "XXL",
     XXLARGE: "XXL",
-
     "3XL": "3XL",
     "3X": "3XL",
     XXXL: "3XL",
     "XXX-LARGE": "3XL",
     "XXX LARGE": "3XL",
     XXXLARGE: "3XL",
-
     "ONE SIZE": "One Size",
     ONESIZE: "One Size",
-
     "12 INCH": "12 inch",
     "12 IN": "12 inch",
     "12IN": "12 inch",
     "12\"": "12 inch",
-
     "18 INCH": "18 inch",
     "18 IN": "18 inch",
     "18IN": "18 inch",
     "18\"": "18 inch",
-
     "24 INCH": "24 inch",
     "24 IN": "24 inch",
     "24IN": "24 inch",
     "24\"": "24 inch",
-
     "11 OZ": "11 oz",
     "11OZ": "11 oz",
-
     "15 OZ": "15 oz",
     "15OZ": "15 oz",
-
     "20 OZ": "20 oz",
     "20OZ": "20 oz"
   }
@@ -190,9 +185,7 @@ const normalizeProductType = (type) => {
 }
 
 const normalizeDigitalProduct = (data = {}) => {
-  const digitalData = typeof data === "object" && data !== null
-    ? data
-    : {}
+  const digitalData = typeof data === "object" && data !== null ? data : {}
 
   const fileFormats = Array.isArray(digitalData.fileFormats)
     ? digitalData.fileFormats
@@ -288,8 +281,6 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
     console.log("📸 FILES RECEIVED:", files.length)
 
-    /* ================= MAP IMAGES BY COLOR / DIGITAL PREVIEW ================= */
-
     const colorMap = {}
 
     files.forEach((file, index) => {
@@ -319,8 +310,6 @@ router.post("/", upload.array("images", 20), async (req, res) => {
           previewImage: digitalPreviewImage
         }
       : digitalProduct
-
-    /* ================= BUILD VARIANTS ================= */
 
     const variants = Array.isArray(rawVariants)
       ? rawVariants
@@ -374,7 +363,11 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       })
     }
 
+    const sku = String(req.body.sku || "").trim() || generateSku(name)
+
     const product = await Product.create({
+      sku,
+
       name: String(name).trim(),
       description: description || "",
       category: String(category).trim(),
@@ -421,8 +414,6 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
 /* ================= GET PRODUCTS ================= */
 
-
-
 router.get("/", async (req, res) => {
   try {
     const {
@@ -433,16 +424,11 @@ router.get("/", async (req, res) => {
     } = req.query
 
     const filter = {}
-
     const andFilters = []
-
-    /* ================= STOREFRONT VISIBILITY ================= */
 
     if (storefrontVisible === "true") {
       filter.storefrontVisible = true
     }
-
-    /* ================= STOREFRONT TARGET ================= */
 
     if (storefront) {
       andFilters.push({
@@ -453,13 +439,9 @@ router.get("/", async (req, res) => {
       })
     }
 
-    /* ================= CATEGORY ================= */
-
     if (category) {
       filter.category = category
     }
-
-    /* ================= SEARCH ================= */
 
     if (search) {
       andFilters.push({
@@ -573,6 +555,14 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
 
       colorMap[normalizedColor].push(`/uploads/${file.filename}`)
     })
+
+    if (req.body.sku !== undefined) {
+      const nextSku = String(req.body.sku || "").trim()
+
+      if (nextSku) {
+        updates.sku = nextSku
+      }
+    }
 
     if (req.body.name !== undefined) {
       updates.name = String(req.body.name).trim()
