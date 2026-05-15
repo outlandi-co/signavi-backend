@@ -13,7 +13,6 @@ const colorSchema = new mongoose.Schema({
 /* ================= VARIANT SCHEMA ================= */
 
 const variantSchema = new mongoose.Schema({
-
   color: {
     type: String,
     default: "",
@@ -55,13 +54,11 @@ const variantSchema = new mongoose.Schema({
     type: [String],
     default: []
   }
-
 }, { _id: false })
 
 /* ================= DIGITAL PRODUCT ================= */
 
 const digitalProductSchema = new mongoose.Schema({
-
   previewImage: {
     type: String,
     default: ""
@@ -101,13 +98,11 @@ const digitalProductSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   }
-
 }, { _id: false })
 
 /* ================= PRODUCT SCHEMA ================= */
 
 const productSchema = new mongoose.Schema({
-
   vendor: {
     type: String,
     default: "",
@@ -128,8 +123,8 @@ const productSchema = new mongoose.Schema({
 
   sku: {
     type: String,
-    default: "",
     trim: true,
+    sparse: true,
     index: true
   },
 
@@ -253,8 +248,23 @@ const productSchema = new mongoose.Schema({
     default: true,
     index: true
   }
-
 }, { timestamps: true })
+
+/* ================= CLEAN EMPTY SKU BEFORE VALIDATION ================= */
+
+productSchema.pre("validate", function cleanSku(next) {
+  if (this.sku !== undefined && this.sku !== null) {
+    const clean = String(this.sku).trim()
+
+    if (!clean) {
+      this.sku = undefined
+    } else {
+      this.sku = clean
+    }
+  }
+
+  next()
+})
 
 const Product =
   mongoose.models.Product ||
