@@ -3,34 +3,22 @@ import Notification from "../models/Notification.js"
 
 const router = express.Router()
 
-const ADMIN_EMAIL = "admin@signavistudio.store"
-
 /* ================= GET NOTIFICATIONS ================= */
 
 router.get("/", async (req, res) => {
   try {
-    const email =
-      req.user?.email ||
-      req.query?.email ||
-      ADMIN_EMAIL
-
-    const notifications =
-      await Notification.find({
-        userEmail: email,
-        archived: false
-      })
-        .sort({ createdAt: -1 })
-        .limit(100)
+    const notifications = await Notification.find({
+      archived: false
+    })
+      .sort({ createdAt: -1 })
+      .limit(100)
 
     res.json({
       success: true,
       data: notifications
     })
   } catch (err) {
-    console.error(
-      "❌ GET NOTIFICATIONS ERROR:",
-      err.message
-    )
+    console.error("❌ GET NOTIFICATIONS ERROR:", err.message)
 
     res.status(500).json({
       success: false,
@@ -39,51 +27,13 @@ router.get("/", async (req, res) => {
   }
 })
 
-/* ================= MARK READ ================= */
-
-router.patch("/:id/read", async (req, res) => {
-  try {
-    const notification =
-      await Notification.findByIdAndUpdate(
-        req.params.id,
-        { read: true },
-        { new: true }
-      )
-
-    res.json({
-      success: true,
-      data: notification
-    })
-  } catch (err) {
-    console.error(
-      "❌ MARK READ ERROR:",
-      err.message
-    )
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to mark notification read"
-    })
-  }
-})
-
 /* ================= MARK ALL READ ================= */
 
 router.patch("/read-all", async (req, res) => {
   try {
-    const email =
-      req.user?.email ||
-      req.query?.email ||
-      ADMIN_EMAIL
-
     await Notification.updateMany(
-      {
-        userEmail: email,
-        archived: false
-      },
-      {
-        read: true
-      }
+      { archived: false },
+      { read: true }
     )
 
     res.json({
@@ -91,10 +41,7 @@ router.patch("/read-all", async (req, res) => {
       message: "All notifications marked read"
     })
   } catch (err) {
-    console.error(
-      "❌ MARK ALL READ ERROR:",
-      err.message
-    )
+    console.error("❌ MARK ALL READ ERROR:", err.message)
 
     res.status(500).json({
       success: false,
@@ -103,29 +50,49 @@ router.patch("/read-all", async (req, res) => {
   }
 })
 
-/* ================= ARCHIVE ================= */
+/* ================= MARK READ ================= */
 
-router.patch("/:id/archive", async (req, res) => {
+router.patch("/:id/read", async (req, res) => {
   try {
-    const notification =
-      await Notification.findByIdAndUpdate(
-        req.params.id,
-        {
-          archived: true,
-          read: true
-        },
-        { new: true }
-      )
+    const notification = await Notification.findByIdAndUpdate(
+      req.params.id,
+      { read: true },
+      { new: true }
+    )
 
     res.json({
       success: true,
       data: notification
     })
   } catch (err) {
-    console.error(
-      "❌ ARCHIVE ERROR:",
-      err.message
+    console.error("❌ MARK READ ERROR:", err.message)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark notification read"
+    })
+  }
+})
+
+/* ================= ARCHIVE ================= */
+
+router.patch("/:id/archive", async (req, res) => {
+  try {
+    const notification = await Notification.findByIdAndUpdate(
+      req.params.id,
+      {
+        archived: true,
+        read: true
+      },
+      { new: true }
     )
+
+    res.json({
+      success: true,
+      data: notification
+    })
+  } catch (err) {
+    console.error("❌ ARCHIVE ERROR:", err.message)
 
     res.status(500).json({
       success: false,
@@ -134,54 +101,35 @@ router.patch("/:id/archive", async (req, res) => {
   }
 })
 
-/* ================= BROADCAST ================= */
+/* ================= TEST / BROADCAST ================= */
 
 router.post("/broadcast", async (req, res) => {
   try {
     const {
-      message,
-      email,
+      message = "Test notification",
       title = "Notification",
       type = "system",
-      link = ""
+      link = "/admin/invoices"
     } = req.body
 
-    if (!message) {
-      return res.status(400).json({
-        success: false,
-        message: "Message required"
-      })
-    }
+    const notification = await Notification.create({
+      userEmail: "admin@signavistudio.store",
+      title,
+      text: message,
+      type,
+      link,
+      read: false,
+      archived: false
+    })
 
-    const users = email
-      ? [email]
-      : [ADMIN_EMAIL]
-
-    for (const userEmail of users) {
-      const notification =
-        await Notification.create({
-          userEmail,
-          title,
-          text: message,
-          type,
-          link,
-          read: false
-        })
-
-      req.app.get("io")?.emit(
-        "adminNotification",
-        notification
-      )
-    }
+    req.app.get("io")?.emit("adminNotification", notification)
 
     res.json({
-      success: true
+      success: true,
+      data: notification
     })
   } catch (err) {
-    console.error(
-      "❌ BROADCAST ERROR:",
-      err.message
-    )
+    console.error("❌ BROADCAST ERROR:", err.message)
 
     res.status(500).json({
       success: false,
