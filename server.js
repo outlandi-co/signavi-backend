@@ -49,6 +49,7 @@ import supportRoutes from "./routes/support/supportRoutes.js"
 import squareWebhook from "./routes/squareWebhook.js"
 import aiChatRoutes from "./routes/aiChat.js"
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
+import invoiceRoutes from "./routes/invoiceRoutes.js"
 
 /* ================= APP ================= */
 
@@ -321,6 +322,7 @@ app.get("/api/export-taxes", async (req, res) => {
 
 app.use("/api/products", productRoutes)
 app.use("/api/orders", orderRoutes)
+app.use("/api/invoices", invoiceRoutes)
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
