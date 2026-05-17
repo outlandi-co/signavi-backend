@@ -1,91 +1,190 @@
 import express from "express"
 import Notification from "../models/Notification.js"
-import { sendNotificationEmail } from "../utils/sendEmail.js"
 
 const router = express.Router()
 
-/* ================= GET USER NOTIFICATIONS ================= */
+const ADMIN_EMAIL = "admin@signavistudio.store"
+
+/* ================= GET NOTIFICATIONS ================= */
+
 router.get("/", async (req, res) => {
   try {
-    /* 🔥 SAFE EMAIL EXTRACTION (USER OR GUEST) */
     const email =
-      req.user?.email ||           // logged-in user
-      req.query?.email ||          // guest fallback via query
-      null
+      req.user?.email ||
+      req.query?.email ||
+      ADMIN_EMAIL
 
-    if (!email) {
-      return res.status(400).json({
-        message: "Email required"
+    const notifications =
+      await Notification.find({
+        userEmail: email,
+        archived: false
       })
-    }
-
-    const notifications = await Notification.find({ userEmail: email })
-      .sort({ createdAt: -1 })
-      .limit(20)
+        .sort({ createdAt: -1 })
+        .limit(100)
 
     res.json({
       success: true,
       data: notifications
     })
-
   } catch (err) {
-    console.error("❌ GET NOTIFICATIONS ERROR:", err.message)
+    console.error(
+      "❌ GET NOTIFICATIONS ERROR:",
+      err.message
+    )
 
     res.status(500).json({
+      success: false,
       message: "Failed to load notifications"
     })
   }
 })
 
+/* ================= MARK READ ================= */
+
+router.patch("/:id/read", async (req, res) => {
+  try {
+    const notification =
+      await Notification.findByIdAndUpdate(
+        req.params.id,
+        { read: true },
+        { new: true }
+      )
+
+    res.json({
+      success: true,
+      data: notification
+    })
+  } catch (err) {
+    console.error(
+      "❌ MARK READ ERROR:",
+      err.message
+    )
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark notification read"
+    })
+  }
+})
+
+/* ================= MARK ALL READ ================= */
+
+router.patch("/read-all", async (req, res) => {
+  try {
+    const email =
+      req.user?.email ||
+      req.query?.email ||
+      ADMIN_EMAIL
+
+    await Notification.updateMany(
+      {
+        userEmail: email,
+        archived: false
+      },
+      {
+        read: true
+      }
+    )
+
+    res.json({
+      success: true,
+      message: "All notifications marked read"
+    })
+  } catch (err) {
+    console.error(
+      "❌ MARK ALL READ ERROR:",
+      err.message
+    )
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to mark notifications read"
+    })
+  }
+})
+
+/* ================= ARCHIVE ================= */
+
+router.patch("/:id/archive", async (req, res) => {
+  try {
+    const notification =
+      await Notification.findByIdAndUpdate(
+        req.params.id,
+        {
+          archived: true,
+          read: true
+        },
+        { new: true }
+      )
+
+    res.json({
+      success: true,
+      data: notification
+    })
+  } catch (err) {
+    console.error(
+      "❌ ARCHIVE ERROR:",
+      err.message
+    )
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to archive notification"
+    })
+  }
+})
+
 /* ================= BROADCAST ================= */
+
 router.post("/broadcast", async (req, res) => {
   try {
-    const { message, email } = req.body
+    const {
+      message,
+      email,
+      title = "Notification",
+      type = "system",
+      link = ""
+    } = req.body
 
     if (!message) {
       return res.status(400).json({
+        success: false,
         message: "Message required"
       })
     }
 
-    /* 🔥 TARGET USERS */
     const users = email
       ? [email]
-      : await Notification.distinct("userEmail")
+      : [ADMIN_EMAIL]
 
     for (const userEmail of users) {
-
-      /* 🔥 SAVE */
-      await Notification.create({
-        userEmail,
-        text: message,
-        read: false
-      })
-
-      /* 🔥 SOCKET EVENT */
-      req.app.get("io")?.emit("jobUpdated", {
-        email: userEmail,
-        text: message
-      })
-
-      /* 🔥 EMAIL (SAFE) */
-      try {
-        await sendNotificationEmail(
+      const notification =
+        await Notification.create({
           userEmail,
-          "New Notification",
-          message
-        )
-      } catch (emailErr) {
-        console.warn("⚠️ Email failed:", emailErr.message)
-      }
+          title,
+          text: message,
+          type,
+          link,
+          read: false
+        })
+
+      req.app.get("io")?.emit(
+        "adminNotification",
+        notification
+      )
     }
 
-    res.json({ success: true })
-
+    res.json({
+      success: true
+    })
   } catch (err) {
-    console.error("❌ BROADCAST ERROR:", err.message)
+    console.error(
+      "❌ BROADCAST ERROR:",
+      err.message
+    )
 
     res.status(500).json({
+      success: false,
       message: "Broadcast failed"
     })
   }

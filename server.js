@@ -35,6 +35,7 @@ import supportRoutes from "./routes/support/supportRoutes.js"
 import squareWebhook from "./routes/squareWebhook.js"
 import aiChatRoutes from "./routes/aiChat.js"
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
+import notificationRoutes from "./routes/notifications.js"
 
 /* ================= PATH SETUP ================= */
 
@@ -313,6 +314,9 @@ app.use("/api/customers", customerRoutes)
 app.use("/api/square", squareRoutes)
 app.use("/api/shipping", shippingRoutes)
 app.use("/api/order-workflow", orderWorkflowRoutes)
+
+app.use("/api/notifications", notificationRoutes)
+console.log("📥 NOTIFICATION ROUTE MOUNTED")
 
 app.use("/api/ai-chat", aiChatRoutes)
 console.log("🤖 AI CHAT ROUTE MOUNTED")
