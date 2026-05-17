@@ -71,6 +71,7 @@ const invoiceSchema = new mongoose.Schema(
 
     paymentUrl: { type: String, default: "" },
     squareCheckoutId: { type: String, default: "" },
+    squarePaymentLinkId: { type: String, default: "" },
     paidAt: { type: Date, default: null },
 
     finalProof: {
@@ -86,8 +87,6 @@ const invoiceSchema = new mongoose.Schema(
 )
 
 invoiceSchema.pre("save", function calculateTotals() {
-  const TAX_RATE = 0.0825
-
   const subtotal = this.items.reduce((sum, item) => {
     return sum + Number(item.quantity || 0) * Number(item.price || 0)
   }, 0)
@@ -95,7 +94,9 @@ invoiceSchema.pre("save", function calculateTotals() {
   this.subtotal = Number(subtotal.toFixed(2))
   this.tax = Number((subtotal * TAX_RATE).toFixed(2))
   this.shipping = Number(this.shipping || 0)
-  this.total = Number((this.subtotal + this.tax + this.shipping).toFixed(2))
+  this.total = Number(
+    (this.subtotal + this.tax + this.shipping).toFixed(2)
+  )
 
   if (!this.invoiceNumber) {
     this.invoiceNumber = `SIGNAVI-${Date.now()}`

@@ -1,4 +1,6 @@
+import crypto from "crypto"
 import sgMail from "@sendgrid/mail"
+import { Client, Environment } from "square"
 import Invoice from "../models/Invoice.js"
 
 const CLIENT_URL =
@@ -12,6 +14,76 @@ const FROM_EMAIL =
 
 if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+}
+
+const squareClient = new Client({
+  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+  environment:
+    process.env.SQUARE_ENVIRONMENT === "production"
+      ? Environment.Production
+      : Environment.Sandbox
+})
+
+const getSquareLocationId = () => {
+  return (
+    process.env.SQUARE_LOCATION_ID ||
+    process.env.SQUARE_SANDBOX_LOCATION_ID
+  )
+}
+
+const createSquarePaymentLinkForInvoice = async (invoice) => {
+  if (invoice.paymentUrl) {
+    return invoice.paymentUrl
+  }
+
+  if (!process.env.SQUARE_ACCESS_TOKEN) {
+    throw new Error("Missing SQUARE_ACCESS_TOKEN")
+  }
+
+  const locationId = getSquareLocationId()
+
+  if (!locationId) {
+    throw new Error("Missing SQUARE_LOCATION_ID")
+  }
+
+  const amount = Math.round(Number(invoice.total || 0) * 100)
+
+  if (!amount || amount <= 0) {
+    throw new Error("Invoice total must be greater than 0")
+  }
+
+  const response =
+    await squareClient.checkoutApi.createPaymentLink({
+      idempotencyKey: crypto.randomUUID(),
+
+      quickPay: {
+        name: `Invoice ${invoice.invoiceNumber}`,
+        priceMoney: {
+          amount: BigInt(amount),
+          currency: "USD"
+        },
+        locationId
+      },
+
+      checkoutOptions: {
+        redirectUrl: `${CLIENT_URL}/invoice/${invoice._id}`
+      }
+    })
+
+  const paymentLink = response.result.paymentLink
+
+  if (!paymentLink?.url) {
+    throw new Error("Square did not return a payment URL")
+  }
+
+  invoice.paymentUrl = paymentLink.url
+  invoice.squareCheckoutId = paymentLink.id || ""
+  invoice.squarePaymentLinkId = paymentLink.id || ""
+  invoice.status = "payment_required"
+
+  await invoice.save()
+
+  return invoice.paymentUrl
 }
 
 /* ================= CREATE INVOICE ================= */
@@ -68,10 +140,7 @@ export const createInvoice = async (req, res) => {
     })
 
   } catch (error) {
-    console.error(
-      "❌ CREATE INVOICE ERROR:",
-      error
-    )
+    console.error("❌ CREATE INVOICE ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -82,14 +151,9 @@ export const createInvoice = async (req, res) => {
 
 /* ================= CREATE PAYMENT LINK ================= */
 
-export const createInvoicePaymentLink = async (
-  req,
-  res
-) => {
+export const createInvoicePaymentLink = async (req, res) => {
   try {
-    const invoice = await Invoice.findById(
-      req.params.id
-    )
+    const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -98,31 +162,20 @@ export const createInvoicePaymentLink = async (
       })
     }
 
-    /*
-      Temporary payment page.
-      Later replace with Square checkout URL.
-    */
+    const paymentUrl =
+      await createSquarePaymentLinkForInvoice(invoice)
 
-    invoice.paymentUrl =
-      `${CLIENT_URL}/invoice/${invoice._id}`
-
-    invoice.status = "payment_required"
-
-    await invoice.save()
-
-    console.log("💳 PAYMENT LINK CREATED")
+    console.log("💳 PAYMENT LINK CREATED:", paymentUrl)
 
     res.json({
       success: true,
       message: "Invoice payment link created",
+      paymentUrl,
       data: invoice
     })
 
   } catch (error) {
-    console.error(
-      "❌ CREATE PAYMENT LINK ERROR:",
-      error
-    )
+    console.error("❌ CREATE PAYMENT LINK ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -135,7 +188,6 @@ export const createInvoicePaymentLink = async (
 
 export const sendInvoiceEmail = async (req, res) => {
   try {
-
     if (!process.env.SENDGRID_API_KEY) {
       return res.status(500).json({
         success: false,
@@ -143,9 +195,7 @@ export const sendInvoiceEmail = async (req, res) => {
       })
     }
 
-    const invoice = await Invoice.findById(
-      req.params.id
-    )
+    const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -155,12 +205,10 @@ export const sendInvoiceEmail = async (req, res) => {
     }
 
     const invoiceUrl =
-      invoice.paymentUrl ||
-      `${CLIENT_URL}/invoice/${invoice._id}`
+      await createSquarePaymentLinkForInvoice(invoice)
 
     await sgMail.send({
       to: invoice.customerEmail,
-
       from: FROM_EMAIL,
 
       subject:
@@ -227,6 +275,12 @@ export const sendInvoiceEmail = async (req, res) => {
           </p>
 
           <p>
+            Or copy and paste this link:
+            <br />
+            ${invoiceUrl}
+          </p>
+
+          <p>
             Thank you,
             <br />
             SignaVi Studio
@@ -236,22 +290,20 @@ export const sendInvoiceEmail = async (req, res) => {
       `
     })
 
-    console.log(
-      "📧 INVOICE EMAIL SENT:",
-      invoice.customerEmail
-    )
+    invoice.status = "payment_required"
+    await invoice.save()
+
+    console.log("📧 INVOICE EMAIL SENT:", invoice.customerEmail)
 
     res.json({
       success: true,
       message: "Invoice email sent successfully",
+      paymentUrl: invoiceUrl,
       data: invoice
     })
 
   } catch (error) {
-    console.error(
-      "❌ SEND INVOICE EMAIL ERROR:",
-      error
-    )
+    console.error("❌ SEND INVOICE EMAIL ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -264,7 +316,6 @@ export const sendInvoiceEmail = async (req, res) => {
 
 export const getInvoices = async (req, res) => {
   try {
-
     const invoices = await Invoice.find()
       .sort({ createdAt: -1 })
 
@@ -274,10 +325,7 @@ export const getInvoices = async (req, res) => {
     })
 
   } catch (error) {
-    console.error(
-      "❌ GET INVOICES ERROR:",
-      error
-    )
+    console.error("❌ GET INVOICES ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -290,10 +338,7 @@ export const getInvoices = async (req, res) => {
 
 export const getInvoiceById = async (req, res) => {
   try {
-
-    const invoice = await Invoice.findById(
-      req.params.id
-    )
+    const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -308,10 +353,7 @@ export const getInvoiceById = async (req, res) => {
     })
 
   } catch (error) {
-    console.error(
-      "❌ GET INVOICE ERROR:",
-      error
-    )
+    console.error("❌ GET INVOICE ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -324,16 +366,7 @@ export const getInvoiceById = async (req, res) => {
 
 export const updateInvoice = async (req, res) => {
   try {
-
-    const invoice =
-      await Invoice.findByIdAndUpdate(
-        req.params.id,
-        req.body,
-        {
-          new: true,
-          runValidators: true
-        }
-      )
+    const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -342,16 +375,35 @@ export const updateInvoice = async (req, res) => {
       })
     }
 
+    const allowedFields = [
+      "customerName",
+      "customerEmail",
+      "items",
+      "shipping",
+      "notes",
+      "status",
+      "paymentStatus"
+    ]
+
+    allowedFields.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        invoice[field] = req.body[field]
+      }
+    })
+
+    if (invoice.paymentStatus === "paid") {
+      invoice.paidAt = invoice.paidAt || new Date()
+    }
+
+    await invoice.save()
+
     res.json({
       success: true,
       data: invoice
     })
 
   } catch (error) {
-    console.error(
-      "❌ UPDATE INVOICE ERROR:",
-      error
-    )
+    console.error("❌ UPDATE INVOICE ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -364,11 +416,8 @@ export const updateInvoice = async (req, res) => {
 
 export const deleteInvoice = async (req, res) => {
   try {
-
     const invoice =
-      await Invoice.findByIdAndDelete(
-        req.params.id
-      )
+      await Invoice.findByIdAndDelete(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -383,10 +432,7 @@ export const deleteInvoice = async (req, res) => {
     })
 
   } catch (error) {
-    console.error(
-      "❌ DELETE INVOICE ERROR:",
-      error
-    )
+    console.error("❌ DELETE INVOICE ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -397,16 +443,9 @@ export const deleteInvoice = async (req, res) => {
 
 /* ================= UPLOAD FINAL PROOF ================= */
 
-export const uploadFinalProof = async (
-  req,
-  res
-) => {
+export const uploadFinalProof = async (req, res) => {
   try {
-
-    const {
-      imageUrl,
-      fileName
-    } = req.body
+    const { imageUrl, fileName } = req.body
 
     const invoice =
       await Invoice.findByIdAndUpdate(
@@ -442,10 +481,7 @@ export const uploadFinalProof = async (
     })
 
   } catch (error) {
-    console.error(
-      "❌ UPLOAD FINAL PROOF ERROR:",
-      error
-    )
+    console.error("❌ UPLOAD FINAL PROOF ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -456,12 +492,8 @@ export const uploadFinalProof = async (
 
 /* ================= APPROVE FINAL PROOF ================= */
 
-export const approveFinalProof = async (
-  req,
-  res
-) => {
+export const approveFinalProof = async (req, res) => {
   try {
-
     const {
       approvalName = "",
       approvalEmail = ""
@@ -474,14 +506,11 @@ export const approveFinalProof = async (
           status: "proof_approved",
 
           "finalProof.approved": true,
-          "finalProof.approvedAt":
-            new Date(),
+          "finalProof.approvedAt": new Date(),
 
-          "finalProof.approvalName":
-            approvalName,
+          "finalProof.approvalName": approvalName,
 
-          "finalProof.approvalEmail":
-            approvalEmail
+          "finalProof.approvalEmail": approvalEmail
         },
         {
           new: true,
@@ -502,10 +531,7 @@ export const approveFinalProof = async (
     })
 
   } catch (error) {
-    console.error(
-      "❌ APPROVE FINAL PROOF ERROR:",
-      error
-    )
+    console.error("❌ APPROVE FINAL PROOF ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -516,15 +542,9 @@ export const approveFinalProof = async (
 
 /* ================= MARK PAID ================= */
 
-export const markInvoicePaid = async (
-  req,
-  res
-) => {
+export const markInvoicePaid = async (req, res) => {
   try {
-
-    const invoice = await Invoice.findById(
-      req.params.id
-    )
+    const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -534,10 +554,7 @@ export const markInvoicePaid = async (
     }
 
     invoice.paymentStatus = "paid"
-
-    invoice.status =
-      "ready_for_production"
-
+    invoice.status = "ready_for_production"
     invoice.paidAt = new Date()
 
     await invoice.save()
@@ -548,10 +565,7 @@ export const markInvoicePaid = async (
     })
 
   } catch (error) {
-    console.error(
-      "❌ MARK INVOICE PAID ERROR:",
-      error
-    )
+    console.error("❌ MARK INVOICE PAID ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -562,15 +576,9 @@ export const markInvoicePaid = async (
 
 /* ================= START PRODUCTION ================= */
 
-export const startProduction = async (
-  req,
-  res
-) => {
+export const startProduction = async (req, res) => {
   try {
-
-    const invoice = await Invoice.findById(
-      req.params.id
-    )
+    const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -597,10 +605,7 @@ export const startProduction = async (
     })
 
   } catch (error) {
-    console.error(
-      "❌ START PRODUCTION ERROR:",
-      error
-    )
+    console.error("❌ START PRODUCTION ERROR:", error)
 
     res.status(500).json({
       success: false,
