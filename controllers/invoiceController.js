@@ -1,9 +1,6 @@
-import crypto from "crypto"
 import sgMail from "@sendgrid/mail"
-import square from "square"
+import { SquareClient, SquareEnvironment } from "square"
 import Invoice from "../models/Invoice.js"
-
-const { Client, Environment } = square
 
 const CLIENT_URL =
   process.env.CLIENT_URL ||
@@ -18,12 +15,12 @@ if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 }
 
-const squareClient = new Client({
-  accessToken: process.env.SQUARE_ACCESS_TOKEN,
+const squareClient = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
   environment:
     process.env.SQUARE_ENVIRONMENT === "production"
-      ? Environment.Production
-      : Environment.Sandbox
+      ? SquareEnvironment.Production
+      : SquareEnvironment.Sandbox
 })
 
 const getSquareLocationId = () => {
@@ -55,7 +52,7 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
   }
 
   const response =
-    await squareClient.checkoutApi.createPaymentLink({
+    await squareClient.checkout.paymentLinks.create({
       idempotencyKey: crypto.randomUUID(),
 
       quickPay: {
@@ -72,7 +69,7 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
       }
     })
 
-  const paymentLink = response.result.paymentLink
+  const paymentLink = response.paymentLink
 
   if (!paymentLink?.url) {
     throw new Error("Square did not return a payment URL")
@@ -122,9 +119,7 @@ export const createInvoice = async (req, res) => {
 
     const invoice = new Invoice({
       customerName: String(customerName).trim(),
-      customerEmail: String(customerEmail)
-        .trim()
-        .toLowerCase(),
+      customerEmail: String(customerEmail).trim().toLowerCase(),
       items: cleanedItems,
       shipping: Number(shipping || 0),
       notes,
@@ -140,7 +135,6 @@ export const createInvoice = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ CREATE INVOICE ERROR:", error)
 
@@ -164,8 +158,7 @@ export const createInvoicePaymentLink = async (req, res) => {
       })
     }
 
-    const paymentUrl =
-      await createSquarePaymentLinkForInvoice(invoice)
+    const paymentUrl = await createSquarePaymentLinkForInvoice(invoice)
 
     console.log("💳 PAYMENT LINK CREATED:", paymentUrl)
 
@@ -175,7 +168,6 @@ export const createInvoicePaymentLink = async (req, res) => {
       paymentUrl,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ CREATE PAYMENT LINK ERROR:", error)
 
@@ -206,88 +198,46 @@ export const sendInvoiceEmail = async (req, res) => {
       })
     }
 
-    const invoiceUrl =
-      await createSquarePaymentLinkForInvoice(invoice)
+    const invoiceUrl = await createSquarePaymentLinkForInvoice(invoice)
 
     await sgMail.send({
       to: invoice.customerEmail,
       from: FROM_EMAIL,
-
-      subject:
-        `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
-
+      subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
       html: `
-        <div style="
-          font-family:Arial,sans-serif;
-          color:#111;
-          line-height:1.5;
-        ">
+        <div style="font-family:Arial,sans-serif;color:#111;line-height:1.5;">
+          <h2>SignaVi Studio Invoice</h2>
 
-          <h2>
-            SignaVi Studio Invoice
-          </h2>
+          <p>Hi ${invoice.customerName},</p>
 
-          <p>
-            Hi ${invoice.customerName},
-          </p>
+          <p>Your invoice is ready for payment.</p>
 
-          <p>
-            Your invoice is ready for payment.
-          </p>
+          <p><strong>Invoice:</strong> ${invoice.invoiceNumber}</p>
 
-          <p>
-            <strong>Invoice:</strong>
-            ${invoice.invoiceNumber}
-          </p>
+          <p><strong>Subtotal:</strong> $${Number(invoice.subtotal || 0).toFixed(2)}</p>
+          <p><strong>Tax:</strong> $${Number(invoice.tax || 0).toFixed(2)}</p>
+          <p><strong>Shipping:</strong> $${Number(invoice.shipping || 0).toFixed(2)}</p>
 
-          <p>
-            <strong>Subtotal:</strong>
-            $${Number(invoice.subtotal || 0).toFixed(2)}
-          </p>
-
-          <p>
-            <strong>Tax:</strong>
-            $${Number(invoice.tax || 0).toFixed(2)}
-          </p>
-
-          <p>
-            <strong>Shipping:</strong>
-            $${Number(invoice.shipping || 0).toFixed(2)}
-          </p>
-
-          <h3>
-            Total:
-            $${Number(invoice.total || 0).toFixed(2)}
-          </h3>
+          <h3>Total: $${Number(invoice.total || 0).toFixed(2)}</h3>
 
           <p>
             <a
               href="${invoiceUrl}"
-              style="
-                background:#111;
-                color:#fff;
-                padding:12px 18px;
-                text-decoration:none;
-                border-radius:8px;
-                display:inline-block;
-              "
+              style="background:#111;color:#fff;padding:12px 18px;text-decoration:none;border-radius:8px;display:inline-block;"
             >
               Pay Invoice
             </a>
           </p>
 
           <p>
-            Or copy and paste this link:
-            <br />
+            Or copy and paste this link:<br />
             ${invoiceUrl}
           </p>
 
           <p>
-            Thank you,
-            <br />
+            Thank you,<br />
             SignaVi Studio
           </p>
-
         </div>
       `
     })
@@ -303,7 +253,6 @@ export const sendInvoiceEmail = async (req, res) => {
       paymentUrl: invoiceUrl,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ SEND INVOICE EMAIL ERROR:", error)
 
@@ -318,14 +267,12 @@ export const sendInvoiceEmail = async (req, res) => {
 
 export const getInvoices = async (req, res) => {
   try {
-    const invoices = await Invoice.find()
-      .sort({ createdAt: -1 })
+    const invoices = await Invoice.find().sort({ createdAt: -1 })
 
     res.json({
       success: true,
       data: invoices
     })
-
   } catch (error) {
     console.error("❌ GET INVOICES ERROR:", error)
 
@@ -353,7 +300,6 @@ export const getInvoiceById = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ GET INVOICE ERROR:", error)
 
@@ -403,7 +349,6 @@ export const updateInvoice = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ UPDATE INVOICE ERROR:", error)
 
@@ -418,8 +363,7 @@ export const updateInvoice = async (req, res) => {
 
 export const deleteInvoice = async (req, res) => {
   try {
-    const invoice =
-      await Invoice.findByIdAndDelete(req.params.id)
+    const invoice = await Invoice.findByIdAndDelete(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -432,7 +376,6 @@ export const deleteInvoice = async (req, res) => {
       success: true,
       message: "Invoice deleted successfully"
     })
-
   } catch (error) {
     console.error("❌ DELETE INVOICE ERROR:", error)
 
@@ -449,26 +392,24 @@ export const uploadFinalProof = async (req, res) => {
   try {
     const { imageUrl, fileName } = req.body
 
-    const invoice =
-      await Invoice.findByIdAndUpdate(
-        req.params.id,
-        {
-          status: "proof_uploaded",
-
-          finalProof: {
-            imageUrl,
-            fileName,
-            approved: false,
-            approvedAt: null,
-            approvalName: "",
-            approvalEmail: ""
-          }
-        },
-        {
-          new: true,
-          runValidators: true
+    const invoice = await Invoice.findByIdAndUpdate(
+      req.params.id,
+      {
+        status: "proof_uploaded",
+        finalProof: {
+          imageUrl,
+          fileName,
+          approved: false,
+          approvedAt: null,
+          approvalName: "",
+          approvalEmail: ""
         }
-      )
+      },
+      {
+        new: true,
+        runValidators: true
+      }
+    )
 
     if (!invoice) {
       return res.status(404).json({
@@ -481,7 +422,6 @@ export const uploadFinalProof = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ UPLOAD FINAL PROOF ERROR:", error)
 
@@ -501,24 +441,20 @@ export const approveFinalProof = async (req, res) => {
       approvalEmail = ""
     } = req.body
 
-    const invoice =
-      await Invoice.findByIdAndUpdate(
-        req.params.id,
-        {
-          status: "proof_approved",
-
-          "finalProof.approved": true,
-          "finalProof.approvedAt": new Date(),
-
-          "finalProof.approvalName": approvalName,
-
-          "finalProof.approvalEmail": approvalEmail
-        },
-        {
-          new: true,
-          runValidators: true
-        }
-      )
+    const invoice = await Invoice.findByIdAndUpdate(
+      req.params.id,
+      {
+        status: "proof_approved",
+        "finalProof.approved": true,
+        "finalProof.approvedAt": new Date(),
+        "finalProof.approvalName": approvalName,
+        "finalProof.approvalEmail": approvalEmail
+      },
+      {
+        new: true,
+        runValidators: true
+      }
+    )
 
     if (!invoice) {
       return res.status(404).json({
@@ -531,7 +467,6 @@ export const approveFinalProof = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ APPROVE FINAL PROOF ERROR:", error)
 
@@ -565,7 +500,6 @@ export const markInvoicePaid = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ MARK INVOICE PAID ERROR:", error)
 
@@ -592,8 +526,7 @@ export const startProduction = async (req, res) => {
     if (invoice.paymentStatus !== "paid") {
       return res.status(400).json({
         success: false,
-        message:
-          "Invoice must be paid before production starts"
+        message: "Invoice must be paid before production starts"
       })
     }
 
@@ -605,7 +538,6 @@ export const startProduction = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
     console.error("❌ START PRODUCTION ERROR:", error)
 
