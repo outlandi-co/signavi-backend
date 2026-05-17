@@ -15,25 +15,11 @@ import { fileURLToPath } from "url"
 
 import Order from "./models/Order.js"
 
-/* ================= PATH SETUP ================= */
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-/* ================= ENSURE UPLOAD DIR ================= */
-
-const uploadDir = path.join(process.cwd(), "uploads")
-
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true })
-}
-
-console.log("📁 Upload directory:", uploadDir)
-
 /* ================= ROUTES ================= */
 
 import productRoutes from "./routes/products.js"
 import orderRoutes from "./routes/orders.js"
+import invoiceRoutes from "./routes/invoiceRoutes.js"
 import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
 import cartRoutes from "./routes/cart.js"
@@ -49,7 +35,19 @@ import supportRoutes from "./routes/support/supportRoutes.js"
 import squareWebhook from "./routes/squareWebhook.js"
 import aiChatRoutes from "./routes/aiChat.js"
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
-import invoiceRoutes from "./routes/invoiceRoutes.js"
+
+/* ================= PATH SETUP ================= */
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const uploadDir = path.join(process.cwd(), "uploads")
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true })
+}
+
+console.log("📁 Upload directory:", uploadDir)
 
 /* ================= APP ================= */
 
@@ -94,20 +92,8 @@ app.use("/api/square", squareWebhook)
 
 /* ================= JSON ================= */
 
-app.use(
-  express.json({
-    strict: true,
-    limit: "2mb"
-  })
-)
-
-app.use(
-  express.urlencoded({
-    extended: true
-  })
-)
-
-/* ================= BAD JSON ================= */
+app.use(express.json({ strict: true, limit: "2mb" }))
+app.use(express.urlencoded({ extended: true }))
 
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && "body" in err) {
@@ -125,9 +111,6 @@ app.use((err, req, res, next) => {
 /* ================= MIDDLEWARE ================= */
 
 app.use(cookieParser())
-
-/* ================= STATIC UPLOADS ================= */
-
 app.use("/uploads", express.static(uploadDir))
 
 /* ================= HEALTH ================= */
@@ -145,7 +128,6 @@ const csvEscape = (value) => {
   if (value === null || value === undefined) return ""
 
   const stringValue = String(value).replace(/"/g, '""')
-
   return `"${stringValue}"`
 }
 
@@ -163,11 +145,7 @@ const sendCSV = (res, filename, rows) => {
   const csv = rows.map(row => row.map(csvEscape).join(",")).join("\n")
 
   res.setHeader("Content-Type", "text/csv")
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${filename}"`
-  )
-
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`)
   res.send(csv)
 }
 
@@ -230,7 +208,6 @@ app.get("/api/orders/export", async (req, res) => {
     ]
 
     sendCSV(res, "signavi-orders.csv", rows)
-
   } catch (err) {
     console.error("❌ ORDERS CSV ERROR:", err)
 
@@ -306,7 +283,6 @@ app.get("/api/export-taxes", async (req, res) => {
     ]
 
     sendCSV(res, "signavi-tax-report.csv", rows)
-
   } catch (err) {
     console.error("❌ TAX CSV ERROR:", err)
 
@@ -322,7 +298,10 @@ app.get("/api/export-taxes", async (req, res) => {
 
 app.use("/api/products", productRoutes)
 app.use("/api/orders", orderRoutes)
+
 app.use("/api/invoices", invoiceRoutes)
+console.log("🧾 INVOICE ROUTE MOUNTED")
+
 app.use("/api/auth", authRoutes)
 app.use("/api/logout", logoutRoutes)
 app.use("/api/cart", cartRoutes)
@@ -338,12 +317,8 @@ app.use("/api/order-workflow", orderWorkflowRoutes)
 app.use("/api/ai-chat", aiChatRoutes)
 console.log("🤖 AI CHAT ROUTE MOUNTED")
 
-/* ================= ADMIN ================= */
-
 app.use("/api/admin-email", adminEmailRoutes)
 console.log("📧 ADMIN EMAIL ROUTE MOUNTED")
-
-/* ================= SUPPORT ================= */
 
 app.use("/api/support", supportRoutes)
 console.log("🛟 SUPPORT ROUTE MOUNTED")
@@ -352,12 +327,7 @@ console.log("🛟 SUPPORT ROUTE MOUNTED")
 
 const io = new Server(server, {
   cors: {
-    origin: [
-  "https://signavistudio.store",
-  "https://signavi.store",
-  "http://localhost:5173",
-  "http://localhost:5174"
-],
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     credentials: true
   }

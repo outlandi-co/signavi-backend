@@ -4,7 +4,33 @@ import Invoice from "../models/Invoice.js"
 
 export const createInvoice = async (req, res) => {
   try {
-    const invoice = await Invoice.create(req.body)
+    const {
+      customerName,
+      customerEmail,
+      items = [],
+      shipping = 0,
+      tax = 0,
+      notes = ""
+    } = req.body
+
+    const subtotal = items.reduce((sum, item) => {
+      return sum + Number(item.price || 0) * Number(item.quantity || 0)
+    }, 0)
+
+    const total =
+      subtotal +
+      Number(shipping || 0) +
+      Number(tax || 0)
+
+    const invoice = await Invoice.create({
+  customerName,
+  customerEmail,
+  items,
+  shipping: Number(shipping || 0),
+  notes,
+  paymentStatus: "unpaid",
+  status: "draft"
+})
 
     res.status(201).json({
       success: true,
@@ -15,7 +41,7 @@ export const createInvoice = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to create invoice"
+      message: error.message
     })
   }
 }
@@ -35,12 +61,12 @@ export const getInvoices = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to get invoices"
+      message: error.message
     })
   }
 }
 
-/* ================= GET SINGLE INVOICE ================= */
+/* ================= GET INVOICE BY ID ================= */
 
 export const getInvoiceById = async (req, res) => {
   try {
@@ -62,7 +88,7 @@ export const getInvoiceById = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to get invoice"
+      message: error.message
     })
   }
 }
@@ -93,7 +119,7 @@ export const updateInvoice = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to update invoice"
+      message: error.message
     })
   }
 }
@@ -120,7 +146,7 @@ export const deleteInvoice = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to delete invoice"
+      message: error.message
     })
   }
 }
@@ -163,7 +189,7 @@ export const uploadFinalProof = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to upload final proof"
+      message: error.message
     })
   }
 }
@@ -172,7 +198,10 @@ export const uploadFinalProof = async (req, res) => {
 
 export const approveFinalProof = async (req, res) => {
   try {
-    const { approvalName, approvalEmail } = req.body
+    const {
+      approvalName = "",
+      approvalEmail = ""
+    } = req.body
 
     const invoice = await Invoice.findByIdAndUpdate(
       req.params.id,
@@ -202,7 +231,7 @@ export const approveFinalProof = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to approve proof"
+      message: error.message
     })
   }
 }
@@ -235,12 +264,12 @@ export const markInvoicePaid = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to mark invoice paid"
+      message: error.message
     })
   }
 }
 
-/* ================= START PRODUCTION MANUALLY ================= */
+/* ================= START PRODUCTION ================= */
 
 export const startProduction = async (req, res) => {
   try {
@@ -280,7 +309,7 @@ export const startProduction = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: "Failed to start production"
+      message: error.message
     })
   }
 }
