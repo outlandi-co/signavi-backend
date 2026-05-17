@@ -19,11 +19,37 @@ import {
 
 const router = express.Router()
 
-const proofUploadDir = path.join(process.cwd(), "uploads", "proofs")
+/* ================= UPLOAD DIRECTORY ================= */
+/*
+  Local:
+    /your-project/uploads/proofs
+
+  Render persistent disk:
+    UPLOAD_DIR=/var/data/uploads
+    proof files save to /var/data/uploads/proofs
+*/
+
+const uploadBaseDir =
+  process.env.UPLOAD_DIR ||
+  path.join(process.cwd(), "uploads")
+
+const proofUploadDir = path.join(
+  uploadBaseDir,
+  "proofs"
+)
 
 if (!fs.existsSync(proofUploadDir)) {
-  fs.mkdirSync(proofUploadDir, { recursive: true })
+  fs.mkdirSync(proofUploadDir, {
+    recursive: true
+  })
 }
+
+console.log(
+  "🖼️ Proof upload directory:",
+  proofUploadDir
+)
+
+/* ================= MULTER STORAGE ================= */
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -31,28 +57,77 @@ const storage = multer.diskStorage({
   },
 
   filename: (req, file, cb) => {
-    const safeName = file.originalname.replace(/\s+/g, "-")
-    cb(null, `${Date.now()}-${safeName}`)
+    const ext = path.extname(file.originalname)
+
+    const baseName = path
+      .basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9-_]/g, "-")
+      .replace(/-+/g, "-")
+      .toLowerCase()
+
+    const uniqueName =
+      `${Date.now()}-${Math.round(
+        Math.random() * 1e9
+      )}-${baseName}${ext.toLowerCase()}`
+
+    cb(null, uniqueName)
   }
 })
 
 const upload = multer({
   storage,
+
   limits: {
     files: 10,
     fileSize: 15 * 1024 * 1024
+  },
+
+  fileFilter: (req, file, cb) => {
+    const allowedMimeTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/gif",
+      "application/pdf"
+    ]
+
+    if (
+      allowedMimeTypes.includes(file.mimetype)
+    ) {
+      cb(null, true)
+      return
+    }
+
+    cb(
+      new Error(
+        "Only image files and PDFs are allowed for final proofs."
+      )
+    )
   }
 })
 
+/* ================= CREATE ================= */
+
 router.post("/", createInvoice)
+
+/* ================= READ ================= */
 
 router.get("/", getInvoices)
 
 router.get("/:id", getInvoiceById)
 
-router.post("/:id/create-payment-link", createInvoicePaymentLink)
+/* ================= PAYMENT ================= */
+
+router.post(
+  "/:id/create-payment-link",
+  createInvoicePaymentLink
+)
+
+/* ================= EMAIL ================= */
 
 router.post("/:id/send", sendInvoiceEmail)
+
+/* ================= UPDATE ================= */
 
 router.patch("/:id", updateInvoice)
 
@@ -62,11 +137,22 @@ router.patch(
   uploadFinalProof
 )
 
-router.patch("/:id/approve-proof", approveFinalProof)
+router.patch(
+  "/:id/approve-proof",
+  approveFinalProof
+)
 
-router.patch("/:id/mark-paid", markInvoicePaid)
+router.patch(
+  "/:id/mark-paid",
+  markInvoicePaid
+)
 
-router.patch("/:id/start-production", startProduction)
+router.patch(
+  "/:id/start-production",
+  startProduction
+)
+
+/* ================= DELETE ================= */
 
 router.delete("/:id", deleteInvoice)
 
