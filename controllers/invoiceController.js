@@ -48,7 +48,9 @@ export const createInvoice = async (req, res) => {
 
     const invoice = new Invoice({
       customerName: String(customerName).trim(),
-      customerEmail: String(customerEmail).trim().toLowerCase(),
+      customerEmail: String(customerEmail)
+        .trim()
+        .toLowerCase(),
       items: cleanedItems,
       shipping: Number(shipping || 0),
       notes,
@@ -58,12 +60,18 @@ export const createInvoice = async (req, res) => {
 
     await invoice.save()
 
+    console.log("✅ INVOICE CREATED:", invoice._id)
+
     res.status(201).json({
       success: true,
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ CREATE INVOICE ERROR:", error)
+    console.error(
+      "❌ CREATE INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -72,31 +80,16 @@ export const createInvoice = async (req, res) => {
   }
 }
 
-/* ================= GET ALL INVOICES ================= */
+/* ================= CREATE PAYMENT LINK ================= */
 
-export const getInvoices = async (req, res) => {
+export const createInvoicePaymentLink = async (
+  req,
+  res
+) => {
   try {
-    const invoices = await Invoice.find().sort({ createdAt: -1 })
-
-    res.json({
-      success: true,
-      data: invoices
-    })
-  } catch (error) {
-    console.error("❌ GET INVOICES ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    })
-  }
-}
-
-/* ================= GET INVOICE BY ID ================= */
-
-export const getInvoiceById = async (req, res) => {
-  try {
-    const invoice = await Invoice.findById(req.params.id)
+    const invoice = await Invoice.findById(
+      req.params.id
+    )
 
     if (!invoice) {
       return res.status(404).json({
@@ -105,12 +98,31 @@ export const getInvoiceById = async (req, res) => {
       })
     }
 
+    /*
+      Temporary payment page.
+      Later replace with Square checkout URL.
+    */
+
+    invoice.paymentUrl =
+      `${CLIENT_URL}/invoice/${invoice._id}`
+
+    invoice.status = "payment_required"
+
+    await invoice.save()
+
+    console.log("💳 PAYMENT LINK CREATED")
+
     res.json({
       success: true,
+      message: "Invoice payment link created",
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ GET INVOICE ERROR:", error)
+    console.error(
+      "❌ CREATE PAYMENT LINK ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -123,6 +135,7 @@ export const getInvoiceById = async (req, res) => {
 
 export const sendInvoiceEmail = async (req, res) => {
   try {
+
     if (!process.env.SENDGRID_API_KEY) {
       return res.status(500).json({
         success: false,
@@ -130,7 +143,9 @@ export const sendInvoiceEmail = async (req, res) => {
       })
     }
 
-    const invoice = await Invoice.findById(req.params.id)
+    const invoice = await Invoice.findById(
+      req.params.id
+    )
 
     if (!invoice) {
       return res.status(404).json({
@@ -139,49 +154,164 @@ export const sendInvoiceEmail = async (req, res) => {
       })
     }
 
-    const invoiceUrl = `${CLIENT_URL}/invoice/${invoice._id}`
+    const invoiceUrl =
+      invoice.paymentUrl ||
+      `${CLIENT_URL}/invoice/${invoice._id}`
 
     await sgMail.send({
       to: invoice.customerEmail,
+
       from: FROM_EMAIL,
-      subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+
+      subject:
+        `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+
       html: `
-        <div style="font-family:Arial,sans-serif;color:#111;line-height:1.5;">
-          <h2>SignaVi Studio Invoice</h2>
+        <div style="
+          font-family:Arial,sans-serif;
+          color:#111;
+          line-height:1.5;
+        ">
 
-          <p>Hi ${invoice.customerName},</p>
-
-          <p>Your invoice is ready for review.</p>
-
-          <p><strong>Invoice:</strong> ${invoice.invoiceNumber}</p>
-          <p><strong>Subtotal:</strong> $${Number(invoice.subtotal || 0).toFixed(2)}</p>
-          <p><strong>Tax:</strong> $${Number(invoice.tax || 0).toFixed(2)}</p>
-          <p><strong>Shipping:</strong> $${Number(invoice.shipping || 0).toFixed(2)}</p>
-          <h3>Total: $${Number(invoice.total || 0).toFixed(2)}</h3>
+          <h2>
+            SignaVi Studio Invoice
+          </h2>
 
           <p>
-            <a href="${invoiceUrl}" style="background:#111;color:#fff;padding:12px 18px;text-decoration:none;border-radius:8px;display:inline-block;">
-              View Invoice
+            Hi ${invoice.customerName},
+          </p>
+
+          <p>
+            Your invoice is ready for payment.
+          </p>
+
+          <p>
+            <strong>Invoice:</strong>
+            ${invoice.invoiceNumber}
+          </p>
+
+          <p>
+            <strong>Subtotal:</strong>
+            $${Number(invoice.subtotal || 0).toFixed(2)}
+          </p>
+
+          <p>
+            <strong>Tax:</strong>
+            $${Number(invoice.tax || 0).toFixed(2)}
+          </p>
+
+          <p>
+            <strong>Shipping:</strong>
+            $${Number(invoice.shipping || 0).toFixed(2)}
+          </p>
+
+          <h3>
+            Total:
+            $${Number(invoice.total || 0).toFixed(2)}
+          </h3>
+
+          <p>
+            <a
+              href="${invoiceUrl}"
+              style="
+                background:#111;
+                color:#fff;
+                padding:12px 18px;
+                text-decoration:none;
+                border-radius:8px;
+                display:inline-block;
+              "
+            >
+              Pay Invoice
             </a>
           </p>
 
-          <p>Thank you,<br />SignaVi Studio</p>
+          <p>
+            Thank you,
+            <br />
+            SignaVi Studio
+          </p>
+
         </div>
       `
     })
 
-    if (invoice.status === "draft") {
-      invoice.status = "payment_required"
-      await invoice.save()
-    }
+    console.log(
+      "📧 INVOICE EMAIL SENT:",
+      invoice.customerEmail
+    )
 
     res.json({
       success: true,
       message: "Invoice email sent successfully",
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ SEND INVOICE EMAIL ERROR:", error)
+    console.error(
+      "❌ SEND INVOICE EMAIL ERROR:",
+      error
+    )
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    })
+  }
+}
+
+/* ================= GET ALL INVOICES ================= */
+
+export const getInvoices = async (req, res) => {
+  try {
+
+    const invoices = await Invoice.find()
+      .sort({ createdAt: -1 })
+
+    res.json({
+      success: true,
+      data: invoices
+    })
+
+  } catch (error) {
+    console.error(
+      "❌ GET INVOICES ERROR:",
+      error
+    )
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    })
+  }
+}
+
+/* ================= GET INVOICE BY ID ================= */
+
+export const getInvoiceById = async (req, res) => {
+  try {
+
+    const invoice = await Invoice.findById(
+      req.params.id
+    )
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found"
+      })
+    }
+
+    res.json({
+      success: true,
+      data: invoice
+    })
+
+  } catch (error) {
+    console.error(
+      "❌ GET INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -194,11 +324,16 @@ export const sendInvoiceEmail = async (req, res) => {
 
 export const updateInvoice = async (req, res) => {
   try {
-    const invoice = await Invoice.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    )
+
+    const invoice =
+      await Invoice.findByIdAndUpdate(
+        req.params.id,
+        req.body,
+        {
+          new: true,
+          runValidators: true
+        }
+      )
 
     if (!invoice) {
       return res.status(404).json({
@@ -211,8 +346,12 @@ export const updateInvoice = async (req, res) => {
       success: true,
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ UPDATE INVOICE ERROR:", error)
+    console.error(
+      "❌ UPDATE INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -225,7 +364,11 @@ export const updateInvoice = async (req, res) => {
 
 export const deleteInvoice = async (req, res) => {
   try {
-    const invoice = await Invoice.findByIdAndDelete(req.params.id)
+
+    const invoice =
+      await Invoice.findByIdAndDelete(
+        req.params.id
+      )
 
     if (!invoice) {
       return res.status(404).json({
@@ -238,8 +381,12 @@ export const deleteInvoice = async (req, res) => {
       success: true,
       message: "Invoice deleted successfully"
     })
+
   } catch (error) {
-    console.error("❌ DELETE INVOICE ERROR:", error)
+    console.error(
+      "❌ DELETE INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -250,25 +397,37 @@ export const deleteInvoice = async (req, res) => {
 
 /* ================= UPLOAD FINAL PROOF ================= */
 
-export const uploadFinalProof = async (req, res) => {
+export const uploadFinalProof = async (
+  req,
+  res
+) => {
   try {
-    const { imageUrl, fileName } = req.body
 
-    const invoice = await Invoice.findByIdAndUpdate(
-      req.params.id,
-      {
-        status: "proof_uploaded",
-        finalProof: {
-          imageUrl,
-          fileName,
-          approved: false,
-          approvedAt: null,
-          approvalName: "",
-          approvalEmail: ""
+    const {
+      imageUrl,
+      fileName
+    } = req.body
+
+    const invoice =
+      await Invoice.findByIdAndUpdate(
+        req.params.id,
+        {
+          status: "proof_uploaded",
+
+          finalProof: {
+            imageUrl,
+            fileName,
+            approved: false,
+            approvedAt: null,
+            approvalName: "",
+            approvalEmail: ""
+          }
+        },
+        {
+          new: true,
+          runValidators: true
         }
-      },
-      { new: true, runValidators: true }
-    )
+      )
 
     if (!invoice) {
       return res.status(404).json({
@@ -281,8 +440,12 @@ export const uploadFinalProof = async (req, res) => {
       success: true,
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ UPLOAD FINAL PROOF ERROR:", error)
+    console.error(
+      "❌ UPLOAD FINAL PROOF ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -293,24 +456,38 @@ export const uploadFinalProof = async (req, res) => {
 
 /* ================= APPROVE FINAL PROOF ================= */
 
-export const approveFinalProof = async (req, res) => {
+export const approveFinalProof = async (
+  req,
+  res
+) => {
   try {
+
     const {
       approvalName = "",
       approvalEmail = ""
     } = req.body
 
-    const invoice = await Invoice.findByIdAndUpdate(
-      req.params.id,
-      {
-        status: "proof_approved",
-        "finalProof.approved": true,
-        "finalProof.approvedAt": new Date(),
-        "finalProof.approvalName": approvalName,
-        "finalProof.approvalEmail": approvalEmail
-      },
-      { new: true, runValidators: true }
-    )
+    const invoice =
+      await Invoice.findByIdAndUpdate(
+        req.params.id,
+        {
+          status: "proof_approved",
+
+          "finalProof.approved": true,
+          "finalProof.approvedAt":
+            new Date(),
+
+          "finalProof.approvalName":
+            approvalName,
+
+          "finalProof.approvalEmail":
+            approvalEmail
+        },
+        {
+          new: true,
+          runValidators: true
+        }
+      )
 
     if (!invoice) {
       return res.status(404).json({
@@ -323,8 +500,12 @@ export const approveFinalProof = async (req, res) => {
       success: true,
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ APPROVE FINAL PROOF ERROR:", error)
+    console.error(
+      "❌ APPROVE FINAL PROOF ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -335,9 +516,15 @@ export const approveFinalProof = async (req, res) => {
 
 /* ================= MARK PAID ================= */
 
-export const markInvoicePaid = async (req, res) => {
+export const markInvoicePaid = async (
+  req,
+  res
+) => {
   try {
-    const invoice = await Invoice.findById(req.params.id)
+
+    const invoice = await Invoice.findById(
+      req.params.id
+    )
 
     if (!invoice) {
       return res.status(404).json({
@@ -347,7 +534,10 @@ export const markInvoicePaid = async (req, res) => {
     }
 
     invoice.paymentStatus = "paid"
-    invoice.status = "ready_for_production"
+
+    invoice.status =
+      "ready_for_production"
+
     invoice.paidAt = new Date()
 
     await invoice.save()
@@ -356,8 +546,12 @@ export const markInvoicePaid = async (req, res) => {
       success: true,
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ MARK INVOICE PAID ERROR:", error)
+    console.error(
+      "❌ MARK INVOICE PAID ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -368,9 +562,15 @@ export const markInvoicePaid = async (req, res) => {
 
 /* ================= START PRODUCTION ================= */
 
-export const startProduction = async (req, res) => {
+export const startProduction = async (
+  req,
+  res
+) => {
   try {
-    const invoice = await Invoice.findById(req.params.id)
+
+    const invoice = await Invoice.findById(
+      req.params.id
+    )
 
     if (!invoice) {
       return res.status(404).json({
@@ -382,26 +582,25 @@ export const startProduction = async (req, res) => {
     if (invoice.paymentStatus !== "paid") {
       return res.status(400).json({
         success: false,
-        message: "Invoice must be paid before production starts"
-      })
-    }
-
-    if (!invoice.finalProof?.approved) {
-      return res.status(400).json({
-        success: false,
-        message: "Final proof must be approved before production starts"
+        message:
+          "Invoice must be paid before production starts"
       })
     }
 
     invoice.status = "production"
+
     await invoice.save()
 
     res.json({
       success: true,
       data: invoice
     })
+
   } catch (error) {
-    console.error("❌ START PRODUCTION ERROR:", error)
+    console.error(
+      "❌ START PRODUCTION ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
