@@ -1,7 +1,9 @@
 import crypto from "crypto"
 import sgMail from "@sendgrid/mail"
-import { Client, Environment } from "square"
+import square from "square"
 import Invoice from "../models/Invoice.js"
+
+const { Client, Environment } = square
 
 const CLIENT_URL =
   process.env.CLIENT_URL ||
