@@ -1,11 +1,21 @@
+import sgMail from "@sendgrid/mail"
 import Invoice from "../models/Invoice.js"
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+
+const CLIENT_URL =
+  process.env.CLIENT_URL ||
+  "https://signavistudio.store"
+
+const FROM_EMAIL =
+  process.env.SENDGRID_FROM_EMAIL ||
+  process.env.EMAIL_FROM ||
+  "admin@signavistudio.store"
 
 /* ================= CREATE INVOICE ================= */
 
 export const createInvoice = async (req, res) => {
   try {
-    console.log("📦 INVOICE BODY:", req.body)
-
     const {
       customerName,
       customerEmail,
@@ -41,7 +51,7 @@ export const createInvoice = async (req, res) => {
     if (hasInvalidItem) {
       return res.status(400).json({
         success: false,
-        message: "Each invoice item needs a name, quantity, and valid price"
+        message: "Each invoice item needs a valid name, quantity, and price"
       })
     }
 
@@ -57,14 +67,173 @@ export const createInvoice = async (req, res) => {
 
     await invoice.save()
 
-    console.log("✅ INVOICE CREATED:", invoice._id)
-
     res.status(201).json({
       success: true,
       data: invoice
     })
   } catch (error) {
-    console.error("❌ CREATE INVOICE ERROR FULL:", error)
+    console.error("❌ CREATE INVOICE ERROR:", error)
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    })
+  }
+}
+
+/* ================= SEND INVOICE EMAIL ================= */
+
+export const sendInvoiceEmail = async (req, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id)
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found"
+      })
+    }
+
+    const invoiceUrl =
+      `${CLIENT_URL}/invoice/${invoice._id}`
+
+    const itemRows = invoice.items
+      .map((item) => {
+        const lineTotal =
+          Number(item.quantity || 0) *
+          Number(item.price || 0)
+
+        return `
+          <tr>
+            <td style="padding:8px;border-bottom:1px solid #ddd;">
+              ${item.name}
+            </td>
+
+            <td style="padding:8px;border-bottom:1px solid #ddd;text-align:center;">
+              ${item.quantity}
+            </td>
+
+            <td style="padding:8px;border-bottom:1px solid #ddd;text-align:right;">
+              $${Number(item.price || 0).toFixed(2)}
+            </td>
+
+            <td style="padding:8px;border-bottom:1px solid #ddd;text-align:right;">
+              $${lineTotal.toFixed(2)}
+            </td>
+          </tr>
+        `
+      })
+      .join("")
+
+    await sgMail.send({
+      to: invoice.customerEmail,
+      from: FROM_EMAIL,
+      subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#111;line-height:1.5;">
+
+          <h2>SignaVi Studio Invoice</h2>
+
+          <p>
+            Hi ${invoice.customerName},
+          </p>
+
+          <p>
+            Your invoice is ready for review.
+          </p>
+
+          <p>
+            <strong>Invoice:</strong>
+            ${invoice.invoiceNumber}
+          </p>
+
+          <table style="border-collapse:collapse;width:100%;max-width:700px;">
+
+            <thead>
+              <tr>
+                <th style="padding:8px;border-bottom:2px solid #111;text-align:left;">
+                  Item
+                </th>
+
+                <th style="padding:8px;border-bottom:2px solid #111;text-align:center;">
+                  Qty
+                </th>
+
+                <th style="padding:8px;border-bottom:2px solid #111;text-align:right;">
+                  Price
+                </th>
+
+                <th style="padding:8px;border-bottom:2px solid #111;text-align:right;">
+                  Total
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${itemRows}
+            </tbody>
+
+          </table>
+
+          <p>
+            <strong>Subtotal:</strong>
+            $${Number(invoice.subtotal || 0).toFixed(2)}
+          </p>
+
+          <p>
+            <strong>Tax:</strong>
+            $${Number(invoice.tax || 0).toFixed(2)}
+          </p>
+
+          <p>
+            <strong>Shipping:</strong>
+            $${Number(invoice.shipping || 0).toFixed(2)}
+          </p>
+
+          <h3>
+            Total:
+            $${Number(invoice.total || 0).toFixed(2)}
+          </h3>
+
+          <p>
+            <a
+              href="${invoiceUrl}"
+              style="
+                background:#111;
+                color:#fff;
+                padding:12px 18px;
+                text-decoration:none;
+                border-radius:8px;
+                display:inline-block;
+              "
+            >
+              View Invoice
+            </a>
+          </p>
+
+          <p>
+            Thank you,
+            <br />
+            SignaVi Studio
+          </p>
+
+        </div>
+      `
+    })
+
+    if (invoice.status === "draft") {
+      invoice.status = "payment_required"
+      await invoice.save()
+    }
+
+    res.json({
+      success: true,
+      message: "Invoice email sent successfully",
+      data: invoice
+    })
+  } catch (error) {
+    console.error("❌ SEND INVOICE EMAIL ERROR:", error)
 
     res.status(500).json({
       success: false,
@@ -77,7 +246,8 @@ export const createInvoice = async (req, res) => {
 
 export const getInvoices = async (req, res) => {
   try {
-    const invoices = await Invoice.find().sort({ createdAt: -1 })
+    const invoices = await Invoice.find()
+      .sort({ createdAt: -1 })
 
     res.json({
       success: true,
@@ -127,7 +297,10 @@ export const updateInvoice = async (req, res) => {
     const invoice = await Invoice.findByIdAndUpdate(
       req.params.id,
       req.body,
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true
+      }
     )
 
     if (!invoice) {
@@ -155,7 +328,8 @@ export const updateInvoice = async (req, res) => {
 
 export const deleteInvoice = async (req, res) => {
   try {
-    const invoice = await Invoice.findByIdAndDelete(req.params.id)
+    const invoice =
+      await Invoice.findByIdAndDelete(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -188,6 +362,7 @@ export const uploadFinalProof = async (req, res) => {
       req.params.id,
       {
         status: "proof_uploaded",
+
         finalProof: {
           imageUrl,
           fileName,
@@ -197,7 +372,10 @@ export const uploadFinalProof = async (req, res) => {
           approvalEmail: ""
         }
       },
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true
+      }
     )
 
     if (!invoice) {
@@ -234,12 +412,16 @@ export const approveFinalProof = async (req, res) => {
       req.params.id,
       {
         status: "proof_approved",
+
         "finalProof.approved": true,
         "finalProof.approvedAt": new Date(),
         "finalProof.approvalName": approvalName,
         "finalProof.approvalEmail": approvalEmail
       },
-      { new: true, runValidators: true }
+      {
+        new: true,
+        runValidators: true
+      }
     )
 
     if (!invoice) {
@@ -267,7 +449,8 @@ export const approveFinalProof = async (req, res) => {
 
 export const markInvoicePaid = async (req, res) => {
   try {
-    const invoice = await Invoice.findById(req.params.id)
+    const invoice =
+      await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -300,7 +483,8 @@ export const markInvoicePaid = async (req, res) => {
 
 export const startProduction = async (req, res) => {
   try {
-    const invoice = await Invoice.findById(req.params.id)
+    const invoice =
+      await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -312,14 +496,16 @@ export const startProduction = async (req, res) => {
     if (invoice.paymentStatus !== "paid") {
       return res.status(400).json({
         success: false,
-        message: "Invoice must be paid before production starts"
+        message:
+          "Invoice must be paid before production starts"
       })
     }
 
     if (!invoice.finalProof?.approved) {
       return res.status(400).json({
         success: false,
-        message: "Final proof must be approved before production starts"
+        message:
+          "Final proof must be approved before production starts"
       })
     }
 
