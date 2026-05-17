@@ -4,44 +4,43 @@ import Invoice from "../models/Invoice.js"
 
 export const createInvoice = async (req, res) => {
   try {
-    const {
-      customerName,
-      customerEmail,
-      items = [],
-      shipping = 0,
-      tax = 0,
-      notes = ""
-    } = req.body
 
-    const subtotal = items.reduce((sum, item) => {
-      return sum + Number(item.price || 0) * Number(item.quantity || 0)
-    }, 0)
+    console.log("📦 INVOICE BODY:", req.body)
 
-    const total =
-      subtotal +
-      Number(shipping || 0) +
-      Number(tax || 0)
+    const invoice = new Invoice({
+      customerName: req.body.customerName,
+      customerEmail: req.body.customerEmail,
 
-    const invoice = await Invoice.create({
-  customerName,
-  customerEmail,
-  items,
-  shipping: Number(shipping || 0),
-  notes,
-  paymentStatus: "unpaid",
-  status: "draft"
-})
+      items: req.body.items || [],
+
+      shipping: Number(req.body.shipping || 0),
+
+      notes: req.body.notes || "",
+
+      paymentStatus: "unpaid",
+      status: "draft"
+    })
+
+    await invoice.save()
+
+    console.log("✅ INVOICE CREATED:", invoice._id)
 
     res.status(201).json({
       success: true,
       data: invoice
     })
+
   } catch (error) {
-    console.error("CREATE INVOICE ERROR:", error)
+
+    console.error(
+      "❌ CREATE INVOICE ERROR FULL:",
+      error
+    )
 
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
+      stack: error.stack
     })
   }
 }
