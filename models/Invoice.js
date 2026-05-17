@@ -1,5 +1,7 @@
 import mongoose from "mongoose"
 
+const TAX_RATE = 0.0825
+
 const invoiceItemSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -30,27 +32,15 @@ const invoiceSchema = new mongoose.Schema(
       lowercase: true
     },
 
-    items: [invoiceItemSchema],
-
-    subtotal: {
-      type: Number,
-      default: 0
+    items: {
+      type: [invoiceItemSchema],
+      default: []
     },
 
-    tax: {
-      type: Number,
-      default: 0
-    },
-
-    shipping: {
-      type: Number,
-      default: 0
-    },
-
-    total: {
-      type: Number,
-      default: 0
-    },
+    subtotal: { type: Number, default: 0 },
+    tax: { type: Number, default: 0 },
+    shipping: { type: Number, default: 0 },
+    total: { type: Number, default: 0 },
 
     notes: {
       type: String,
@@ -79,54 +69,23 @@ const invoiceSchema = new mongoose.Schema(
       default: "unpaid"
     },
 
-    paymentUrl: {
-      type: String,
-      default: ""
-    },
-
-    squareCheckoutId: {
-      type: String,
-      default: ""
-    },
-
-    paidAt: {
-      type: Date,
-      default: null
-    },
+    paymentUrl: { type: String, default: "" },
+    squareCheckoutId: { type: String, default: "" },
+    paidAt: { type: Date, default: null },
 
     finalProof: {
-      imageUrl: {
-        type: String,
-        default: ""
-      },
-      fileName: {
-        type: String,
-        default: ""
-      },
-      approved: {
-        type: Boolean,
-        default: false
-      },
-      approvedAt: {
-        type: Date,
-        default: null
-      },
-      approvalName: {
-        type: String,
-        default: ""
-      },
-      approvalEmail: {
-        type: String,
-        default: ""
-      }
+      imageUrl: { type: String, default: "" },
+      fileName: { type: String, default: "" },
+      approved: { type: Boolean, default: false },
+      approvedAt: { type: Date, default: null },
+      approvalName: { type: String, default: "" },
+      approvalEmail: { type: String, default: "" }
     }
   },
   { timestamps: true }
 )
 
 invoiceSchema.pre("save", function calculateTotals(next) {
-  const TAX_RATE = 0.0825
-
   const subtotal = this.items.reduce((sum, item) => {
     return sum + Number(item.quantity || 0) * Number(item.price || 0)
   }, 0)
@@ -142,6 +101,5 @@ invoiceSchema.pre("save", function calculateTotals(next) {
 
   next()
 })
-
 
 export default mongoose.model("Invoice", invoiceSchema)

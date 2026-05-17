@@ -4,19 +4,53 @@ import Invoice from "../models/Invoice.js"
 
 export const createInvoice = async (req, res) => {
   try {
-
     console.log("📦 INVOICE BODY:", req.body)
 
+    const {
+      customerName,
+      customerEmail,
+      items = [],
+      shipping = 0,
+      notes = ""
+    } = req.body
+
+    if (!customerName || !customerEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer name and email are required"
+      })
+    }
+
+    if (!items.length) {
+      return res.status(400).json({
+        success: false,
+        message: "At least one invoice item is required"
+      })
+    }
+
+    const cleanedItems = items.map((item) => ({
+      name: String(item.name || "").trim(),
+      quantity: Number(item.quantity || 1),
+      price: Number(item.price || 0)
+    }))
+
+    const hasInvalidItem = cleanedItems.some((item) => {
+      return !item.name || item.quantity <= 0 || item.price < 0
+    })
+
+    if (hasInvalidItem) {
+      return res.status(400).json({
+        success: false,
+        message: "Each invoice item needs a name, quantity, and valid price"
+      })
+    }
+
     const invoice = new Invoice({
-      customerName: req.body.customerName,
-      customerEmail: req.body.customerEmail,
-
-      items: req.body.items || [],
-
-      shipping: Number(req.body.shipping || 0),
-
-      notes: req.body.notes || "",
-
+      customerName: String(customerName).trim(),
+      customerEmail: String(customerEmail).trim().toLowerCase(),
+      items: cleanedItems,
+      shipping: Number(shipping || 0),
+      notes,
       paymentStatus: "unpaid",
       status: "draft"
     })
@@ -29,18 +63,12 @@ export const createInvoice = async (req, res) => {
       success: true,
       data: invoice
     })
-
   } catch (error) {
-
-    console.error(
-      "❌ CREATE INVOICE ERROR FULL:",
-      error
-    )
+    console.error("❌ CREATE INVOICE ERROR FULL:", error)
 
     res.status(500).json({
       success: false,
-      message: error.message,
-      stack: error.stack
+      message: error.message
     })
   }
 }
