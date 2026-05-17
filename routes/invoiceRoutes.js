@@ -4,12 +4,6 @@ import {
   createInvoice,
   getInvoices,
   getInvoiceById,
-  updateInvoice,
-  deleteInvoice,
-  approveFinalProof,
-  startProduction,
-  markInvoicePaid,
-  uploadFinalProof,
   sendInvoiceEmail
 } from "../controllers/invoiceController.js"
 
@@ -22,22 +16,11 @@ router.post("/", createInvoice)
 /* ================= READ ================= */
 
 router.get("/", getInvoices)
+
 router.get("/:id", getInvoiceById)
 
 /* ================= EMAIL ================= */
 
 router.post("/:id/send", sendInvoiceEmail)
-
-/* ================= UPDATE ================= */
-
-router.patch("/:id", updateInvoice)
-router.patch("/:id/final-proof", uploadFinalProof)
-router.patch("/:id/approve-proof", approveFinalProof)
-router.patch("/:id/mark-paid", markInvoicePaid)
-router.patch("/:id/start-production", startProduction)
-
-/* ================= DELETE ================= */
-
-router.delete("/:id", deleteInvoice)
 
 export default router
