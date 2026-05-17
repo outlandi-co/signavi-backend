@@ -85,7 +85,9 @@ const invoiceSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
-invoiceSchema.pre("save", function calculateTotals(next) {
+invoiceSchema.pre("save", function calculateTotals() {
+  const TAX_RATE = 0.0825
+
   const subtotal = this.items.reduce((sum, item) => {
     return sum + Number(item.quantity || 0) * Number(item.price || 0)
   }, 0)
@@ -98,8 +100,6 @@ invoiceSchema.pre("save", function calculateTotals(next) {
   if (!this.invoiceNumber) {
     this.invoiceNumber = `SIGNAVI-${Date.now()}`
   }
-
-  next()
 })
 
 export default mongoose.model("Invoice", invoiceSchema)
