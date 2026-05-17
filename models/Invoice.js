@@ -11,6 +11,15 @@ const invoiceItemSchema = new mongoose.Schema(
   { _id: false }
 )
 
+const proofFileSchema = new mongoose.Schema(
+  {
+    url: { type: String, default: "" },
+    fileName: { type: String, default: "" },
+    mimeType: { type: String, default: "" }
+  },
+  { _id: false }
+)
+
 const invoiceSchema = new mongoose.Schema(
   {
     invoiceNumber: {
@@ -77,6 +86,10 @@ const invoiceSchema = new mongoose.Schema(
     finalProof: {
       imageUrl: { type: String, default: "" },
       fileName: { type: String, default: "" },
+      files: {
+        type: [proofFileSchema],
+        default: []
+      },
       approved: { type: Boolean, default: false },
       approvedAt: { type: Date, default: null },
       approvalName: { type: String, default: "" },

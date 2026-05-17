@@ -7,33 +7,25 @@ const CLIENT_URL =
   process.env.CLIENT_URL ||
   "https://signavistudio.store"
 
+const BACKEND_URL =
+  process.env.BACKEND_URL ||
+  "https://signavi-backend.onrender.com"
+
+const LOGO_URL =
+  `${CLIENT_URL.replace(/\/$/, "")}/signavi-logo.png`
+
 const FROM_EMAIL =
   process.env.SENDGRID_FROM_EMAIL ||
   process.env.EMAIL_FROM ||
   "admin@signavistudio.store"
 
-const SQUARE_ENVIRONMENT = String(
-  process.env.SQUARE_ENVIRONMENT || "production"
-)
-  .trim()
-  .toLowerCase()
-
-const squareEnvironment =
-  SQUARE_ENVIRONMENT === "sandbox"
-    ? SquareEnvironment.Sandbox
-    : SquareEnvironment.Production
+const squareClient = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN,
+  environment: SquareEnvironment.Production
+})
 
 if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY)
-}
-
-const squareClient = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
-  environment: squareEnvironment
-})
-
-const getSquareLocationId = () => {
-  return process.env.SQUARE_LOCATION_ID
 }
 
 const createSquarePaymentLinkForInvoice = async (invoice) => {
@@ -41,23 +33,9 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
     return invoice.paymentUrl
   }
 
-  if (!process.env.SQUARE_ACCESS_TOKEN) {
-    throw new Error("Missing SQUARE_ACCESS_TOKEN")
-  }
-
-  const locationId = getSquareLocationId()
-
-  if (!locationId) {
-    throw new Error("Missing SQUARE_LOCATION_ID")
-  }
-
-  const amount = Math.round(Number(invoice.total || 0) * 100)
-
-  if (!amount || amount <= 0) {
-    throw new Error("Invoice total must be greater than 0")
-  }
-
-  console.log("💳 SQUARE ENVIRONMENT:", SQUARE_ENVIRONMENT)
+  const amount = Math.round(
+    Number(invoice.total || 0) * 100
+  )
 
   const response =
     await squareClient.checkout.paymentLinks.create({
@@ -65,27 +43,31 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
 
       quickPay: {
         name: `Invoice ${invoice.invoiceNumber}`,
+
         priceMoney: {
           amount: BigInt(amount),
           currency: "USD"
         },
-        locationId
+
+        locationId:
+          process.env.SQUARE_LOCATION_ID
       },
 
       checkoutOptions: {
-        redirectUrl: `${CLIENT_URL}/invoice/${invoice._id}`
+        redirectUrl:
+          `${CLIENT_URL}/invoice/${invoice._id}`
       }
     })
 
   const paymentLink = response.paymentLink
 
-  if (!paymentLink?.url) {
-    throw new Error("Square did not return a payment URL")
-  }
-
   invoice.paymentUrl = paymentLink.url
-  invoice.squareCheckoutId = paymentLink.id || ""
-  invoice.squarePaymentLinkId = paymentLink.id || ""
+  invoice.squareCheckoutId =
+    paymentLink.id || ""
+
+  invoice.squarePaymentLinkId =
+    paymentLink.id || ""
+
   invoice.status = "payment_required"
 
   await invoice.save()
@@ -93,7 +75,7 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
   return invoice.paymentUrl
 }
 
-/* ================= CREATE INVOICE ================= */
+/* ================= CREATE ================= */
 
 export const createInvoice = async (req, res) => {
   try {
@@ -105,46 +87,30 @@ export const createInvoice = async (req, res) => {
       notes = ""
     } = req.body
 
-    if (!customerName || !customerEmail) {
-      return res.status(400).json({
-        success: false,
-        message: "Customer name and email are required"
-      })
-    }
-
-    if (!items.length) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one invoice item is required"
-      })
-    }
-
-    const cleanedItems = items.map((item) => ({
-      name: String(item.name || "").trim(),
-      quantity: Number(item.quantity || 1),
-      price: Number(item.price || 0)
-    }))
-
     const invoice = new Invoice({
-      customerName: String(customerName).trim(),
-      customerEmail: String(customerEmail).trim().toLowerCase(),
-      items: cleanedItems,
-      shipping: Number(shipping || 0),
-      notes,
-      paymentStatus: "unpaid",
-      status: "draft"
+      customerName,
+      customerEmail,
+      items,
+      shipping,
+      notes
     })
 
     await invoice.save()
 
-    console.log("✅ INVOICE CREATED:", invoice._id)
+    console.log(
+      "✅ INVOICE CREATED:",
+      invoice._id
+    )
 
     res.status(201).json({
       success: true,
       data: invoice
     })
   } catch (error) {
-    console.error("❌ CREATE INVOICE ERROR:", error)
+    console.error(
+      "❌ CREATE INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -153,130 +119,22 @@ export const createInvoice = async (req, res) => {
   }
 }
 
-/* ================= CREATE PAYMENT LINK ================= */
-
-export const createInvoicePaymentLink = async (req, res) => {
-  try {
-    const invoice = await Invoice.findById(req.params.id)
-
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found"
-      })
-    }
-
-    const paymentUrl = await createSquarePaymentLinkForInvoice(invoice)
-
-    console.log("💳 PAYMENT LINK CREATED:", paymentUrl)
-
-    res.json({
-      success: true,
-      message: "Invoice payment link created",
-      paymentUrl,
-      data: invoice
-    })
-  } catch (error) {
-    console.error("❌ CREATE PAYMENT LINK ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    })
-  }
-}
-
-/* ================= SEND INVOICE EMAIL ================= */
-
-export const sendInvoiceEmail = async (req, res) => {
-  try {
-    if (!process.env.SENDGRID_API_KEY) {
-      return res.status(500).json({
-        success: false,
-        message: "Missing SENDGRID_API_KEY"
-      })
-    }
-
-    const invoice = await Invoice.findById(req.params.id)
-
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found"
-      })
-    }
-
-    const invoiceUrl = await createSquarePaymentLinkForInvoice(invoice)
-
-    await sgMail.send({
-      to: invoice.customerEmail,
-      from: FROM_EMAIL,
-      subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
-      html: `
-        <div style="font-family:Arial,sans-serif;color:#111;line-height:1.5;">
-          <h2>SignaVi Studio Invoice</h2>
-          <p>Hi ${invoice.customerName},</p>
-          <p>Your invoice is ready for payment.</p>
-
-          <p><strong>Invoice:</strong> ${invoice.invoiceNumber}</p>
-          <p><strong>Subtotal:</strong> $${Number(invoice.subtotal || 0).toFixed(2)}</p>
-          <p><strong>Tax:</strong> $${Number(invoice.tax || 0).toFixed(2)}</p>
-          <p><strong>Shipping:</strong> $${Number(invoice.shipping || 0).toFixed(2)}</p>
-
-          <h3>Total: $${Number(invoice.total || 0).toFixed(2)}</h3>
-
-          <p>
-            <a
-              href="${invoiceUrl}"
-              style="background:#111;color:#fff;padding:12px 18px;text-decoration:none;border-radius:8px;display:inline-block;"
-            >
-              Pay Invoice
-            </a>
-          </p>
-
-          <p>
-            Or copy and paste this link:<br />
-            ${invoiceUrl}
-          </p>
-
-          <p>Thank you,<br />SignaVi Studio</p>
-        </div>
-      `
-    })
-
-    invoice.status = "payment_required"
-    await invoice.save()
-
-    console.log("📧 INVOICE EMAIL SENT:", invoice.customerEmail)
-
-    res.json({
-      success: true,
-      message: "Invoice email sent successfully",
-      paymentUrl: invoiceUrl,
-      data: invoice
-    })
-  } catch (error) {
-    console.error("❌ SEND INVOICE EMAIL ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    })
-  }
-}
-
-/* ================= GET ALL INVOICES ================= */
+/* ================= GET ALL ================= */
 
 export const getInvoices = async (req, res) => {
   try {
-    const invoices = await Invoice.find().sort({ createdAt: -1 })
+    const invoices = await Invoice.find()
+      .sort({ createdAt: -1 })
 
     res.json({
       success: true,
       data: invoices
     })
   } catch (error) {
-    console.error("❌ GET INVOICES ERROR:", error)
+    console.error(
+      "❌ GET INVOICES ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -285,11 +143,13 @@ export const getInvoices = async (req, res) => {
   }
 }
 
-/* ================= GET INVOICE BY ID ================= */
+/* ================= GET ONE ================= */
 
 export const getInvoiceById = async (req, res) => {
   try {
-    const invoice = await Invoice.findById(req.params.id)
+    const invoice = await Invoice.findById(
+      req.params.id
+    )
 
     if (!invoice) {
       return res.status(404).json({
@@ -303,7 +163,10 @@ export const getInvoiceById = async (req, res) => {
       data: invoice
     })
   } catch (error) {
-    console.error("❌ GET INVOICE ERROR:", error)
+    console.error(
+      "❌ GET INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -312,120 +175,216 @@ export const getInvoiceById = async (req, res) => {
   }
 }
 
-/* ================= UPDATE INVOICE ================= */
+/* ================= PAYMENT LINK ================= */
 
-export const updateInvoice = async (req, res) => {
-  try {
-    const invoice = await Invoice.findById(req.params.id)
+export const createInvoicePaymentLink =
+  async (req, res) => {
+    try {
+      const invoice =
+        await Invoice.findById(req.params.id)
 
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found"
-      })
-    }
-
-    const allowedFields = [
-      "customerName",
-      "customerEmail",
-      "items",
-      "shipping",
-      "notes",
-      "status",
-      "paymentStatus"
-    ]
-
-    allowedFields.forEach((field) => {
-      if (req.body[field] !== undefined) {
-        invoice[field] = req.body[field]
+      if (!invoice) {
+        return res.status(404).json({
+          success: false,
+          message: "Invoice not found"
+        })
       }
-    })
 
-    if (invoice.paymentStatus === "paid") {
-      invoice.paidAt = invoice.paidAt || new Date()
-    }
+      const paymentUrl =
+        await createSquarePaymentLinkForInvoice(
+          invoice
+        )
 
-    await invoice.save()
+      console.log(
+        "💳 PAYMENT LINK CREATED:",
+        paymentUrl
+      )
 
-    res.json({
-      success: true,
-      data: invoice
-    })
-  } catch (error) {
-    console.error("❌ UPDATE INVOICE ERROR:", error)
+      res.json({
+        success: true,
+        paymentUrl,
+        data: invoice
+      })
+    } catch (error) {
+      console.error(
+        "❌ CREATE PAYMENT LINK ERROR:",
+        error
+      )
 
-    res.status(500).json({
-      success: false,
-      message: error.message
-    })
-  }
-}
-
-/* ================= DELETE INVOICE ================= */
-
-export const deleteInvoice = async (req, res) => {
-  try {
-    const invoice = await Invoice.findByIdAndDelete(req.params.id)
-
-    if (!invoice) {
-      return res.status(404).json({
+      res.status(500).json({
         success: false,
-        message: "Invoice not found"
+        message: error.message
       })
     }
-
-    res.json({
-      success: true,
-      message: "Invoice deleted successfully"
-    })
-  } catch (error) {
-    console.error("❌ DELETE INVOICE ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    })
   }
-}
 
-/* ================= UPLOAD FINAL PROOF ================= */
+/* ================= SEND EMAIL ================= */
 
-export const uploadFinalProof = async (req, res) => {
+export const sendInvoiceEmail =
+  async (req, res) => {
+    try {
+      const invoice =
+        await Invoice.findById(req.params.id)
+
+      if (!invoice) {
+        return res.status(404).json({
+          success: false,
+          message: "Invoice not found"
+        })
+      }
+
+      const invoiceUrl =
+        await createSquarePaymentLinkForInvoice(
+          invoice
+        )
+
+      const proofUrl =
+        `${CLIENT_URL}/proof/${invoice._id}`
+
+      await sgMail.send({
+        to: invoice.customerEmail,
+        from: FROM_EMAIL,
+        subject:
+          `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+
+        html: `
+          <div style="
+            font-family:Arial,sans-serif;
+            max-width:720px;
+            margin:auto;
+            border:1px solid #ddd;
+            padding:30px;
+          ">
+
+            <div style="
+              text-align:center;
+              border-bottom:2px solid #111;
+              padding-bottom:20px;
+            ">
+
+              <img
+                src="${LOGO_URL}"
+                style="width:140px;"
+              />
+
+              <h1>SIGNAVI STUDIO</h1>
+
+              <p>
+                Signature | Vision | Veteran Owned
+              </p>
+
+            </div>
+
+            <div style="padding:24px 0;">
+
+              <p>
+                Hi ${invoice.customerName},
+              </p>
+
+              <p>
+                Your final design proofs
+                and invoice are ready.
+              </p>
+
+              <div style="margin:24px 0;">
+
+                <a
+                  href="${proofUrl}"
+                  style="
+                    background:#111;
+                    color:#fff;
+                    padding:14px 18px;
+                    border-radius:8px;
+                    text-decoration:none;
+                    margin-right:10px;
+                    display:inline-block;
+                  "
+                >
+                  Review Final Proofs
+                </a>
+
+                <a
+                  href="${invoiceUrl}"
+                  style="
+                    background:#0f766e;
+                    color:#fff;
+                    padding:14px 18px;
+                    border-radius:8px;
+                    text-decoration:none;
+                    display:inline-block;
+                  "
+                >
+                  Pay Invoice
+                </a>
+
+              </div>
+
+              <h2>
+                Total:
+                $${Number(invoice.total || 0).toFixed(2)}
+              </h2>
+
+            </div>
+
+          </div>
+        `
+      })
+
+      invoice.status =
+        invoice.finalProof?.files?.length ||
+        invoice.finalProof?.imageUrl
+          ? "proof_uploaded"
+          : "payment_required"
+
+      await invoice.save()
+
+      console.log(
+        "📧 INVOICE EMAIL SENT:",
+        invoice.customerEmail
+      )
+
+      res.json({
+        success: true,
+        data: invoice
+      })
+    } catch (error) {
+      console.error(
+        "❌ SEND EMAIL ERROR:",
+        error
+      )
+
+      res.status(500).json({
+        success: false,
+        message: error.message
+      })
+    }
+  }
+
+/* ================= UPDATE ================= */
+
+export const updateInvoice = async (
+  req,
+  res
+) => {
   try {
-    const { imageUrl, fileName } = req.body
-
-    const invoice = await Invoice.findByIdAndUpdate(
-      req.params.id,
-      {
-        status: "proof_uploaded",
-        finalProof: {
-          imageUrl,
-          fileName,
-          approved: false,
-          approvedAt: null,
-          approvalName: "",
-          approvalEmail: ""
+    const invoice =
+      await Invoice.findByIdAndUpdate(
+        req.params.id,
+        req.body,
+        {
+          new: true
         }
-      },
-      {
-        new: true,
-        runValidators: true
-      }
-    )
-
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found"
-      })
-    }
+      )
 
     res.json({
       success: true,
       data: invoice
     })
   } catch (error) {
-    console.error("❌ UPLOAD FINAL PROOF ERROR:", error)
+    console.error(
+      "❌ UPDATE INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -434,43 +393,25 @@ export const uploadFinalProof = async (req, res) => {
   }
 }
 
-/* ================= APPROVE FINAL PROOF ================= */
+/* ================= DELETE ================= */
 
-export const approveFinalProof = async (req, res) => {
+export const deleteInvoice = async (
+  req,
+  res
+) => {
   try {
-    const {
-      approvalName = "",
-      approvalEmail = ""
-    } = req.body
-
-    const invoice = await Invoice.findByIdAndUpdate(
-      req.params.id,
-      {
-        status: "proof_approved",
-        "finalProof.approved": true,
-        "finalProof.approvedAt": new Date(),
-        "finalProof.approvalName": approvalName,
-        "finalProof.approvalEmail": approvalEmail
-      },
-      {
-        new: true,
-        runValidators: true
-      }
+    await Invoice.findByIdAndDelete(
+      req.params.id
     )
 
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found"
-      })
-    }
-
     res.json({
-      success: true,
-      data: invoice
+      success: true
     })
   } catch (error) {
-    console.error("❌ APPROVE FINAL PROOF ERROR:", error)
+    console.error(
+      "❌ DELETE INVOICE ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -478,74 +419,217 @@ export const approveFinalProof = async (req, res) => {
     })
   }
 }
+
+/* ================= FINAL PROOF ================= */
+
+export const uploadFinalProof =
+  async (req, res) => {
+    try {
+      console.log(
+        "📦 FINAL PROOF REQUEST RECEIVED"
+      )
+
+      const invoice =
+        await Invoice.findById(req.params.id)
+
+      if (!invoice) {
+        return res.status(404).json({
+          success: false,
+          message: "Invoice not found"
+        })
+      }
+
+      const uploadedFiles =
+        Array.isArray(req.files)
+          ? req.files
+          : req.file
+            ? [req.file]
+            : []
+
+      if (!uploadedFiles.length) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "At least one final proof file is required"
+        })
+      }
+
+      const proofFiles =
+        uploadedFiles.map((file) => {
+          const url =
+            `${BACKEND_URL.replace(
+              /\/$/,
+              ""
+            )}/uploads/proofs/${file.filename}`
+
+          return {
+            url,
+            fileName: file.originalname,
+            mimeType: file.mimetype
+          }
+        })
+
+      invoice.status = "proof_uploaded"
+
+      invoice.finalProof = {
+        imageUrl:
+          proofFiles[0]?.url || "",
+
+        fileName:
+          proofFiles[0]?.fileName || "",
+
+        files: proofFiles,
+
+        approved: false,
+        approvedAt: null,
+        approvalName: "",
+        approvalEmail: ""
+      }
+
+      await invoice.save()
+
+      console.log(
+        "✅ FINAL PROOFS SAVED:",
+        proofFiles.length
+      )
+
+      res.json({
+        success: true,
+        filesUploaded:
+          proofFiles.length,
+        data: invoice
+      })
+    } catch (error) {
+      console.error(
+        "❌ UPLOAD FINAL PROOF ERROR:",
+        error
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          error?.message ||
+          "Final proof upload failed"
+      })
+    }
+  }
+
+/* ================= APPROVE PROOF ================= */
+
+export const approveFinalProof =
+  async (req, res) => {
+    try {
+      const {
+        approvalName = "",
+        approvalEmail = ""
+      } = req.body
+
+      const invoice =
+        await Invoice.findByIdAndUpdate(
+          req.params.id,
+          {
+            status: "proof_approved",
+
+            "finalProof.approved": true,
+
+            "finalProof.approvedAt":
+              new Date(),
+
+            "finalProof.approvalName":
+              approvalName,
+
+            "finalProof.approvalEmail":
+              approvalEmail
+          },
+          {
+            new: true
+          }
+        )
+
+      res.json({
+        success: true,
+        data: invoice
+      })
+    } catch (error) {
+      console.error(
+        "❌ APPROVE FINAL PROOF ERROR:",
+        error
+      )
+
+      res.status(500).json({
+        success: false,
+        message: error.message
+      })
+    }
+  }
 
 /* ================= MARK PAID ================= */
 
-export const markInvoicePaid = async (req, res) => {
-  try {
-    const invoice = await Invoice.findById(req.params.id)
+export const markInvoicePaid =
+  async (req, res) => {
+    try {
+      const invoice =
+        await Invoice.findById(req.params.id)
 
-    if (!invoice) {
-      return res.status(404).json({
+      invoice.paymentStatus = "paid"
+      invoice.status =
+        "ready_for_production"
+      invoice.paidAt = new Date()
+
+      await invoice.save()
+
+      res.json({
+        success: true,
+        data: invoice
+      })
+    } catch (error) {
+      console.error(
+        "❌ MARK PAID ERROR:",
+        error
+      )
+
+      res.status(500).json({
         success: false,
-        message: "Invoice not found"
+        message: error.message
       })
     }
-
-    invoice.paymentStatus = "paid"
-    invoice.status = "ready_for_production"
-    invoice.paidAt = new Date()
-
-    await invoice.save()
-
-    res.json({
-      success: true,
-      data: invoice
-    })
-  } catch (error) {
-    console.error("❌ MARK INVOICE PAID ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    })
   }
-}
 
 /* ================= START PRODUCTION ================= */
 
-export const startProduction = async (req, res) => {
-  try {
-    const invoice = await Invoice.findById(req.params.id)
+export const startProduction =
+  async (req, res) => {
+    try {
+      const invoice =
+        await Invoice.findById(req.params.id)
 
-    if (!invoice) {
-      return res.status(404).json({
+      if (
+        invoice.paymentStatus !== "paid"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invoice must be paid first"
+        })
+      }
+
+      invoice.status = "production"
+
+      await invoice.save()
+
+      res.json({
+        success: true,
+        data: invoice
+      })
+    } catch (error) {
+      console.error(
+        "❌ START PRODUCTION ERROR:",
+        error
+      )
+
+      res.status(500).json({
         success: false,
-        message: "Invoice not found"
+        message: error.message
       })
     }
-
-    if (invoice.paymentStatus !== "paid") {
-      return res.status(400).json({
-        success: false,
-        message: "Invoice must be paid before production starts"
-      })
-    }
-
-    invoice.status = "production"
-
-    await invoice.save()
-
-    res.json({
-      success: true,
-      data: invoice
-    })
-  } catch (error) {
-    console.error("❌ START PRODUCTION ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: error.message
-    })
   }
-}
