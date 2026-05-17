@@ -1,3 +1,4 @@
+import crypto from "crypto"
 import sgMail from "@sendgrid/mail"
 import { SquareClient, SquareEnvironment } from "square"
 import Invoice from "../models/Invoice.js"
@@ -11,23 +12,28 @@ const FROM_EMAIL =
   process.env.EMAIL_FROM ||
   "admin@signavistudio.store"
 
+const SQUARE_ENVIRONMENT = String(
+  process.env.SQUARE_ENVIRONMENT || "production"
+)
+  .trim()
+  .toLowerCase()
+
+const squareEnvironment =
+  SQUARE_ENVIRONMENT === "sandbox"
+    ? SquareEnvironment.Sandbox
+    : SquareEnvironment.Production
+
 if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 }
 
 const squareClient = new SquareClient({
   token: process.env.SQUARE_ACCESS_TOKEN,
-  environment:
-    process.env.SQUARE_ENVIRONMENT === "production"
-      ? SquareEnvironment.Production
-      : SquareEnvironment.Sandbox
+  environment: squareEnvironment
 })
 
 const getSquareLocationId = () => {
-  return (
-    process.env.SQUARE_LOCATION_ID ||
-    process.env.SQUARE_SANDBOX_LOCATION_ID
-  )
+  return process.env.SQUARE_LOCATION_ID
 }
 
 const createSquarePaymentLinkForInvoice = async (invoice) => {
@@ -50,6 +56,8 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
   if (!amount || amount <= 0) {
     throw new Error("Invoice total must be greater than 0")
   }
+
+  console.log("💳 SQUARE ENVIRONMENT:", SQUARE_ENVIRONMENT)
 
   const response =
     await squareClient.checkout.paymentLinks.create({
@@ -207,13 +215,10 @@ export const sendInvoiceEmail = async (req, res) => {
       html: `
         <div style="font-family:Arial,sans-serif;color:#111;line-height:1.5;">
           <h2>SignaVi Studio Invoice</h2>
-
           <p>Hi ${invoice.customerName},</p>
-
           <p>Your invoice is ready for payment.</p>
 
           <p><strong>Invoice:</strong> ${invoice.invoiceNumber}</p>
-
           <p><strong>Subtotal:</strong> $${Number(invoice.subtotal || 0).toFixed(2)}</p>
           <p><strong>Tax:</strong> $${Number(invoice.tax || 0).toFixed(2)}</p>
           <p><strong>Shipping:</strong> $${Number(invoice.shipping || 0).toFixed(2)}</p>
@@ -234,10 +239,7 @@ export const sendInvoiceEmail = async (req, res) => {
             ${invoiceUrl}
           </p>
 
-          <p>
-            Thank you,<br />
-            SignaVi Studio
-          </p>
+          <p>Thank you,<br />SignaVi Studio</p>
         </div>
       `
     })
