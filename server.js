@@ -42,7 +42,9 @@ import notificationRoutes from "./routes/notifications.js"
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const uploadDir = path.join(process.cwd(), "uploads")
+const uploadDir =
+  process.env.UPLOAD_DIR ||
+  path.join(process.cwd(), "uploads")
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true })
@@ -112,7 +114,11 @@ app.use((err, req, res, next) => {
 /* ================= MIDDLEWARE ================= */
 
 app.use(cookieParser())
-app.use("/uploads", express.static(uploadDir))
+
+app.use(
+  "/uploads",
+  express.static(uploadDir)
+)
 
 /* ================= HEALTH ================= */
 
@@ -143,10 +149,15 @@ const formatCSVDate = (value) => {
 }
 
 const sendCSV = (res, filename, rows) => {
-  const csv = rows.map(row => row.map(csvEscape).join(",")).join("\n")
+  const csv = rows
+    .map((row) => row.map(csvEscape).join(","))
+    .join("\n")
 
   res.setHeader("Content-Type", "text/csv")
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`)
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filename}"`
+  )
   res.send(csv)
 }
 
@@ -182,7 +193,7 @@ app.get("/api/orders/export", async (req, res) => {
         "Archived At"
       ],
 
-      ...orders.map(order => [
+      ...orders.map((order) => [
         order._id,
         order.customerName || "",
         order.email || "",
@@ -263,7 +274,7 @@ app.get("/api/export-taxes", async (req, res) => {
         "Status"
       ],
 
-      ...orders.map(order => [
+      ...orders.map((order) => [
         formatCSVDate(order.paidAt),
         formatCSVDate(order.createdAt),
         order._id,
@@ -339,10 +350,10 @@ const io = new Server(server, {
 
 app.set("io", io)
 
-io.on("connection", socket => {
+io.on("connection", (socket) => {
   console.log("🟢 Socket connected:", socket.id)
 
-  socket.on("support:new-message", data => {
+  socket.on("support:new-message", (data) => {
     io.emit("support:new-message", data)
   })
 
@@ -384,6 +395,6 @@ mongoose
       console.log(`🚀 Server running on ${PORT}`)
     })
   })
-  .catch(err => {
+  .catch((err) => {
     console.error("❌ DB ERROR:", err)
   })
