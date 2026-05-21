@@ -71,6 +71,43 @@ router.get("/archived", requireAuth, async (req, res) => {
   }
 })
 
+/* ================= RESTORE THREAD ================= */
+
+router.patch("/:threadId/restore", requireAuth, async (req, res) => {
+  try {
+    const thread = await AdminEmailThread.findByIdAndUpdate(
+      req.params.threadId,
+      {
+        archived: false
+      },
+      {
+        new: true
+      }
+    )
+
+    if (!thread) {
+      return res.status(404).json({
+        success: false,
+        message: "Thread not found"
+      })
+    }
+
+    req.app.get("io")?.emit("threadRestored", thread)
+
+    res.json({
+      success: true,
+      data: thread
+    })
+  } catch (error) {
+    console.error("❌ RESTORE THREAD ERROR:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to restore thread"
+    })
+  }
+})
+
 /* ================= GET THREAD MESSAGES ================= */
 
 router.get("/:threadId/messages", requireAuth, async (req, res) => {
