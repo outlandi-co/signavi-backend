@@ -130,9 +130,11 @@ app.use((err, req, res, next) => {
 
 app.use(cookieParser())
 
+app.use("/uploads", express.static(uploadDir))
+
 app.use(
-  "/uploads",
-  express.static(uploadDir)
+  "/uploads/proofs",
+  express.static(path.join(uploadDir, "proofs"))
 )
 
 /* ================= HEALTH ================= */
