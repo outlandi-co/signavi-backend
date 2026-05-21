@@ -29,13 +29,20 @@ const timelineSchema = new mongoose.Schema(
   { _id: false }
 )
 
+const shippingInfoSchema = new mongoose.Schema(
+  {
+    carrier: { type: String, default: "" },
+    trackingNumber: { type: String, default: "" },
+    trackingUrl: { type: String, default: "" },
+    shippedAt: { type: Date, default: null },
+    deliveredAt: { type: Date, default: null }
+  },
+  { _id: false }
+)
+
 const invoiceSchema = new mongoose.Schema(
   {
-    invoiceNumber: {
-      type: String,
-      unique: true,
-      sparse: true
-    },
+    invoiceNumber: { type: String, unique: true, sparse: true },
 
     customerName: {
       type: String,
@@ -50,20 +57,14 @@ const invoiceSchema = new mongoose.Schema(
       lowercase: true
     },
 
-    items: {
-      type: [invoiceItemSchema],
-      default: []
-    },
+    items: { type: [invoiceItemSchema], default: [] },
 
     subtotal: { type: Number, default: 0 },
     tax: { type: Number, default: 0 },
     shipping: { type: Number, default: 0 },
     total: { type: Number, default: 0 },
 
-    notes: {
-      type: String,
-      default: ""
-    },
+    notes: { type: String, default: "" },
 
     status: {
       type: String,
@@ -75,6 +76,8 @@ const invoiceSchema = new mongoose.Schema(
         "paid",
         "ready_for_production",
         "production",
+        "shipped",
+        "delivered",
         "completed",
         "cancelled"
       ],
@@ -96,14 +99,16 @@ const invoiceSchema = new mongoose.Schema(
     finalProof: {
       imageUrl: { type: String, default: "" },
       fileName: { type: String, default: "" },
-      files: {
-        type: [proofFileSchema],
-        default: []
-      },
+      files: { type: [proofFileSchema], default: [] },
       approved: { type: Boolean, default: false },
       approvedAt: { type: Date, default: null },
       approvalName: { type: String, default: "" },
       approvalEmail: { type: String, default: "" }
+    },
+
+    shippingInfo: {
+      type: shippingInfoSchema,
+      default: () => ({})
     },
 
     timeline: {
@@ -114,10 +119,7 @@ const invoiceSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
-invoiceSchema.methods.addTimeline = function (
-  status,
-  note = ""
-) {
+invoiceSchema.methods.addTimeline = function (status, note = "") {
   this.timeline.push({
     status,
     note,
@@ -151,4 +153,8 @@ invoiceSchema.pre("save", function calculateTotals() {
   }
 })
 
-export default mongoose.model("Invoice", invoiceSchema)
+const Invoice =
+  mongoose.models.Invoice ||
+  mongoose.model("Invoice", invoiceSchema)
+
+export default Invoice

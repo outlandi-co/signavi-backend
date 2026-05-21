@@ -42,22 +42,25 @@ const emitAdminNotification = (req, notification) => {
 const addTimeline = (invoice, status, note) => {
   if (typeof invoice.addTimeline === "function") {
     invoice.addTimeline(status, note)
-  } else {
-    invoice.timeline = invoice.timeline || []
-    invoice.timeline.push({
-      status,
-      note,
-      date: new Date()
-    })
+    return
   }
+
+  invoice.timeline = invoice.timeline || []
+  invoice.timeline.push({
+    status,
+    note,
+    date: new Date()
+  })
 }
 
 const createSquarePaymentLinkForInvoice = async (invoice) => {
-  if (invoice.paymentUrl) {
-    return invoice.paymentUrl
-  }
+  if (invoice.paymentUrl) return invoice.paymentUrl
 
   const amount = Math.round(Number(invoice.total || 0) * 100)
+
+  if (!amount || amount < 1) {
+    throw new Error("Invoice total must be greater than $0.00")
+  }
 
   const response =
     await squareClient.checkout.paymentLinks.create({
@@ -117,15 +120,9 @@ export const createInvoice = async (req, res) => {
       notes
     })
 
-    addTimeline(
-      invoice,
-      "draft",
-      "Invoice created."
-    )
+    addTimeline(invoice, "draft", "Invoice created.")
 
     await invoice.save()
-
-    console.log("✅ INVOICE CREATED:", invoice._id)
 
     res.status(201).json({
       success: true,
@@ -201,9 +198,8 @@ export const createInvoicePaymentLink = async (req, res) => {
       })
     }
 
-    const paymentUrl = await createSquarePaymentLinkForInvoice(invoice)
-
-    console.log("💳 PAYMENT LINK CREATED:", paymentUrl)
+    const paymentUrl =
+      await createSquarePaymentLinkForInvoice(invoice)
 
     res.json({
       success: true,
@@ -233,78 +229,34 @@ export const sendInvoiceEmail = async (req, res) => {
       })
     }
 
-    const invoiceUrl = await createSquarePaymentLinkForInvoice(invoice)
+    const invoiceUrl =
+      await createSquarePaymentLinkForInvoice(invoice)
+
     const proofUrl = `${CLIENT_URL}/proof/${invoice._id}`
 
     const html = `
-      <div style="
-        font-family:Arial,sans-serif;
-        max-width:720px;
-        margin:auto;
-        border:1px solid #ddd;
-        padding:30px;
-      ">
-        <div style="
-          text-align:center;
-          border-bottom:2px solid #111;
-          padding-bottom:20px;
-        ">
-          <img
-            src="${LOGO_URL}"
-            style="width:140px;"
-          />
-
+      <div style="font-family:Arial,sans-serif;max-width:720px;margin:auto;border:1px solid #ddd;padding:30px;">
+        <div style="text-align:center;border-bottom:2px solid #111;padding-bottom:20px;">
+          <img src="${LOGO_URL}" style="width:140px;" />
           <h1>SIGNAVI STUDIO</h1>
-
-          <p>
-            Signature | Vision | Veteran Owned
-          </p>
+          <p>Signature | Vision | Veteran Owned</p>
         </div>
 
         <div style="padding:24px 0;">
-          <p>
-            Hi ${invoice.customerName},
-          </p>
-
-          <p>
-            Your final design proofs and invoice are ready.
-          </p>
+          <p>Hi ${invoice.customerName},</p>
+          <p>Your final design proofs and invoice are ready.</p>
 
           <div style="margin:24px 0;">
-            <a
-              href="${proofUrl}"
-              style="
-                background:#111;
-                color:#fff;
-                padding:14px 18px;
-                border-radius:8px;
-                text-decoration:none;
-                margin-right:10px;
-                display:inline-block;
-              "
-            >
+            <a href="${proofUrl}" style="background:#111;color:#fff;padding:14px 18px;border-radius:8px;text-decoration:none;margin-right:10px;display:inline-block;">
               Review Final Proofs
             </a>
 
-            <a
-              href="${invoiceUrl}"
-              style="
-                background:#0f766e;
-                color:#fff;
-                padding:14px 18px;
-                border-radius:8px;
-                text-decoration:none;
-                display:inline-block;
-              "
-            >
+            <a href="${invoiceUrl}" style="background:#0f766e;color:#fff;padding:14px 18px;border-radius:8px;text-decoration:none;display:inline-block;">
               Pay Invoice
             </a>
           </div>
 
-          <h2>
-            Total:
-            $${Number(invoice.total || 0).toFixed(2)}
-          </h2>
+          <h2>Total: $${Number(invoice.total || 0).toFixed(2)}</h2>
         </div>
       </div>
     `
@@ -342,8 +294,6 @@ export const sendInvoiceEmail = async (req, res) => {
 
     await invoice.save()
 
-    console.log("📧 INVOICE EMAIL SENT:", invoice.customerEmail)
-
     res.json({
       success: true,
       data: invoice
@@ -365,7 +315,10 @@ export const updateInvoice = async (req, res) => {
     const invoice = await Invoice.findByIdAndUpdate(
       req.params.id,
       req.body,
-      { new: true }
+      {
+        new: true,
+        runValidators: true
+      }
     )
 
     if (!invoice) {
@@ -403,7 +356,8 @@ export const deleteInvoice = async (req, res) => {
     }
 
     res.json({
-      success: true
+      success: true,
+      message: "Invoice deleted"
     })
   } catch (error) {
     console.error("❌ DELETE INVOICE ERROR:", error)
@@ -419,8 +373,6 @@ export const deleteInvoice = async (req, res) => {
 
 export const uploadFinalProof = async (req, res) => {
   try {
-    console.log("📦 FINAL PROOF REQUEST RECEIVED")
-
     const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
@@ -473,8 +425,6 @@ export const uploadFinalProof = async (req, res) => {
     )
 
     await invoice.save()
-
-    console.log("✅ FINAL PROOFS SAVED:", proofFiles.length)
 
     res.json({
       success: true,
@@ -529,8 +479,7 @@ export const approveFinalProof = async (req, res) => {
       userEmail: ADMIN_EMAIL,
       title: "Final Proof Approved",
       text:
-        `${invoice.customerName} approved final proofs for ` +
-        `${invoice.invoiceNumber}.`,
+        `${invoice.customerName} approved final proofs for ${invoice.invoiceNumber}.`,
       type: "proof",
       invoiceId: invoice._id,
       link: "/admin/invoices",
@@ -539,8 +488,6 @@ export const approveFinalProof = async (req, res) => {
     })
 
     emitAdminNotification(req, notification)
-
-    console.log("📥 PROOF APPROVAL NOTIFICATION CREATED:", notification._id)
 
     res.json({
       success: true,
@@ -586,8 +533,7 @@ export const markInvoicePaid = async (req, res) => {
       userEmail: ADMIN_EMAIL,
       title: "Payment Received",
       text:
-        `${invoice.customerName} paid ${invoice.invoiceNumber} ` +
-        `for $${Number(invoice.total || 0).toFixed(2)}.`,
+        `${invoice.customerName} paid ${invoice.invoiceNumber} for $${Number(invoice.total || 0).toFixed(2)}.`,
       type: "payment",
       invoiceId: invoice._id,
       link: "/admin/invoices",
@@ -596,8 +542,6 @@ export const markInvoicePaid = async (req, res) => {
     })
 
     emitAdminNotification(req, notification)
-
-    console.log("📥 PAYMENT NOTIFICATION CREATED:", notification._id)
 
     res.json({
       success: true,
@@ -650,6 +594,90 @@ export const startProduction = async (req, res) => {
     })
   } catch (error) {
     console.error("❌ START PRODUCTION ERROR:", error)
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    })
+  }
+}
+
+/* ================= SHIPPED ================= */
+
+export const markInvoiceShipped = async (req, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id)
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found"
+      })
+    }
+
+    invoice.status = "shipped"
+
+    invoice.shippingInfo = {
+      ...(invoice.shippingInfo?.toObject?.() || invoice.shippingInfo || {}),
+      shippedAt: new Date()
+    }
+
+    addTimeline(
+      invoice,
+      "shipped",
+      "Invoice marked as shipped."
+    )
+
+    await invoice.save()
+
+    res.json({
+      success: true,
+      data: invoice
+    })
+  } catch (error) {
+    console.error("❌ MARK SHIPPED ERROR:", error)
+
+    res.status(500).json({
+      success: false,
+      message: error.message
+    })
+  }
+}
+
+/* ================= DELIVERED ================= */
+
+export const markInvoiceDelivered = async (req, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id)
+
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found"
+      })
+    }
+
+    invoice.status = "delivered"
+
+    invoice.shippingInfo = {
+      ...(invoice.shippingInfo?.toObject?.() || invoice.shippingInfo || {}),
+      deliveredAt: new Date()
+    }
+
+    addTimeline(
+      invoice,
+      "delivered",
+      "Invoice marked as delivered."
+    )
+
+    await invoice.save()
+
+    res.json({
+      success: true,
+      data: invoice
+    })
+  } catch (error) {
+    console.error("❌ MARK DELIVERED ERROR:", error)
 
     res.status(500).json({
       success: false,

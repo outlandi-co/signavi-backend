@@ -14,42 +14,24 @@ import {
   uploadFinalProof,
   approveFinalProof,
   markInvoicePaid,
-  startProduction
+  startProduction,
+  markInvoiceShipped,
+  markInvoiceDelivered
 } from "../controllers/invoiceController.js"
 
 const router = express.Router()
-
-/* ================= UPLOAD DIRECTORY ================= */
-/*
-  Local:
-    /your-project/uploads/proofs
-
-  Render persistent disk:
-    UPLOAD_DIR=/var/data/uploads
-    proof files save to /var/data/uploads/proofs
-*/
 
 const uploadBaseDir =
   process.env.UPLOAD_DIR ||
   path.join(process.cwd(), "uploads")
 
-const proofUploadDir = path.join(
-  uploadBaseDir,
-  "proofs"
-)
+const proofUploadDir = path.join(uploadBaseDir, "proofs")
 
 if (!fs.existsSync(proofUploadDir)) {
-  fs.mkdirSync(proofUploadDir, {
-    recursive: true
-  })
+  fs.mkdirSync(proofUploadDir, { recursive: true })
 }
 
-console.log(
-  "🖼️ Proof upload directory:",
-  proofUploadDir
-)
-
-/* ================= MULTER STORAGE ================= */
+console.log("🖼️ Proof upload directory:", proofUploadDir)
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -91,9 +73,7 @@ const upload = multer({
       "application/pdf"
     ]
 
-    if (
-      allowedMimeTypes.includes(file.mimetype)
-    ) {
+    if (allowedMimeTypes.includes(file.mimetype)) {
       cb(null, true)
       return
     }
@@ -106,28 +86,13 @@ const upload = multer({
   }
 })
 
-/* ================= CREATE ================= */
-
 router.post("/", createInvoice)
 
-/* ================= READ ================= */
-
 router.get("/", getInvoices)
-
 router.get("/:id", getInvoiceById)
 
-/* ================= PAYMENT ================= */
-
-router.post(
-  "/:id/create-payment-link",
-  createInvoicePaymentLink
-)
-
-/* ================= EMAIL ================= */
-
+router.post("/:id/create-payment-link", createInvoicePaymentLink)
 router.post("/:id/send", sendInvoiceEmail)
-
-/* ================= UPDATE ================= */
 
 router.patch("/:id", updateInvoice)
 
@@ -137,22 +102,12 @@ router.patch(
   uploadFinalProof
 )
 
-router.patch(
-  "/:id/approve-proof",
-  approveFinalProof
-)
+router.patch("/:id/approve-proof", approveFinalProof)
+router.patch("/:id/mark-paid", markInvoicePaid)
+router.patch("/:id/start-production", startProduction)
 
-router.patch(
-  "/:id/mark-paid",
-  markInvoicePaid
-)
-
-router.patch(
-  "/:id/start-production",
-  startProduction
-)
-
-/* ================= DELETE ================= */
+router.patch("/:id/ship", markInvoiceShipped)
+router.patch("/:id/deliver", markInvoiceDelivered)
 
 router.delete("/:id", deleteInvoice)
 
