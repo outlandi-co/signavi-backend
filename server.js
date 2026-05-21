@@ -20,21 +20,36 @@ import Order from "./models/Order.js"
 import productRoutes from "./routes/products.js"
 import orderRoutes from "./routes/orders.js"
 import invoiceRoutes from "./routes/invoiceRoutes.js"
+
 import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
+
 import cartRoutes from "./routes/cart.js"
+
 import productionRoutes from "./routes/production.js"
+
 import quoteRoutes from "./routes/quotes.js"
+
 import expenseRoutes from "./routes/expenses.js"
+
 import pricingRoutes from "./routes/pricing.js"
+
 import customerRoutes from "./routes/customers.js"
+
 import squareRoutes from "./routes/square.js"
-import shippingRoutes from "./routes/shipping.js"
-import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
-import supportRoutes from "./routes/support/supportRoutes.js"
 import squareWebhook from "./routes/squareWebhook.js"
+
+import shippingRoutes from "./routes/shipping.js"
+
+import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
+import adminEmailWebhookRoutes from "./routes/admin/adminEmailWebhookRoutes.js"
+
+import supportRoutes from "./routes/support/supportRoutes.js"
+
 import aiChatRoutes from "./routes/aiChat.js"
+
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
+
 import notificationRoutes from "./routes/notifications.js"
 
 /* ================= PATH SETUP ================= */
@@ -309,31 +324,63 @@ app.get("/api/export-taxes", async (req, res) => {
 /* ================= ROUTES ================= */
 
 app.use("/api/products", productRoutes)
+
 app.use("/api/orders", orderRoutes)
+console.log("🔥 ORDERS ROUTES ACTIVE")
 
 app.use("/api/invoices", invoiceRoutes)
 console.log("🧾 INVOICE ROUTE MOUNTED")
 
 app.use("/api/auth", authRoutes)
+console.log("🔐 AUTH ROUTES LOADED")
+
 app.use("/api/logout", logoutRoutes)
+
 app.use("/api/cart", cartRoutes)
+
 app.use("/api/production", productionRoutes)
+
 app.use("/api/quotes", quoteRoutes)
+console.log("🔥 QUOTES ROUTE LOADED")
+
 app.use("/api/expenses", expenseRoutes)
+
 app.use("/api/pricing", pricingRoutes)
+
 app.use("/api/customers", customerRoutes)
+
 app.use("/api/square", squareRoutes)
+console.log("💳 SQUARE ROUTE LOADED")
+
 app.use("/api/shipping", shippingRoutes)
+
 app.use("/api/order-workflow", orderWorkflowRoutes)
+
+/* ================= NOTIFICATIONS ================= */
 
 app.use("/api/notifications", notificationRoutes)
 console.log("📥 NOTIFICATION ROUTE MOUNTED")
 
+/* ================= AI CHAT ================= */
+
 app.use("/api/ai-chat", aiChatRoutes)
 console.log("🤖 AI CHAT ROUTE MOUNTED")
 
+/* ================= ADMIN EMAIL ================= */
+
 app.use("/api/admin-email", adminEmailRoutes)
 console.log("📧 ADMIN EMAIL ROUTE MOUNTED")
+
+/* ================= EMAIL WEBHOOKS ================= */
+
+app.use(
+  "/api/admin-email-webhook",
+  adminEmailWebhookRoutes
+)
+
+console.log("📨 ADMIN EMAIL WEBHOOK ROUTE MOUNTED")
+
+/* ================= SUPPORT ================= */
 
 app.use("/api/support", supportRoutes)
 console.log("🛟 SUPPORT ROUTE MOUNTED")

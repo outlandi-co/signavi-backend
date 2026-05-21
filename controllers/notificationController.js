@@ -1,11 +1,8 @@
 import crypto from "crypto"
 import sgMail from "@sendgrid/mail"
 import { SquareClient, SquareEnvironment } from "square"
-
 import Invoice from "../models/Invoice.js"
 import Notification from "../models/Notification.js"
-
-import AdminEmail from "../models/AdminEmail.js"
 
 const CLIENT_URL =
   process.env.CLIENT_URL ||
@@ -41,31 +38,24 @@ const emitAdminNotification = (req, notification) => {
 }
 
 const createSquarePaymentLinkForInvoice = async (invoice) => {
-  if (invoice.paymentUrl) {
-    return invoice.paymentUrl
-  }
+  if (invoice.paymentUrl) return invoice.paymentUrl
 
   const amount = Math.round(Number(invoice.total || 0) * 100)
 
-  const response =
-    await squareClient.checkout.paymentLinks.create({
-      idempotencyKey: crypto.randomUUID(),
-
-      quickPay: {
-        name: `Invoice ${invoice.invoiceNumber}`,
-
-        priceMoney: {
-          amount: BigInt(amount),
-          currency: "USD"
-        },
-
-        locationId: process.env.SQUARE_LOCATION_ID
+  const response = await squareClient.checkout.paymentLinks.create({
+    idempotencyKey: crypto.randomUUID(),
+    quickPay: {
+      name: `Invoice ${invoice.invoiceNumber}`,
+      priceMoney: {
+        amount: BigInt(amount),
+        currency: "USD"
       },
-
-      checkoutOptions: {
-        redirectUrl: `${CLIENT_URL}/invoice/${invoice._id}`
-      }
-    })
+      locationId: process.env.SQUARE_LOCATION_ID
+    },
+    checkoutOptions: {
+      redirectUrl: `${CLIENT_URL}/invoice/${invoice._id}`
+    }
+  })
 
   const paymentLink = response.paymentLink
 
@@ -78,8 +68,6 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
 
   return invoice.paymentUrl
 }
-
-/* ================= CREATE ================= */
 
 export const createInvoice = async (req, res) => {
   try {
@@ -101,8 +89,6 @@ export const createInvoice = async (req, res) => {
 
     await invoice.save()
 
-    console.log("✅ INVOICE CREATED:", invoice._id)
-
     res.status(201).json({
       success: true,
       data: invoice
@@ -116,8 +102,6 @@ export const createInvoice = async (req, res) => {
     })
   }
 }
-
-/* ================= GET ALL ================= */
 
 export const getInvoices = async (req, res) => {
   try {
@@ -136,8 +120,6 @@ export const getInvoices = async (req, res) => {
     })
   }
 }
-
-/* ================= GET ONE ================= */
 
 export const getInvoiceById = async (req, res) => {
   try {
@@ -164,8 +146,6 @@ export const getInvoiceById = async (req, res) => {
   }
 }
 
-/* ================= PAYMENT LINK ================= */
-
 export const createInvoicePaymentLink = async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id)
@@ -178,8 +158,6 @@ export const createInvoicePaymentLink = async (req, res) => {
     }
 
     const paymentUrl = await createSquarePaymentLinkForInvoice(invoice)
-
-    console.log("💳 PAYMENT LINK CREATED:", paymentUrl)
 
     res.json({
       success: true,
@@ -195,8 +173,6 @@ export const createInvoicePaymentLink = async (req, res) => {
     })
   }
 }
-
-/* ================= SEND EMAIL ================= */
 
 export const sendInvoiceEmail = async (req, res) => {
   try {
@@ -216,76 +192,29 @@ export const sendInvoiceEmail = async (req, res) => {
       to: invoice.customerEmail,
       from: FROM_EMAIL,
       subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
-
       html: `
-        <div style="
-          font-family:Arial,sans-serif;
-          max-width:720px;
-          margin:auto;
-          border:1px solid #ddd;
-          padding:30px;
-        ">
-          <div style="
-            text-align:center;
-            border-bottom:2px solid #111;
-            padding-bottom:20px;
-          ">
-            <img
-              src="${LOGO_URL}"
-              style="width:140px;"
-            />
-
+        <div style="font-family:Arial,sans-serif;max-width:720px;margin:auto;border:1px solid #ddd;padding:30px;">
+          <div style="text-align:center;border-bottom:2px solid #111;padding-bottom:20px;">
+            <img src="${LOGO_URL}" style="width:140px;" />
             <h1>SIGNAVI STUDIO</h1>
-
-            <p>
-              Signature | Vision | Veteran Owned
-            </p>
+            <p>Signature | Vision | Veteran Owned</p>
           </div>
 
           <div style="padding:24px 0;">
-            <p>
-              Hi ${invoice.customerName},
-            </p>
-
-            <p>
-              Your final design proofs and invoice are ready.
-            </p>
+            <p>Hi ${invoice.customerName},</p>
+            <p>Your final design proofs and invoice are ready.</p>
 
             <div style="margin:24px 0;">
-              <a
-                href="${proofUrl}"
-                style="
-                  background:#111;
-                  color:#fff;
-                  padding:14px 18px;
-                  border-radius:8px;
-                  text-decoration:none;
-                  margin-right:10px;
-                  display:inline-block;
-                "
-              >
+              <a href="${proofUrl}" style="background:#111;color:#fff;padding:14px 18px;border-radius:8px;text-decoration:none;margin-right:10px;display:inline-block;">
                 Review Final Proofs
               </a>
 
-              <a
-                href="${invoiceUrl}"
-                style="
-                  background:#0f766e;
-                  color:#fff;
-                  padding:14px 18px;
-                  border-radius:8px;
-                  text-decoration:none;
-                  display:inline-block;
-                "
-              >
+              <a href="${invoiceUrl}" style="background:#0f766e;color:#fff;padding:14px 18px;border-radius:8px;text-decoration:none;display:inline-block;">
                 Pay Invoice
               </a>
             </div>
 
-            <h2>
-              Total:
-              $${Number(invoice.total || 0).toFixed(2)}
-            </h2>
+            <h2>Total: $${Number(invoice.total || 0).toFixed(2)}</h2>
           </div>
         </div>
       `
@@ -298,8 +227,6 @@ export const sendInvoiceEmail = async (req, res) => {
         : "payment_required"
 
     await invoice.save()
-
-    console.log("📧 INVOICE EMAIL SENT:", invoice.customerEmail)
 
     res.json({
       success: true,
@@ -315,24 +242,13 @@ export const sendInvoiceEmail = async (req, res) => {
   }
 }
 
-/* ================= UPDATE ================= */
-
 export const updateInvoice = async (req, res) => {
   try {
     const invoice = await Invoice.findByIdAndUpdate(
       req.params.id,
       req.body,
-      {
-        new: true
-      }
+      { new: true }
     )
-
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found"
-      })
-    }
 
     res.json({
       success: true,
@@ -348,18 +264,9 @@ export const updateInvoice = async (req, res) => {
   }
 }
 
-/* ================= DELETE ================= */
-
 export const deleteInvoice = async (req, res) => {
   try {
-    const invoice = await Invoice.findByIdAndDelete(req.params.id)
-
-    if (!invoice) {
-      return res.status(404).json({
-        success: false,
-        message: "Invoice not found"
-      })
-    }
+    await Invoice.findByIdAndDelete(req.params.id)
 
     res.json({
       success: true
@@ -374,12 +281,8 @@ export const deleteInvoice = async (req, res) => {
   }
 }
 
-/* ================= FINAL PROOF ================= */
-
 export const uploadFinalProof = async (req, res) => {
   try {
-    console.log("📦 FINAL PROOF REQUEST RECEIVED")
-
     const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
@@ -427,8 +330,6 @@ export const uploadFinalProof = async (req, res) => {
 
     await invoice.save()
 
-    console.log("✅ FINAL PROOFS SAVED:", proofFiles.length)
-
     res.json({
       success: true,
       filesUploaded: proofFiles.length,
@@ -439,14 +340,10 @@ export const uploadFinalProof = async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message:
-        error?.message ||
-        "Final proof upload failed"
+      message: error?.message || "Final proof upload failed"
     })
   }
 }
-
-/* ================= APPROVE PROOF ================= */
 
 export const approveFinalProof = async (req, res) => {
   try {
@@ -464,9 +361,7 @@ export const approveFinalProof = async (req, res) => {
         "finalProof.approvalName": approvalName,
         "finalProof.approvalEmail": approvalEmail
       },
-      {
-        new: true
-      }
+      { new: true }
     )
 
     if (!invoice) {
@@ -479,9 +374,7 @@ export const approveFinalProof = async (req, res) => {
     const notification = await Notification.create({
       userEmail: ADMIN_EMAIL,
       title: "Final Proof Approved",
-      text:
-        `${invoice.customerName} approved final proofs for ` +
-        `${invoice.invoiceNumber}.`,
+      text: `${invoice.customerName} approved final proofs for ${invoice.invoiceNumber}.`,
       type: "proof",
       invoiceId: invoice._id,
       link: "/admin/invoices",
@@ -490,8 +383,6 @@ export const approveFinalProof = async (req, res) => {
     })
 
     emitAdminNotification(req, notification)
-
-    console.log("📥 PROOF APPROVAL NOTIFICATION CREATED:", notification._id)
 
     res.json({
       success: true,
@@ -507,8 +398,6 @@ export const approveFinalProof = async (req, res) => {
     })
   }
 }
-
-/* ================= MARK PAID ================= */
 
 export const markInvoicePaid = async (req, res) => {
   try {
@@ -530,9 +419,7 @@ export const markInvoicePaid = async (req, res) => {
     const notification = await Notification.create({
       userEmail: ADMIN_EMAIL,
       title: "Payment Received",
-      text:
-        `${invoice.customerName} paid ${invoice.invoiceNumber} ` +
-        `for $${Number(invoice.total || 0).toFixed(2)}.`,
+      text: `${invoice.customerName} paid ${invoice.invoiceNumber} for $${Number(invoice.total || 0).toFixed(2)}.`,
       type: "payment",
       invoiceId: invoice._id,
       link: "/admin/invoices",
@@ -541,8 +428,6 @@ export const markInvoicePaid = async (req, res) => {
     })
 
     emitAdminNotification(req, notification)
-
-    console.log("📥 PAYMENT NOTIFICATION CREATED:", notification._id)
 
     res.json({
       success: true,
@@ -558,8 +443,6 @@ export const markInvoicePaid = async (req, res) => {
     })
   }
 }
-
-/* ================= START PRODUCTION ================= */
 
 export const startProduction = async (req, res) => {
   try {
