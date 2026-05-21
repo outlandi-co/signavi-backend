@@ -49,6 +49,28 @@ router.get("/", requireAuth, async (req, res) => {
   }
 })
 
+/* ================= GET ARCHIVED THREADS ================= */
+
+router.get("/archived", requireAuth, async (req, res) => {
+  try {
+    const threads = await AdminEmailThread.find({
+      archived: true
+    }).sort({ updatedAt: -1 })
+
+    res.json({
+      success: true,
+      data: threads
+    })
+  } catch (error) {
+    console.error("❌ GET ARCHIVED THREADS ERROR:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to load archived threads"
+    })
+  }
+})
+
 /* ================= GET THREAD MESSAGES ================= */
 
 router.get("/:threadId/messages", requireAuth, async (req, res) => {
