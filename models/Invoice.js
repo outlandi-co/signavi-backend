@@ -20,6 +20,15 @@ const proofFileSchema = new mongoose.Schema(
   { _id: false }
 )
 
+const timelineSchema = new mongoose.Schema(
+  {
+    status: { type: String, required: true },
+    note: { type: String, default: "" },
+    date: { type: Date, default: Date.now }
+  },
+  { _id: false }
+)
+
 const invoiceSchema = new mongoose.Schema(
   {
     invoiceNumber: {
@@ -81,6 +90,7 @@ const invoiceSchema = new mongoose.Schema(
     paymentUrl: { type: String, default: "" },
     squareCheckoutId: { type: String, default: "" },
     squarePaymentLinkId: { type: String, default: "" },
+    squarePaymentId: { type: String, default: "" },
     paidAt: { type: Date, default: null },
 
     finalProof: {
@@ -94,10 +104,26 @@ const invoiceSchema = new mongoose.Schema(
       approvedAt: { type: Date, default: null },
       approvalName: { type: String, default: "" },
       approvalEmail: { type: String, default: "" }
+    },
+
+    timeline: {
+      type: [timelineSchema],
+      default: []
     }
   },
   { timestamps: true }
 )
+
+invoiceSchema.methods.addTimeline = function (
+  status,
+  note = ""
+) {
+  this.timeline.push({
+    status,
+    note,
+    date: new Date()
+  })
+}
 
 invoiceSchema.pre("save", function calculateTotals() {
   const subtotal = this.items.reduce((sum, item) => {
@@ -107,12 +133,21 @@ invoiceSchema.pre("save", function calculateTotals() {
   this.subtotal = Number(subtotal.toFixed(2))
   this.tax = Number((subtotal * TAX_RATE).toFixed(2))
   this.shipping = Number(this.shipping || 0)
+
   this.total = Number(
     (this.subtotal + this.tax + this.shipping).toFixed(2)
   )
 
   if (!this.invoiceNumber) {
     this.invoiceNumber = `SIGNAVI-${Date.now()}`
+  }
+
+  if (this.isNew && this.timeline.length === 0) {
+    this.timeline.push({
+      status: "draft",
+      note: "Invoice created",
+      date: new Date()
+    })
   }
 })
 

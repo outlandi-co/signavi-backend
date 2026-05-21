@@ -4,7 +4,6 @@ import { SquareClient, SquareEnvironment } from "square"
 
 import Invoice from "../models/Invoice.js"
 import Notification from "../models/Notification.js"
-
 import AdminEmail from "../models/AdminEmail.js"
 
 const CLIENT_URL =
@@ -38,6 +37,19 @@ if (process.env.SENDGRID_API_KEY) {
 
 const emitAdminNotification = (req, notification) => {
   req.app.get("io")?.emit("adminNotification", notification)
+}
+
+const addTimeline = (invoice, status, note) => {
+  if (typeof invoice.addTimeline === "function") {
+    invoice.addTimeline(status, note)
+  } else {
+    invoice.timeline = invoice.timeline || []
+    invoice.timeline.push({
+      status,
+      note,
+      date: new Date()
+    })
+  }
 }
 
 const createSquarePaymentLinkForInvoice = async (invoice) => {
@@ -74,6 +86,12 @@ const createSquarePaymentLinkForInvoice = async (invoice) => {
   invoice.squarePaymentLinkId = paymentLink.id || ""
   invoice.status = "payment_required"
 
+  addTimeline(
+    invoice,
+    "payment_required",
+    "Payment link created and invoice moved to payment required."
+  )
+
   await invoice.save()
 
   return invoice.paymentUrl
@@ -98,6 +116,12 @@ export const createInvoice = async (req, res) => {
       shipping,
       notes
     })
+
+    addTimeline(
+      invoice,
+      "draft",
+      "Invoice created."
+    )
 
     await invoice.save()
 
@@ -212,83 +236,96 @@ export const sendInvoiceEmail = async (req, res) => {
     const invoiceUrl = await createSquarePaymentLinkForInvoice(invoice)
     const proofUrl = `${CLIENT_URL}/proof/${invoice._id}`
 
+    const html = `
+      <div style="
+        font-family:Arial,sans-serif;
+        max-width:720px;
+        margin:auto;
+        border:1px solid #ddd;
+        padding:30px;
+      ">
+        <div style="
+          text-align:center;
+          border-bottom:2px solid #111;
+          padding-bottom:20px;
+        ">
+          <img
+            src="${LOGO_URL}"
+            style="width:140px;"
+          />
+
+          <h1>SIGNAVI STUDIO</h1>
+
+          <p>
+            Signature | Vision | Veteran Owned
+          </p>
+        </div>
+
+        <div style="padding:24px 0;">
+          <p>
+            Hi ${invoice.customerName},
+          </p>
+
+          <p>
+            Your final design proofs and invoice are ready.
+          </p>
+
+          <div style="margin:24px 0;">
+            <a
+              href="${proofUrl}"
+              style="
+                background:#111;
+                color:#fff;
+                padding:14px 18px;
+                border-radius:8px;
+                text-decoration:none;
+                margin-right:10px;
+                display:inline-block;
+              "
+            >
+              Review Final Proofs
+            </a>
+
+            <a
+              href="${invoiceUrl}"
+              style="
+                background:#0f766e;
+                color:#fff;
+                padding:14px 18px;
+                border-radius:8px;
+                text-decoration:none;
+                display:inline-block;
+              "
+            >
+              Pay Invoice
+            </a>
+          </div>
+
+          <h2>
+            Total:
+            $${Number(invoice.total || 0).toFixed(2)}
+          </h2>
+        </div>
+      </div>
+    `
+
     await sgMail.send({
       to: invoice.customerEmail,
       from: FROM_EMAIL,
       subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+      html
+    })
 
-      html: `
-        <div style="
-          font-family:Arial,sans-serif;
-          max-width:720px;
-          margin:auto;
-          border:1px solid #ddd;
-          padding:30px;
-        ">
-          <div style="
-            text-align:center;
-            border-bottom:2px solid #111;
-            padding-bottom:20px;
-          ">
-            <img
-              src="${LOGO_URL}"
-              style="width:140px;"
-            />
-
-            <h1>SIGNAVI STUDIO</h1>
-
-            <p>
-              Signature | Vision | Veteran Owned
-            </p>
-          </div>
-
-          <div style="padding:24px 0;">
-            <p>
-              Hi ${invoice.customerName},
-            </p>
-
-            <p>
-              Your final design proofs and invoice are ready.
-            </p>
-
-            <div style="margin:24px 0;">
-              <a
-                href="${proofUrl}"
-                style="
-                  background:#111;
-                  color:#fff;
-                  padding:14px 18px;
-                  border-radius:8px;
-                  text-decoration:none;
-                  margin-right:10px;
-                  display:inline-block;
-                "
-              >
-                Review Final Proofs
-              </a>
-
-              <a
-                href="${invoiceUrl}"
-                style="
-                  background:#0f766e;
-                  color:#fff;
-                  padding:14px 18px;
-                  border-radius:8px;
-                  text-decoration:none;
-                  display:inline-block;
-                "
-              >
-                Pay Invoice
-              </a>
-            </div>
-
-            <h2>
-              Total:
-              $${Number(invoice.total || 0).toFixed(2)}
-            </h2>
-          </div>
-        </div>
-      `
+    await AdminEmail.create({
+      to: invoice.customerEmail,
+      subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+      message:
+        `Invoice, final proofs, and payment link sent to ${invoice.customerEmail}.`,
+      html,
+      status: "sent",
+      relatedInvoiceId: invoice._id,
+      createdBy: ADMIN_EMAIL,
+      sentAt: new Date()
     })
 
     invoice.status =
@@ -296,6 +333,12 @@ export const sendInvoiceEmail = async (req, res) => {
       invoice.finalProof?.imageUrl
         ? "proof_uploaded"
         : "payment_required"
+
+    addTimeline(
+      invoice,
+      "email_sent",
+      "Invoice email with proof review and payment link was sent."
+    )
 
     await invoice.save()
 
@@ -322,9 +365,7 @@ export const updateInvoice = async (req, res) => {
     const invoice = await Invoice.findByIdAndUpdate(
       req.params.id,
       req.body,
-      {
-        new: true
-      }
+      { new: true }
     )
 
     if (!invoice) {
@@ -425,6 +466,12 @@ export const uploadFinalProof = async (req, res) => {
       approvalEmail: ""
     }
 
+    addTimeline(
+      invoice,
+      "proof_uploaded",
+      `${proofFiles.length} final proof file(s) uploaded.`
+    )
+
     await invoice.save()
 
     console.log("✅ FINAL PROOFS SAVED:", proofFiles.length)
@@ -455,19 +502,7 @@ export const approveFinalProof = async (req, res) => {
       approvalEmail = ""
     } = req.body
 
-    const invoice = await Invoice.findByIdAndUpdate(
-      req.params.id,
-      {
-        status: "proof_approved",
-        "finalProof.approved": true,
-        "finalProof.approvedAt": new Date(),
-        "finalProof.approvalName": approvalName,
-        "finalProof.approvalEmail": approvalEmail
-      },
-      {
-        new: true
-      }
-    )
+    const invoice = await Invoice.findById(req.params.id)
 
     if (!invoice) {
       return res.status(404).json({
@@ -475,6 +510,20 @@ export const approveFinalProof = async (req, res) => {
         message: "Invoice not found"
       })
     }
+
+    invoice.status = "proof_approved"
+    invoice.finalProof.approved = true
+    invoice.finalProof.approvedAt = new Date()
+    invoice.finalProof.approvalName = approvalName
+    invoice.finalProof.approvalEmail = approvalEmail
+
+    addTimeline(
+      invoice,
+      "proof_approved",
+      `${approvalName || invoice.customerName} approved the final proof.`
+    )
+
+    await invoice.save()
 
     const notification = await Notification.create({
       userEmail: ADMIN_EMAIL,
@@ -524,6 +573,12 @@ export const markInvoicePaid = async (req, res) => {
     invoice.paymentStatus = "paid"
     invoice.status = "ready_for_production"
     invoice.paidAt = new Date()
+
+    addTimeline(
+      invoice,
+      "paid",
+      `Payment received for $${Number(invoice.total || 0).toFixed(2)}.`
+    )
 
     await invoice.save()
 
@@ -580,6 +635,12 @@ export const startProduction = async (req, res) => {
     }
 
     invoice.status = "production"
+
+    addTimeline(
+      invoice,
+      "production",
+      "Production started."
+    )
 
     await invoice.save()
 
