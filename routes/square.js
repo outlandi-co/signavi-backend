@@ -34,14 +34,43 @@ const getItemPrice = (item = {}) => {
   )
 }
 
+const getItemQuantity = (item = {}) => {
+  return Math.max(1, toNumber(item.quantity, 1))
+}
+
 const getShipping = (record = {}) => {
   return toNumber(
     record.shippingCost ??
       record.shipping ??
       record.shippingTotal ??
       record.deliveryFee ??
+      record.shippingRate?.amount ??
       0
   )
+}
+
+const getSubtotal = (record = {}) => {
+  if (Array.isArray(record.items) && record.items.length > 0) {
+    return record.items.reduce((sum, item) => {
+      const price = getItemPrice(item)
+      const qty = getItemQuantity(item)
+
+      console.log("🛒 SQUARE ITEM:", {
+        name: item.name,
+        salePrice: item.salePrice,
+        finalPrice: item.finalPrice,
+        unitPrice: item.unitPrice,
+        price: item.price,
+        selectedVariantPrice: item.selectedVariant?.price,
+        parsedPrice: price,
+        quantity: qty
+      })
+
+      return sum + price * qty
+    }, 0)
+  }
+
+  return toNumber(record.subtotal) || toNumber(record.price) || 0
 }
 
 router.post("/create-payment/:id", async (req, res) => {
@@ -49,7 +78,10 @@ router.post("/create-payment/:id", async (req, res) => {
     const { id } = req.params
 
     if (!id || id === "null" || id === "undefined") {
-      return res.status(400).json({ message: "Invalid ID" })
+      return res.status(400).json({
+        success: false,
+        message: "Invalid ID"
+      })
     }
 
     let record = await Quote.findById(id)
@@ -61,42 +93,24 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     if (!record) {
-      return res.status(404).json({ message: "Record not found" })
+      return res.status(404).json({
+        success: false,
+        message: "Record not found"
+      })
     }
 
-    let subtotal = 0
-
-    if (Array.isArray(record.items) && record.items.length > 0) {
-      subtotal = record.items.reduce((sum, item) => {
-        const price = getItemPrice(item)
-        const qty = toNumber(item.quantity, 1)
-
-        console.log("🛒 SQUARE ITEM:", {
-          name: item.name,
-          salePrice: item.salePrice,
-          finalPrice: item.finalPrice,
-          unitPrice: item.unitPrice,
-          price: item.price,
-          selectedVariantPrice: item.selectedVariant?.price,
-          parsedPrice: price,
-          quantity: qty
-        })
-
-        return sum + price * qty
-      }, 0)
-    }
-
-    if (!subtotal) {
-      subtotal =
-        toNumber(record.subtotal) ||
-        toNumber(record.finalPrice) ||
-        toNumber(record.price) ||
-        0
-    }
+    const subtotal = getSubtotal(record)
 
     const shipping = getShipping(record)
-    const tax = toNumber(record.tax, subtotal * TAX_RATE)
-    const total = subtotal + shipping + tax
+
+    const tax =
+      toNumber(record.tax) ||
+      subtotal * TAX_RATE
+
+    const total =
+      toNumber(record.finalPrice) && shipping
+        ? toNumber(record.finalPrice)
+        : subtotal + shipping + tax
 
     console.log("💰 FINAL SQUARE CALC:", {
       type,
@@ -104,11 +118,17 @@ router.post("/create-payment/:id", async (req, res) => {
       subtotal,
       shipping,
       tax,
-      total
+      total,
+      savedShippingCost: record.shippingCost,
+      savedShipping: record.shipping,
+      savedShippingTotal: record.shippingTotal,
+      savedDeliveryFee: record.deliveryFee,
+      savedShippingRateAmount: record.shippingRate?.amount
     })
 
     if (!total || total <= 0) {
       return res.status(400).json({
+        success: false,
         message: "Invalid total",
         debug: {
           subtotal,
@@ -121,26 +141,28 @@ router.post("/create-payment/:id", async (req, res) => {
 
     const amount = BigInt(Math.round(total * 100))
 
+    const lineItems = [
+      {
+        name: `${type.toUpperCase()} #${record._id}`,
+        quantity: "1",
+        basePriceMoney: {
+          amount,
+          currency: "USD"
+        }
+      }
+    ]
+
     const response = await client.checkout.paymentLinks.create({
       idempotencyKey: `${id}-${Date.now()}`,
       order: {
         locationId: LOCATION_ID,
         note: `ID:${record._id}`,
-        lineItems: [
-          {
-            name: `${type.toUpperCase()} #${record._id}`,
-            quantity: "1",
-            basePriceMoney: {
-              amount,
-              currency: "USD"
-            }
-          }
-        ]
+        lineItems
       },
       checkoutOptions: {
-  redirectUrl: `${process.env.CLIENT_URL}/success/${id}`,
-  askForShippingAddress: false
-}
+        redirectUrl: `${process.env.CLIENT_URL}/success/${id}`,
+        askForShippingAddress: false
+      }
     })
 
     const paymentUrl = response?.paymentLink?.url
@@ -151,6 +173,7 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     record.subtotal = subtotal
+    record.shipping = shipping
     record.shippingCost = shipping
     record.tax = tax
     record.finalPrice = total
@@ -173,7 +196,11 @@ router.post("/create-payment/:id", async (req, res) => {
     })
   } catch (err) {
     console.error("❌ SQUARE ERROR:", err)
-    res.status(500).json({ message: err.message })
+
+    res.status(500).json({
+      success: false,
+      message: err.message || "Square payment failed"
+    })
   }
 })
 
