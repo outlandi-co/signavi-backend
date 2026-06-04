@@ -159,7 +159,7 @@ const normalizeColors = (colors = []) => {
   if (!Array.isArray(colors)) return []
 
   return colors
-    .map(color => {
+    .map((color) => {
       if (typeof color === "string") {
         return {
           name: normalizeColorName(color)
@@ -171,7 +171,7 @@ const normalizeColors = (colors = []) => {
         name: normalizeColorName(color?.name)
       }
     })
-    .filter(color => color.name)
+    .filter((color) => color.name)
 }
 
 const normalizeProductType = (type) => {
@@ -191,7 +191,7 @@ const normalizeDigitalProduct = (data = {}) => {
     ? digitalData.fileFormats
     : String(digitalData.fileFormats || "")
         .split(",")
-        .map(format => format.trim())
+        .map((format) => format.trim())
         .filter(Boolean)
 
   return {
@@ -206,15 +206,51 @@ const normalizeDigitalProduct = (data = {}) => {
   }
 }
 
+const normalizeDiscountType = (value = "") => {
+  const discountType = String(value || "").trim().toLowerCase()
+
+  if (["percent", "fixed"].includes(discountType)) {
+    return discountType
+  }
+
+  return ""
+}
+
+const getDiscountUpdates = (body = {}) => {
+  const updates = {}
+
+  if (body.discountActive !== undefined) {
+    updates.discountActive = toBoolean(body.discountActive, false)
+  }
+
+  if (body.discountType !== undefined) {
+    updates.discountType = normalizeDiscountType(body.discountType)
+  }
+
+  if (body.discountValue !== undefined) {
+    updates.discountValue = toNumber(body.discountValue, 0)
+  }
+
+  if (body.discountLabel !== undefined) {
+    updates.discountLabel = String(body.discountLabel || "")
+  }
+
+  if (body.salePrice !== undefined) {
+    updates.salePrice = toNumber(body.salePrice, 0)
+  }
+
+  if (body.originalPrice !== undefined) {
+    updates.originalPrice = toNumber(body.originalPrice, 0)
+  }
+
+  return updates
+}
+
 /* ================= CREATE PRODUCT ================= */
 
 router.post("/", upload.array("images", 20), async (req, res) => {
   try {
-    const {
-      name,
-      description,
-      category
-    } = req.body
+    const { name, description, category } = req.body
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({
@@ -244,11 +280,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
     const basePrice = toNumber(req.body.basePrice || price, price)
     const listPrice = toNumber(req.body.listPrice || price, price)
 
-    const stock = toNumber(
-      req.body.stock || req.body.quantity,
-      0
-    )
-
+    const stock = toNumber(req.body.stock || req.body.quantity, 0)
     const quantity = toNumber(req.body.quantity || stock, stock)
 
     const rawVariants = safeParse(req.body.variants, [])
@@ -304,12 +336,13 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       digitalProduct.previewImage ||
       ""
 
-    const finalDigitalProduct = productType === "digital"
-      ? {
-          ...digitalProduct,
-          previewImage: digitalPreviewImage
-        }
-      : digitalProduct
+    const finalDigitalProduct =
+      productType === "digital"
+        ? {
+            ...digitalProduct,
+            previewImage: digitalPreviewImage
+          }
+        : digitalProduct
 
     const variants = Array.isArray(rawVariants)
       ? rawVariants
@@ -339,14 +372,23 @@ router.post("/", upload.array("images", 20), async (req, res) => {
               color,
               size,
               stock: variantStock,
-              quantity: toNumber(variant.quantity || variantStock, variantStock),
+              quantity: toNumber(
+                variant.quantity || variantStock,
+                variantStock
+              ),
               price: variantPrice,
-              basePrice: toNumber(variant.basePrice || variantPrice, variantPrice),
-              listPrice: toNumber(variant.listPrice || variantPrice, variantPrice),
+              basePrice: toNumber(
+                variant.basePrice || variantPrice,
+                variantPrice
+              ),
+              listPrice: toNumber(
+                variant.listPrice || variantPrice,
+                variantPrice
+              ),
               images: colorMap[color] || []
             }
           })
-          .filter(variant => variant.color && variant.size)
+          .filter((variant) => variant.color && variant.size)
       : []
 
     if (productType === "physical" && !variants.length) {
@@ -364,6 +406,8 @@ router.post("/", upload.array("images", 20), async (req, res) => {
     }
 
     const sku = String(req.body.sku || "").trim() || generateSku(name)
+
+    const discountUpdates = getDiscountUpdates(req.body)
 
     const product = await Product.create({
       sku,
@@ -387,11 +431,19 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       variants,
 
       image: productType === "digital" ? finalDigitalProduct.previewImage : "",
-      images: productType === "digital" && finalDigitalProduct.previewImage
-        ? [finalDigitalProduct.previewImage]
-        : [],
+      images:
+        productType === "digital" && finalDigitalProduct.previewImage
+          ? [finalDigitalProduct.previewImage]
+          : [],
 
-      active: true
+      active: true,
+
+      discountActive: discountUpdates.discountActive || false,
+      discountType: discountUpdates.discountType || "",
+      discountValue: discountUpdates.discountValue || 0,
+      discountLabel: discountUpdates.discountLabel || "",
+      salePrice: discountUpdates.salePrice || 0,
+      originalPrice: discountUpdates.originalPrice || 0
     })
 
     console.log("✅ PRODUCT CREATED:", product.name)
@@ -400,7 +452,6 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       success: true,
       data: product
     })
-
   } catch (err) {
     console.error("❌ CREATE PRODUCT ERROR:", err)
 
@@ -416,12 +467,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const {
-      storefrontVisible,
-      storefront,
-      category,
-      search
-    } = req.query
+    const { storefrontVisible, storefront, category, search } = req.query
 
     const filter = {}
     const andFilters = []
@@ -432,10 +478,7 @@ router.get("/", async (req, res) => {
 
     if (storefront) {
       andFilters.push({
-        $or: [
-          { storefront },
-          { storefront: "both" }
-        ]
+        $or: [{ storefront }, { storefront: "both" }]
       })
     }
 
@@ -472,15 +515,13 @@ router.get("/", async (req, res) => {
       filter.$and = andFilters
     }
 
-    const products = await Product.find(filter)
-      .sort({ createdAt: -1 })
+    const products = await Product.find(filter).sort({ createdAt: -1 })
 
     return res.json({
       success: true,
       count: products.length,
       data: products
     })
-
   } catch (err) {
     console.error("❌ FETCH PRODUCTS ERROR:", err)
 
@@ -509,7 +550,6 @@ router.get("/:id", async (req, res) => {
       success: true,
       data: product
     })
-
   } catch (err) {
     console.error("❌ FETCH PRODUCT ERROR:", err)
 
@@ -615,10 +655,7 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
       updates.listPrice = toNumber(req.body.listPrice || price, price)
     }
 
-    if (
-      req.body.stock !== undefined ||
-      req.body.quantity !== undefined
-    ) {
+    if (req.body.stock !== undefined || req.body.quantity !== undefined) {
       const stock = toNumber(
         req.body.stock || req.body.quantity,
         product.stock || 0
@@ -659,7 +696,10 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
               }
 
               const variantPrice = toNumber(
-                variant.price || variant.basePrice || variant.listPrice || product.price,
+                variant.price ||
+                  variant.basePrice ||
+                  variant.listPrice ||
+                  product.price,
                 product.price || 0
               )
 
@@ -672,31 +712,41 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
                 color,
                 size,
                 stock: variantStock,
-                quantity: toNumber(variant.quantity || variantStock, variantStock),
+                quantity: toNumber(
+                  variant.quantity || variantStock,
+                  variantStock
+                ),
                 price: variantPrice,
-                basePrice: toNumber(variant.basePrice || variantPrice, variantPrice),
-                listPrice: toNumber(variant.listPrice || variantPrice, variantPrice),
+                basePrice: toNumber(
+                  variant.basePrice || variantPrice,
+                  variantPrice
+                ),
+                listPrice: toNumber(
+                  variant.listPrice || variantPrice,
+                  variantPrice
+                ),
                 images: Array.isArray(variant.images) ? variant.images : []
               }
             })
-            .filter(variant => variant.color && variant.size)
+            .filter((variant) => variant.color && variant.size)
         : []
     }
 
-    const updated = await Product.findByIdAndUpdate(
-      req.params.id,
-      updates,
-      {
-        new: true,
-        runValidators: true
-      }
-    )
+    const discountUpdates = getDiscountUpdates(req.body)
+
+    Object.assign(updates, discountUpdates)
+
+    console.log("🔥 PRODUCT UPDATE:", updates)
+
+    const updated = await Product.findByIdAndUpdate(req.params.id, updates, {
+      new: true,
+      runValidators: true
+    })
 
     return res.json({
       success: true,
       data: updated
     })
-
   } catch (err) {
     console.error("❌ UPDATE PRODUCT ERROR:", err)
 
@@ -725,7 +775,6 @@ router.delete("/:id", async (req, res) => {
       success: true,
       message: "Product deleted"
     })
-
   } catch (err) {
     console.error("❌ DELETE PRODUCT ERROR:", err)
 
