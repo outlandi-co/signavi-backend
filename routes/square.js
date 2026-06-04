@@ -138,8 +138,9 @@ router.post("/create-payment/:id", async (req, res) => {
         ]
       },
       checkoutOptions: {
-        redirectUrl: `${process.env.CLIENT_URL}/success/${id}`
-      }
+  redirectUrl: `${process.env.CLIENT_URL}/success/${id}`,
+  askForShippingAddress: false
+}
     })
 
     const paymentUrl = response?.paymentLink?.url
