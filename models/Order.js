@@ -2,388 +2,493 @@ import mongoose from "mongoose"
 
 /* ================= ITEM SCHEMA ================= */
 
-const itemSchema = new mongoose.Schema({
-  name: {
-    type: String,
-    default: "",
-    trim: true
-  },
+const itemSchema = new mongoose.Schema(
+  {
+    productId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product",
+      default: null
+    },
 
-  quantity: {
-    type: Number,
-    default: 1,
-    min: 1
-  },
-
-  price: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-
-  cost: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-
-  variant: {
-    color: {
+    name: {
       type: String,
       default: "",
-      lowercase: true,
       trim: true
     },
 
-    size: {
-      type: String,
-      default: "",
-      uppercase: true,
-      trim: true
-    }
-  }
+    quantity: {
+      type: Number,
+      default: 1,
+      min: 1
+    },
 
-}, { _id: false })
+    price: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    unitPrice: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    salePrice: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    finalPrice: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    cost: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    image: {
+      type: String,
+      default: ""
+    },
+
+    productType: {
+      type: String,
+      default: "physical"
+    },
+
+    selectedVariant: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null
+    },
+
+    variant: {
+      color: {
+        type: String,
+        default: "",
+        lowercase: true,
+        trim: true
+      },
+
+      size: {
+        type: String,
+        default: "",
+        uppercase: true,
+        trim: true
+      }
+    }
+  },
+  { _id: false }
+)
 
 /* ================= ORDER SCHEMA ================= */
 
-const orderSchema = new mongoose.Schema({
+const orderSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+      index: true
+    },
 
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User",
-    default: null,
-    index: true
-  },
+    customerName: {
+      type: String,
+      required: true,
+      trim: true
+    },
 
-  customerName: {
-    type: String,
-    required: true,
-    trim: true
-  },
+    email: {
+      type: String,
+      required: true,
+      lowercase: true,
+      trim: true,
+      index: true
+    },
 
-  email: {
-    type: String,
-    required: true,
-    lowercase: true,
-    trim: true,
-    index: true
-  },
-
-  phone: {
-    type: String,
-    default: "",
-    trim: true
-  },
-
-  address: {
-    street: {
+    phone: {
       type: String,
       default: "",
       trim: true
     },
 
-    city: {
-      type: String,
-      default: "",
-      trim: true
-    },
-
-    state: {
-      type: String,
-      default: "",
-      trim: true
-    },
-
-    zip: {
-      type: String,
-      default: "",
-      trim: true
-    },
-
-    country: {
-      type: String,
-      default: "US",
-      trim: true
-    }
-  },
-
-  quoteId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Quote",
-    default: null,
-    index: true
-  },
-
-  quantity: {
-    type: Number,
-    default: 1,
-    min: 1
-  },
-
-  printType: {
-    type: String,
-    default: "screenprint"
-  },
-
-  artworks: [
-    {
-      url: {
+    address: {
+      street: {
         type: String,
-        required: true
+        default: "",
+        trim: true
       },
 
-      public_id: {
+      city: {
         type: String,
-        default: ""
+        default: "",
+        trim: true
       },
 
-      filename: {
+      state: {
         type: String,
-        default: ""
+        default: "",
+        trim: true
+      },
+
+      zip: {
+        type: String,
+        default: "",
+        trim: true
+      },
+
+      country: {
+        type: String,
+        default: "US",
+        trim: true
       }
-    }
-  ],
+    },
 
-  artwork: {
-    type: String,
-    default: ""
-  },
+    quoteId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Quote",
+      default: null,
+      index: true
+    },
 
-  subtotal: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
+    quantity: {
+      type: Number,
+      default: 1,
+      min: 1
+    },
 
-  tax: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
+    printType: {
+      type: String,
+      default: "screenprint"
+    },
 
-  shipping: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-
-  finalPrice: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-
-  cogs: {
-    type: Number,
-    default: 0
-  },
-
-  profit: {
-    type: Number,
-    default: 0
-  },
-
-  margin: {
-    type: Number,
-    default: 0
-  },
-
-  items: {
-    type: [itemSchema],
-    default: []
-  },
-
-  orderType: {
-    type: String,
-    enum: ["store", "custom"],
-    default: "store",
-    index: true
-  },
-
-  source: {
-    type: String,
-    enum: ["store", "quote", "admin", "custom"],
-    default: "store"
-  },
-
-  paymentMethod: {
-    type: String,
-    default: "",
-    trim: true
-  },
-
-  paymentStatus: {
-    type: String,
-    enum: ["unpaid", "paid", "refunded"],
-    default: "unpaid",
-    index: true
-  },
-
-  notes: {
-    type: String,
-    default: "",
-    trim: true
-  },
-
-  status: {
-    type: String,
-    enum: [
-      "quotes",
-      "payment_required",
-      "ready_for_production",
-      "paid",
-      "production",
-      "shipping",
-      "shipped",
-      "delivered",
-      "archive",
-      "denied"
-    ],
-
-    default: "payment_required",
-    index: true
-  },
-
-  printStatus: {
-    type: String,
-    default: ""
-  },
-
-  trackingNumber: {
-    type: String,
-    default: ""
-  },
-
-  trackingLink: {
-    type: String,
-    default: ""
-  },
-
-  timeline: {
-    type: [
+    artworks: [
       {
-        status: {
-          type: String
+        url: {
+          type: String,
+          required: true
         },
 
-        date: {
-          type: Date,
-          default: Date.now
+        public_id: {
+          type: String,
+          default: ""
         },
 
-        note: {
-          type: String
+        filename: {
+          type: String,
+          default: ""
         }
       }
     ],
 
-    default: []
+    artwork: {
+      type: String,
+      default: ""
+    },
+
+    subtotal: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    tax: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    shipping: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    shippingCost: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    shippingTotal: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    deliveryFee: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    shippingRate: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null
+    },
+
+    shippingRateId: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    shippingProvider: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    shippingService: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    finalPrice: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    cogs: {
+      type: Number,
+      default: 0
+    },
+
+    profit: {
+      type: Number,
+      default: 0
+    },
+
+    margin: {
+      type: Number,
+      default: 0
+    },
+
+    items: {
+      type: [itemSchema],
+      default: []
+    },
+
+    orderType: {
+      type: String,
+      enum: ["store", "custom"],
+      default: "store",
+      index: true
+    },
+
+    source: {
+      type: String,
+      enum: [
+        "store",
+        "quote",
+        "admin",
+        "custom",
+        "cart_drawer",
+        "cart_page"
+      ],
+      default: "store"
+    },
+
+    paymentMethod: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: ["unpaid", "paid", "refunded"],
+      default: "unpaid",
+      index: true
+    },
+
+    notes: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    status: {
+      type: String,
+      enum: [
+        "quotes",
+        "payment_required",
+        "ready_for_production",
+        "paid",
+        "production",
+        "shipping",
+        "shipped",
+        "delivered",
+        "archive",
+        "denied"
+      ],
+      default: "payment_required",
+      index: true
+    },
+
+    printStatus: {
+      type: String,
+      default: ""
+    },
+
+    trackingNumber: {
+      type: String,
+      default: ""
+    },
+
+    trackingLink: {
+      type: String,
+      default: ""
+    },
+
+    timeline: {
+      type: [
+        {
+          status: {
+            type: String
+          },
+
+          date: {
+            type: Date,
+            default: Date.now
+          },
+
+          note: {
+            type: String
+          }
+        }
+      ],
+      default: []
+    },
+
+    invoiceCreatedAt: {
+      type: Date,
+      default: null
+    },
+
+    receiptCreatedAt: {
+      type: Date,
+      default: null
+    },
+
+    receiptEmailSent: {
+      type: Boolean,
+      default: false
+    },
+
+    receiptEmailSentAt: {
+      type: Date,
+      default: null
+    },
+
+    paidAt: {
+      type: Date,
+      default: null
+    },
+
+    customQuotePaidAt: {
+      type: Date,
+      default: null
+    },
+
+    paymentUrlCreatedAt: {
+      type: Date,
+      default: null
+    },
+
+    shippingStartedAt: {
+      type: Date,
+      default: null
+    },
+
+    shippedAt: {
+      type: Date,
+      default: null
+    },
+
+    deliveredAt: {
+      type: Date,
+      default: null
+    },
+
+    archivedAt: {
+      type: Date,
+      default: null
+    },
+
+    paymentUrl: {
+      type: String,
+      default: ""
+    },
+
+    squarePaymentId: {
+      type: String,
+      default: ""
+    },
+
+    currency: {
+      type: String,
+      default: "usd"
+    }
   },
-
-  invoiceCreatedAt: {
-    type: Date,
-    default: null
-  },
-
-  receiptCreatedAt: {
-    type: Date,
-    default: null
-  },
-
-  receiptEmailSent: {
-    type: Boolean,
-    default: false
-  },
-
-  receiptEmailSentAt: {
-    type: Date,
-    default: null
-  },
-
-  paidAt: {
-    type: Date,
-    default: null
-  },
-
-  customQuotePaidAt: {
-    type: Date,
-    default: null
-  },
-
-  paymentUrlCreatedAt: {
-    type: Date,
-    default: null
-  },
-
-  shippingStartedAt: {
-    type: Date,
-    default: null
-  },
-
-  shippedAt: {
-    type: Date,
-    default: null
-  },
-
-  deliveredAt: {
-    type: Date,
-    default: null
-  },
-
-  archivedAt: {
-    type: Date,
-    default: null
-  },
-
-  paymentUrl: {
-    type: String,
-    default: ""
-  },
-
-  squarePaymentId: {
-    type: String,
-    default: ""
-  },
-
-  currency: {
-    type: String,
-    default: "usd"
-  }
-
-}, { timestamps: true })
+  { timestamps: true }
+)
 
 /* =========================================================
    AUTO ENGINE
 ========================================================= */
 
 orderSchema.pre("save", function () {
-
   if (this.items?.length) {
-
     this.subtotal = this.items.reduce((sum, item) => {
+      const price = Number(
+        item.finalPrice ||
+          item.salePrice ||
+          item.unitPrice ||
+          item.price ||
+          item.selectedVariant?.price ||
+          0
+      )
 
-      const price = Number(item.price || 0)
       const qty = Number(item.quantity || 1)
 
-      return sum + (price * qty)
-
+      return sum + price * qty
     }, 0)
   }
 
-  this.tax = this.subtotal * 0.0825
+  const selectedShipping = Number(
+    this.shippingCost ||
+      this.shipping ||
+      this.shippingTotal ||
+      this.deliveryFee ||
+      this.shippingRate?.amount ||
+      0
+  )
+
+  this.shipping = selectedShipping
+  this.shippingCost = selectedShipping
+  this.shippingTotal = selectedShipping
+  this.deliveryFee = selectedShipping
+
+  this.tax = Number(this.tax || this.subtotal * 0.0825)
 
   this.finalPrice =
-    this.subtotal +
-    this.tax +
-    Number(this.shipping || 0)
+    Number(this.subtotal || 0) +
+    Number(this.tax || 0) +
+    selectedShipping
 
   if (!this.timeline) {
     this.timeline = []
   }
 
   if (this.timeline.length === 0) {
-
     this.timeline.push({
       status: this.status,
       date: new Date(),
@@ -392,34 +497,42 @@ orderSchema.pre("save", function () {
   }
 
   if (!this.cogs || this.cogs === 0) {
-
     this.cogs = (this.items || []).reduce((sum, item) => {
-
       if (item.cost && item.cost > 0) {
-        return sum + (item.cost * item.quantity)
+        return sum + item.cost * item.quantity
       }
 
-      const estimatedCost =
-        (item.price || 0) * 0.4
-
-      return sum + (
-        estimatedCost *
-        (item.quantity || 1)
+      const itemPrice = Number(
+        item.finalPrice ||
+          item.salePrice ||
+          item.unitPrice ||
+          item.price ||
+          0
       )
 
+      const estimatedCost = itemPrice * 0.4
+
+      return sum + estimatedCost * (item.quantity || 1)
     }, 0)
   }
 
   this.profit = this.finalPrice - this.cogs
 
-  this.margin = this.finalPrice > 0
-    ? (this.profit / this.finalPrice) * 100
-    : 0
+  this.margin =
+    this.finalPrice > 0
+      ? (this.profit / this.finalPrice) * 100
+      : 0
 
+  this.subtotal = Number(this.subtotal.toFixed(2))
+  this.tax = Number(this.tax.toFixed(2))
+  this.shipping = Number(this.shipping.toFixed(2))
+  this.shippingCost = Number(this.shippingCost.toFixed(2))
+  this.shippingTotal = Number(this.shippingTotal.toFixed(2))
+  this.deliveryFee = Number(this.deliveryFee.toFixed(2))
+  this.finalPrice = Number(this.finalPrice.toFixed(2))
   this.cogs = Number(this.cogs.toFixed(2))
   this.profit = Number(this.profit.toFixed(2))
   this.margin = Number(this.margin.toFixed(2))
-
 })
 
 const Order =
