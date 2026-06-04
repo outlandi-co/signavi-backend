@@ -177,6 +177,32 @@ const productSchema = new mongoose.Schema({
     min: 0
   },
 
+salePrice: {
+  type: Number,
+  default: 0,
+  min: 0
+},
+
+discountPercent: {
+  type: Number,
+  default: 0,
+  min: 0,
+  max: 100
+},
+
+profitMargin: {
+  type: Number,
+  default: 0,
+  min: 0,
+  max: 100
+},
+
+onSale: {
+  type: Boolean,
+  default: false,
+  index: true
+},
+
   stock: {
     type: Number,
     default: 0,
@@ -252,7 +278,7 @@ const productSchema = new mongoose.Schema({
 
 /* ================= CLEAN EMPTY SKU BEFORE VALIDATION ================= */
 
-productSchema.pre("validate", function cleanSku(next) {
+productSchema.pre("validate", function cleanSku() {
   if (this.sku !== undefined && this.sku !== null) {
     const clean = String(this.sku).trim()
 
@@ -262,8 +288,6 @@ productSchema.pre("validate", function cleanSku(next) {
       this.sku = clean
     }
   }
-
-  next()
 })
 
 const Product =
