@@ -13,7 +13,18 @@ const client = new SquareClient({
 })
 
 const LOCATION_ID = process.env.SQUARE_LOCATION_ID
-const BASE_URL = "https://signavi-backend.onrender.com"
+
+const getItemPrice = (item = {}) => {
+  return Number(
+    item.salePrice ??
+      item.finalPrice ??
+      item.unitPrice ??
+      item.price ??
+      item.selectedVariant?.price ??
+      item.variant?.price ??
+      0
+  )
+}
 
 router.post("/create-payment/:id", async (req, res) => {
   try {
@@ -23,7 +34,6 @@ router.post("/create-payment/:id", async (req, res) => {
       return res.status(400).json({ message: "Invalid ID" })
     }
 
-    /* ================= FIND RECORD ================= */
     let record = await Quote.findById(id)
     let type = "quote"
 
@@ -36,25 +46,14 @@ router.post("/create-payment/:id", async (req, res) => {
       return res.status(404).json({ message: "Record not found" })
     }
 
-    /* ================= PREVENT DUPLICATE ================= */
-    if (record.paymentUrl) {
-      console.log("⚠️ Reusing payment link:", record.paymentUrl)
-
-      return res.json({
-        success: true,
-        paymentUrl: record.paymentUrl,
-        orderId: record._id
-      })
-    }
-
-    /* ================= BULLETPROOF CALC ================= */
     let subtotal = 0
 
     if (record.items?.length) {
       subtotal = record.items.reduce((sum, item) => {
-        const price = Number(item.price || item.selectedVariant?.price || 0)
+        const price = getItemPrice(item)
         const qty = Number(item.quantity || 1)
-        return sum + (price * qty)
+
+        return sum + price * qty
       }, 0)
     }
 
@@ -66,15 +65,16 @@ router.post("/create-payment/:id", async (req, res) => {
         0
     }
 
-    const shipping = Number(record.shippingCost || 0)
+    const shipping = Number(record.shippingCost || record.shipping || 0)
     const tax = Number(record.tax || subtotal * 0.0825)
     const total = subtotal + shipping + tax
 
-    console.log("💰 FINAL CALC:", {
+    console.log("💰 FINAL SQUARE CALC:", {
       subtotal,
       shipping,
       tax,
-      total
+      total,
+      items: record.items
     })
 
     if (!total || total <= 0) {
@@ -84,16 +84,15 @@ router.post("/create-payment/:id", async (req, res) => {
           subtotal,
           shipping,
           tax,
-          record
+          total
         }
       })
     }
 
-    /* ================= SQUARE PAYMENT ================= */
-    const amount = BigInt(Math.round(total * 100)) // 🔥 FINAL FIX
+    const amount = BigInt(Math.round(total * 100))
 
     const response = await client.checkout.paymentLinks.create({
-      idempotencyKey: `${id}-payment`,
+      idempotencyKey: `${id}-${Date.now()}`,
       order: {
         locationId: LOCATION_ID,
         note: `ID:${record._id}`,
@@ -102,7 +101,7 @@ router.post("/create-payment/:id", async (req, res) => {
             name: `${type.toUpperCase()} #${record._id}`,
             quantity: "1",
             basePriceMoney: {
-              amount, // ✅ BigInt now
+              amount,
               currency: "USD"
             }
           }
@@ -120,7 +119,6 @@ router.post("/create-payment/:id", async (req, res) => {
       throw new Error("No payment URL returned")
     }
 
-    /* ================= SAVE ================= */
     record.paymentUrl = paymentUrl
     await record.save()
 
@@ -129,9 +127,14 @@ router.post("/create-payment/:id", async (req, res) => {
     res.json({
       success: true,
       paymentUrl,
-      orderId: record._id
+      orderId: record._id,
+      totals: {
+        subtotal,
+        shipping,
+        tax,
+        total
+      }
     })
-
   } catch (err) {
     console.error("❌ SQUARE ERROR:", err)
     res.status(500).json({ message: err.message })
