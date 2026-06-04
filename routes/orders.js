@@ -54,7 +54,6 @@ router.get("/my-orders", async (req, res) => {
       success: true,
       data: orders
     })
-
   } catch (err) {
     console.error("❌ MY ORDERS ERROR:", err)
     res.status(500).json({ message: err.message })
@@ -176,7 +175,6 @@ router.get("/:id/packing-slip", async (req, res) => {
 
     res.setHeader("Content-Type", "text/html")
     res.send(html)
-
   } catch (err) {
     console.error("❌ PACKING SLIP ERROR:", err)
     res.status(500).send("Packing slip failed")
@@ -206,7 +204,6 @@ router.get("/:id/print-all", async (req, res) => {
       packingSlip: `${baseUrl}/api/orders/${order._id}/packing-slip`,
       invoice: `${baseUrl}/api/orders/${order._id}/invoice`
     })
-
   } catch (err) {
     console.error("❌ PRINT ALL ERROR:", err)
 
@@ -243,13 +240,12 @@ router.get("/:id/invoice", async (req, res) => {
     const fileName = `signavi-invoice-${order._id.toString().slice(-6)}.pdf`
 
     res.download(invoicePath, fileName)
-
   } catch (err) {
     console.error("❌ INVOICE DOWNLOAD ERROR:", err)
 
     res.status(500).json({
       success: false,
-      message: "Failed to download invoice",
+      message: "Failed to download orders CSV",
       error: err.message
     })
   }
@@ -290,7 +286,6 @@ router.post("/:id/send-invoice", async (req, res) => {
       success: true,
       message: "Invoice sent successfully"
     })
-
   } catch (err) {
     console.error("❌ SEND INVOICE ERROR:", err)
 
@@ -306,7 +301,6 @@ router.post("/:id/send-invoice", async (req, res) => {
 
 router.post("/custom", async (req, res) => {
   try {
-
     const {
       customerName,
       email,
@@ -342,83 +336,55 @@ router.post("/custom", async (req, res) => {
 
     const safeItems = items.map(item => ({
       name: item.name || "Custom Service",
-
       quantity: Number(item.quantity || 1),
-
       price: Number(item.price || 0),
-
       cost: Number(item.cost || 0),
-
       variant: item.variant || {}
     }))
 
     const subtotal = safeItems.reduce(
-      (sum, item) =>
-        sum + (item.price * item.quantity),
+      (sum, item) => sum + item.price * item.quantity,
       0
     )
 
     const tax = subtotal * 0.0825
 
+    const selectedShipping = Number(shipping || 0)
+
     const finalPrice =
       subtotal +
       tax +
-      Number(shipping || 0)
+      selectedShipping
 
     const order = await Order.create({
-
-      customerName:
-        String(customerName).trim(),
-
-      email:
-        String(email)
-          .trim()
-          .toLowerCase(),
-
-      phone:
-        String(phone || "").trim(),
+      customerName: String(customerName).trim(),
+      email: String(email).trim().toLowerCase(),
+      phone: String(phone || "").trim(),
 
       address: {
-
-        street:
-          address?.street || "",
-
-        city:
-          address?.city || "",
-
-        state:
-          address?.state || "",
-
-        zip:
-          address?.zip || "",
-
-        country:
-          address?.country || "US"
+        street: address?.street || "",
+        city: address?.city || "",
+        state: address?.state || "",
+        zip: address?.zip || "",
+        country: address?.country || "US"
       },
 
       items: safeItems,
-
       subtotal,
-
       tax,
 
-      shipping:
-        Number(shipping || 0),
+      shipping: selectedShipping,
+      shippingCost: selectedShipping,
+      shippingTotal: selectedShipping,
+      deliveryFee: selectedShipping,
 
       finalPrice,
 
-      paymentMethod:
-        paymentMethod || "",
-
-      notes:
-        notes || "",
-
+      paymentMethod: paymentMethod || "",
+      notes: notes || "",
       orderType: "custom",
-
       source: "admin",
-
-      status:
-        status || "payment_required"
+      status: status || "payment_required"
     })
 
     const io = req.app.get("io")
@@ -431,13 +397,8 @@ router.post("/custom", async (req, res) => {
       success: true,
       data: order
     })
-
   } catch (err) {
-
-    console.error(
-      "❌ CREATE CUSTOM ORDER ERROR:",
-      err
-    )
+    console.error("❌ CREATE CUSTOM ORDER ERROR:", err)
 
     res.status(500).json({
       success: false,
@@ -580,7 +541,6 @@ router.get("/:id/receipt", async (req, res) => {
 
     res.setHeader("Content-Type", "text/html")
     res.send(html)
-
   } catch (err) {
     console.error("❌ RECEIPT ERROR:", err)
 
@@ -618,7 +578,6 @@ router.get("/:id", async (req, res) => {
       success: true,
       data: order
     })
-
   } catch (err) {
     console.error("❌ GET ORDER BY ID ERROR:", err)
 
@@ -639,7 +598,20 @@ router.post("/", async (req, res) => {
       email,
       phone,
       address,
-      items
+      items,
+
+      shipping,
+      shippingCost,
+      shippingTotal,
+      deliveryFee,
+
+      shippingRate,
+      shippingRateId,
+      shippingProvider,
+      shippingService,
+
+      source,
+      status
     } = req.body
 
     if (!email) {
@@ -658,8 +630,14 @@ router.post("/", async (req, res) => {
 
     const safeItems = items.map(item => {
       const rawPrice =
+        item.finalPrice ??
+        item.salePrice ??
+        item.unitPrice ??
         item.price ??
         item.selectedVariant?.price ??
+        item.variant?.price ??
+        item.basePrice ??
+        item.listPrice ??
         0
 
       const price = Number(rawPrice)
@@ -677,21 +655,79 @@ router.post("/", async (req, res) => {
       }
 
       return {
+        productId:
+          item.productId ||
+          item._id ||
+          item.id ||
+          item.product?._id ||
+          null,
+
         name: item.name || "",
         quantity: Number(item.quantity || 1),
+
         price,
+        unitPrice: Number(item.unitPrice || price),
+        salePrice: Number(item.salePrice || price),
+        finalPrice: Number(item.finalPrice || price),
+
         cost: Number(item.cost || 0),
-        variant: item.variant || item.selectedVariant || {}
+
+        image:
+          item.image ||
+          item.imageUrl ||
+          item.selectedVariant?.image ||
+          "",
+
+        productType:
+          item.productType ||
+          "physical",
+
+        selectedVariant:
+          item.selectedVariant || null,
+
+        variant:
+          item.variant ||
+          item.selectedVariant ||
+          {}
       }
     })
 
     const subtotal = safeItems.reduce(
-      (sum, item) => sum + (item.price * item.quantity),
+      (sum, item) => sum + item.price * item.quantity,
       0
     )
 
+    const selectedShipping = Number(
+      shippingCost ||
+        shipping ||
+        shippingTotal ||
+        deliveryFee ||
+        shippingRate?.amount ||
+        0
+    )
+
     const tax = subtotal * 0.0825
-    const finalPrice = subtotal + tax
+
+    const finalPrice =
+      subtotal +
+      tax +
+      selectedShipping
+
+    console.log("🚚 SHIPPING RECEIVED:", {
+      shipping,
+      shippingCost,
+      shippingTotal,
+      deliveryFee,
+      shippingRate,
+      selectedShipping
+    })
+
+    console.log("🧾 ORDER CREATE TOTALS:", {
+      subtotal,
+      tax,
+      selectedShipping,
+      finalPrice
+    })
 
     const order = await Order.create({
       customerName: String(customerName || "Customer").trim(),
@@ -707,18 +743,60 @@ router.post("/", async (req, res) => {
       },
 
       items: safeItems,
+
       subtotal,
       tax,
+
+      shipping: selectedShipping,
+      shippingCost: selectedShipping,
+      shippingTotal: selectedShipping,
+      deliveryFee: selectedShipping,
+
+      shippingRate: shippingRate || null,
+
+      shippingRateId:
+        shippingRateId ||
+        shippingRate?.id ||
+        shippingRate?.object_id ||
+        shippingRate?.raw?.object_id ||
+        "",
+
+      shippingProvider:
+        shippingProvider ||
+        shippingRate?.provider ||
+        "",
+
+      shippingService:
+        shippingService ||
+        shippingRate?.servicelevel ||
+        shippingRate?.servicelevel?.name ||
+        "",
+
       finalPrice,
-      status: "payment_required",
-      source: "store"
+
+      status:
+        status || "payment_required",
+
+      source:
+        source || "store"
+    })
+
+    console.log("✅ CREATED ORDER SHIPPING:", {
+      orderId: order._id,
+      shipping: order.shipping,
+      shippingCost: order.shippingCost,
+      shippingTotal: order.shippingTotal,
+      deliveryFee: order.deliveryFee,
+      finalPrice: order.finalPrice
     })
 
     const io = req.app.get("io")
     if (io) io.emit("jobCreated", order)
 
-    res.json({ success: true, data: order })
-
+    res.json({
+      success: true,
+      data: order
+    })
   } catch (err) {
     console.error("❌ ORDER CREATE ERROR:", err)
 
@@ -734,6 +812,7 @@ router.post("/", async (req, res) => {
 router.patch("/:id", async (req, res) => {
   try {
     const { id } = req.params
+
     const {
       status,
       finalPrice,
@@ -741,7 +820,12 @@ router.patch("/:id", async (req, res) => {
       customerName,
       email,
       phone,
-      address
+      address,
+      shipping,
+      shippingCost,
+      shippingRate,
+      shippingProvider,
+      shippingService
     } = req.body
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -773,6 +857,40 @@ router.patch("/:id", async (req, res) => {
         zip: address?.zip || order.address?.zip || "",
         country: address?.country || order.address?.country || "US"
       }
+    }
+
+    const selectedShipping = Number(
+      shippingCost ||
+        shipping ||
+        shippingRate?.amount ||
+        order.shippingCost ||
+        order.shipping ||
+        0
+    )
+
+    if (selectedShipping >= 0) {
+      order.shipping = selectedShipping
+      order.shippingCost = selectedShipping
+      order.shippingTotal = selectedShipping
+      order.deliveryFee = selectedShipping
+    }
+
+    if (shippingRate !== undefined) {
+      order.shippingRate = shippingRate
+      order.shippingRateId =
+        shippingRate?.id ||
+        shippingRate?.object_id ||
+        shippingRate?.raw?.object_id ||
+        order.shippingRateId ||
+        ""
+    }
+
+    if (shippingProvider !== undefined) {
+      order.shippingProvider = shippingProvider
+    }
+
+    if (shippingService !== undefined) {
+      order.shippingService = shippingService
     }
 
     if (finalPrice !== undefined) {
@@ -835,7 +953,6 @@ router.patch("/:id", async (req, res) => {
     }
 
     res.json({ success: true, data: order })
-
   } catch (err) {
     console.error("❌ UPDATE ORDER ERROR:", err)
     res.status(500).json({ message: err.message })
@@ -849,7 +966,9 @@ router.patch("/:id/checkout", async (req, res) => {
     const order = await Order.findById(req.params.id)
     if (!order) return res.status(404).json({ message: "Order not found" })
 
-    const baseUrl = "https://signavi-backend.onrender.com"
+    const baseUrl =
+      process.env.SERVER_URL ||
+      "https://signavi-backend.onrender.com"
 
     const response = await fetch(
       `${baseUrl}/api/square/create-payment/${order._id}`,
@@ -880,7 +999,6 @@ router.patch("/:id/checkout", async (req, res) => {
       paymentUrl,
       orderId: order._id.toString()
     })
-
   } catch (err) {
     console.error("❌ CHECKOUT ERROR:", err)
     res.status(500).json({ message: err.message })
@@ -909,7 +1027,6 @@ router.post("/ship/:id", async (req, res) => {
     await sendOrderStatusEmail(order.email, "shipped", order)
 
     res.json({ success: true, data: order })
-
   } catch (err) {
     console.error("❌ SHIP ERROR:", err)
     res.status(500).json({ message: err.message })
