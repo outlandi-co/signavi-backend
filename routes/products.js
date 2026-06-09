@@ -113,10 +113,19 @@ const normalizeStorefront = (value = "") => {
 const getStorefrontFromRequest = (req) => {
   const origin = String(req.headers.origin || "").toLowerCase()
   const referer = String(req.headers.referer || "").toLowerCase()
+  const host = String(req.headers.host || "").toLowerCase()
 
-  const source = `${origin} ${referer}`
+  const source = `${origin} ${referer} ${host}`
 
-  // Check studio first because it includes "signavi" in the name
+  console.log("🏪 STOREFRONT DETECT:", {
+    origin,
+    referer,
+    host,
+    bodyStorefront: req.body?.storefront,
+    queryStorefront: req.query?.storefront
+  })
+
+  // Studio must be checked first because it includes "signavi"
   if (source.includes("signavistudio.store")) {
     return "signavistudio"
   }
@@ -126,10 +135,16 @@ const getStorefrontFromRequest = (req) => {
   }
 
   const fromBody = normalizeStorefront(req.body?.storefront)
-  if (fromBody) return fromBody
+
+  if (fromBody && fromBody !== "both") {
+    return fromBody
+  }
 
   const fromQuery = normalizeStorefront(req.query?.storefront)
-  if (fromQuery) return fromQuery
+
+  if (fromQuery && fromQuery !== "both") {
+    return fromQuery
+  }
 
   return "signavi"
 }
@@ -399,14 +414,6 @@ router.post("/", upload.array("images", 20), async (req, res) => {
             const color = normalizeColorName(variant.color)
             const size = normalizeSize(variant.size)
 
-            if (!size) {
-              console.warn("⚠️ INVALID VARIANT SIZE:", {
-                index,
-                rawSize: variant.size,
-                variant
-              })
-            }
-
             const variantPrice = toNumber(
               variant.price || variant.basePrice || variant.listPrice || price,
               price
@@ -439,13 +446,6 @@ router.post("/", upload.array("images", 20), async (req, res) => {
           })
           .filter((variant) => variant.color && variant.size)
       : []
-
-    if (productType === "physical" && !variants.length) {
-      return res.status(400).json({
-        success: false,
-        message: "At least one valid variant is required"
-      })
-    }
 
     if (productType === "digital" && !finalDigitalProduct.previewImage) {
       return res.status(400).json({
@@ -551,24 +551,9 @@ router.get("/", async (req, res) => {
     if (search) {
       andFilters.push({
         $or: [
-          {
-            name: {
-              $regex: search,
-              $options: "i"
-            }
-          },
-          {
-            description: {
-              $regex: search,
-              $options: "i"
-            }
-          },
-          {
-            category: {
-              $regex: search,
-              $options: "i"
-            }
-          }
+          { name: { $regex: search, $options: "i" } },
+          { description: { $regex: search, $options: "i" } },
+          { category: { $regex: search, $options: "i" } }
         ]
       })
     }
@@ -666,21 +651,26 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
     })
 
     if (req.body.storefront !== undefined) {
-  const storefront = normalizeStorefront(req.body.storefront)
+      const storefront = normalizeStorefront(req.body.storefront)
 
-  if (storefront) {
-    updates.storefront = storefront
-    updates.salesChannel = getSalesChannelFromStorefront(storefront)
-  }
-}
+      if (storefront && storefront !== "both") {
+        updates.storefront = storefront
+        updates.salesChannel = getSalesChannelFromStorefront(storefront)
+      }
 
-if (req.body.salesChannel !== undefined) {
-  updates.salesChannel = String(req.body.salesChannel || "").trim()
-}
+      if (storefront === "both" && req.body.allowBoth === "true") {
+        updates.storefront = "both"
+        updates.salesChannel = "admin_custom"
+      }
+    }
 
-if (req.body.storefrontVisible !== undefined) {
-  updates.storefrontVisible = toBoolean(req.body.storefrontVisible, true)
-}
+    if (req.body.salesChannel !== undefined) {
+      updates.salesChannel = String(req.body.salesChannel || "").trim()
+    }
+
+    if (req.body.storefrontVisible !== undefined) {
+      updates.storefrontVisible = toBoolean(req.body.storefrontVisible, true)
+    }
 
     if (req.body.sku !== undefined) {
       const nextSku = String(req.body.sku || "").trim()
@@ -769,17 +759,9 @@ if (req.body.storefrontVisible !== undefined) {
 
       updates.variants = Array.isArray(rawVariants)
         ? rawVariants
-            .map((variant, index) => {
+            .map((variant) => {
               const color = normalizeColorName(variant.color)
               const size = normalizeSize(variant.size)
-
-              if (!size) {
-                console.warn("⚠️ INVALID UPDATE VARIANT SIZE:", {
-                  index,
-                  rawSize: variant.size,
-                  variant
-                })
-              }
 
               const variantPrice = toNumber(
                 variant.price ||
@@ -824,8 +806,8 @@ if (req.body.storefrontVisible !== undefined) {
 
     console.log("🔥 PRODUCT UPDATE:", {
       id: req.params.id,
-      storefront: updates.storefront,
-      salesChannel: updates.salesChannel,
+      previousStorefront: product.storefront,
+      newStorefront: updates.storefront || product.storefront,
       updates
     })
 
