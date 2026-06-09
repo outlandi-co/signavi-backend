@@ -101,11 +101,9 @@ const normalizeStorefront = (value = "") => {
   const clean = String(value || "")
     .trim()
     .toLowerCase()
-    .replace(/_/g, "")
 
-  if (clean === "signavistudio") return "signavistudio"
-  if (clean === "signavi") return "signavi"
-  if (clean === "both") return "both"
+  if (clean === "signavi_store") return "signavi_store"
+  if (clean === "signavi_studio") return "signavi_studio"
 
   return ""
 }
@@ -125,35 +123,29 @@ const getStorefrontFromRequest = (req) => {
     queryStorefront: req.query?.storefront
   })
 
+  const fromBody = normalizeStorefront(req.body?.storefront)
+  if (fromBody) return fromBody
+
+  const fromQuery = normalizeStorefront(req.query?.storefront)
+  if (fromQuery) return fromQuery
+
   // Studio must be checked first because it includes "signavi"
   if (source.includes("signavistudio.store")) {
-    return "signavistudio"
+    return "signavi_studio"
   }
 
   if (source.includes("signavi.store")) {
-    return "signavi"
+    return "signavi_store"
   }
 
-  const fromBody = normalizeStorefront(req.body?.storefront)
-
-  if (fromBody && fromBody !== "both") {
-    return fromBody
-  }
-
-  const fromQuery = normalizeStorefront(req.query?.storefront)
-
-  if (fromQuery && fromQuery !== "both") {
-    return fromQuery
-  }
-
-  return "signavi"
+  return "signavi_store"
 }
 
 const getSalesChannelFromStorefront = (storefront) => {
-  if (storefront === "signavistudio") return "signavistudio_store"
-  if (storefront === "signavi") return "signavi_store"
+  if (storefront === "signavi_studio") return "signavi_studio"
+  if (storefront === "signavi_store") return "signavi_store"
 
-  return "admin_custom"
+  return "signavi_store"
 }
 
 const normalizeSize = (s) => {
@@ -410,7 +402,7 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
     const variants = Array.isArray(rawVariants)
       ? rawVariants
-          .map((variant, index) => {
+          .map((variant) => {
             const color = normalizeColorName(variant.color)
             const size = normalizeSize(variant.size)
 
@@ -537,10 +529,7 @@ router.get("/", async (req, res) => {
 
     if (requestedStorefront) {
       andFilters.push({
-        $or: [
-          { storefront: requestedStorefront },
-          { storefront: "both" }
-        ]
+        storefront: requestedStorefront
       })
     }
 
@@ -653,19 +642,19 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
     if (req.body.storefront !== undefined) {
       const storefront = normalizeStorefront(req.body.storefront)
 
-      if (storefront && storefront !== "both") {
+      if (storefront) {
         updates.storefront = storefront
         updates.salesChannel = getSalesChannelFromStorefront(storefront)
-      }
-
-      if (storefront === "both" && req.body.allowBoth === "true") {
-        updates.storefront = "both"
-        updates.salesChannel = "admin_custom"
       }
     }
 
     if (req.body.salesChannel !== undefined) {
-      updates.salesChannel = String(req.body.salesChannel || "").trim()
+      const salesChannel = normalizeStorefront(req.body.salesChannel)
+
+      if (salesChannel) {
+        updates.salesChannel = salesChannel
+        updates.storefront = salesChannel
+      }
     }
 
     if (req.body.storefrontVisible !== undefined) {

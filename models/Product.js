@@ -298,8 +298,9 @@ const productSchema = new mongoose.Schema(
 
     storefront: {
       type: String,
-      enum: ["signavi", "signavistudio"],
-      default: "signavi",
+      enum: ["signavi_store", "signavi_studio"],
+      required: true,
+      default: "signavi_store",
       index: true
     },
 
@@ -334,11 +335,11 @@ productSchema.pre("validate", function cleanAndSyncProduct() {
   }
 
   if (this.salesChannel === "signavi_studio") {
-    this.storefront = "signavistudio"
+    this.storefront = "signavi_studio"
   }
 
   if (this.salesChannel === "signavi_store") {
-    this.storefront = "signavi"
+    this.storefront = "signavi_store"
   }
 })
 
