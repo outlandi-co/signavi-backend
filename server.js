@@ -54,6 +54,9 @@ import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
 
 import notificationRoutes from "./routes/notifications.js"
 
+import supplierRoutes from "./routes/supplierRoutes.js"
+import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js"
+
 /* ================= PATH SETUP ================= */
 
 const __filename = fileURLToPath(import.meta.url)
@@ -356,6 +359,12 @@ app.get("/api/export-taxes", async (req, res) => {
 
 app.use("/api/materials", materialRoutes)
 console.log("📦 MATERIAL CATALOG ROUTE MOUNTED")
+
+app.use("/api/suppliers", supplierRoutes)
+console.log("🏢 SUPPLIER ROUTE MOUNTED")
+
+app.use("/api/purchase-orders", purchaseOrderRoutes)
+console.log("📋 PURCHASE ORDER ROUTE MOUNTED")
 
 app.use("/api/products", productRoutes)
 

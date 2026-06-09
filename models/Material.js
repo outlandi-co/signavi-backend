@@ -18,6 +18,20 @@ const materialSchema = new mongoose.Schema(
     productName: { type: String, required: true },
     fullName: { type: String, required: true },
 
+    /* ================= MATERIAL IMAGE ================= */
+
+    image: {
+      url: {
+        type: String,
+        default: ""
+      },
+
+      alt: {
+        type: String,
+        default: ""
+      }
+    },
+
     category: { type: String, required: true },
     materialType: { type: String },
     unit: { type: String, default: "yard" },
