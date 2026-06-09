@@ -298,14 +298,15 @@ const productSchema = new mongoose.Schema(
 
     storefront: {
       type: String,
-      enum: ["signavi", "signavistudio", "both"],
+      enum: ["signavi", "signavistudio"],
       default: "signavi",
       index: true
     },
 
     salesChannel: {
       type: String,
-      enum: ["signavi_store", "signavistudio_store", "admin_custom"],
+      enum: ["signavi_store", "signavi_studio"],
+      required: true,
       default: "signavi_store",
       index: true
     },
@@ -319,9 +320,9 @@ const productSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
-/* ================= CLEAN EMPTY SKU BEFORE VALIDATION ================= */
+/* ================= CLEAN EMPTY SKU + SYNC STOREFRONT ================= */
 
-productSchema.pre("validate", function cleanSku() {
+productSchema.pre("validate", function cleanAndSyncProduct() {
   if (this.sku !== undefined && this.sku !== null) {
     const clean = String(this.sku).trim()
 
@@ -330,6 +331,14 @@ productSchema.pre("validate", function cleanSku() {
     } else {
       this.sku = clean
     }
+  }
+
+  if (this.salesChannel === "signavi_studio") {
+    this.storefront = "signavistudio"
+  }
+
+  if (this.salesChannel === "signavi_store") {
+    this.storefront = "signavi"
   }
 })
 
