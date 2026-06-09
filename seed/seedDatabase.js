@@ -1,27 +1,28 @@
-import suppliers from "./suppliers.js"
+import "dotenv/config"
+import mongoose from "mongoose"
+
+import Material from "../models/Material.js"
 import materialCatalog from "./materialCatalog.js"
 
-console.log("\n📦 SIGNAVI MATERIAL CATALOG\n")
+const seedDatabase = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI)
 
-console.log(`Suppliers Loaded: ${suppliers.length}`)
-console.log(`Materials Loaded: ${materialCatalog.length}`)
+    console.log("✅ Mongo connected")
 
-materialCatalog.forEach((material) => {
-  console.log(
-    `\n✅ ${material.fullName}`
-  )
+    await Material.deleteMany({})
+    console.log("🧹 Old materials cleared")
 
-  console.log(
-    `Colors: ${material.colors.length}`
-  )
+    await Material.insertMany(materialCatalog)
+    console.log(`📦 Materials inserted: ${materialCatalog.length}`)
 
-  console.log(
-    `Price: $${material.price}`
-  )
+    console.log("🎉 Material catalog seeded successfully")
 
-  console.log(
-    `Supplier: ${material.source.vendor}`
-  )
-})
+    process.exit(0)
+  } catch (error) {
+    console.error("❌ SEED ERROR:", error)
+    process.exit(1)
+  }
+}
 
-console.log("\n🎉 Catalog Ready For Database Import\n")
+seedDatabase()
