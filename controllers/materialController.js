@@ -1,5 +1,26 @@
 import Material from "../models/Material.js"
 
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return ""
+
+  const stringValue = String(value).replace(/"/g, '""')
+  return `"${stringValue}"`
+}
+
+const sendCSV = (res, filename, rows) => {
+  const csv = rows
+    .map((row) => row.map(csvEscape).join(","))
+    .join("\n")
+
+  res.setHeader("Content-Type", "text/csv")
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${filename}"`
+  )
+
+  res.send(csv)
+}
+
 export const getMaterials = async (req, res) => {
   try {
     const materials = await Material.find().sort({ brand: 1, productName: 1 })
@@ -90,5 +111,119 @@ export const deleteMaterial = async (req, res) => {
   } catch (error) {
     console.error("DELETE MATERIAL ERROR:", error)
     res.status(500).json({ message: "Failed to delete material" })
+  }
+}
+
+export const exportMaterialsCSV = async (req, res) => {
+  try {
+    const materials = await Material.find().sort({ brand: 1, productName: 1 })
+
+    const rows = [
+      [
+        "id",
+        "brand",
+        "productName",
+        "fullName",
+        "category",
+        "materialType",
+        "unit",
+        "skuPrefix",
+        "price",
+        "regularPrice",
+        "currency",
+        "listedWidth",
+        "actualWidth",
+        "lengthPerUnit",
+        "thickness",
+        "composition",
+        "backing",
+        "finish",
+        "blade",
+        "certification",
+        "supplierId",
+        "vendor",
+        "sourceUrl",
+        "lastChecked",
+        "colorSku",
+        "colorName",
+        "hex",
+        "stock",
+        "careInstructions",
+        "applicationInstructions"
+      ]
+    ]
+
+    materials.forEach((material) => {
+      const colors = material.colors?.length
+        ? material.colors
+        : [{ sku: "", name: "", hex: "", stock: "" }]
+
+      colors.forEach((color) => {
+        rows.push([
+          material.id,
+          material.brand,
+          material.productName,
+          material.fullName,
+          material.category,
+          material.materialType,
+          material.unit,
+          material.skuPrefix,
+          material.price,
+          material.regularPrice,
+          material.currency,
+          material.dimensions?.listedWidth || "",
+          material.dimensions?.actualWidth || "",
+          material.dimensions?.lengthPerUnit || "",
+          material.dimensions?.thickness || "",
+          material.specs?.composition || "",
+          material.specs?.backing || "",
+          material.specs?.finish || "",
+          material.specs?.blade || "",
+          material.specs?.certification || "",
+          material.source?.supplierId || "",
+          material.source?.vendor || "",
+          material.source?.url || "",
+          material.source?.lastChecked || "",
+          color.sku || "",
+          color.name || "",
+          color.hex || "",
+          color.stock ?? "",
+          (material.careInstructions || []).join(" | "),
+          (material.applicationInstructions || []).join(" | ")
+        ])
+      })
+    })
+
+    sendCSV(res, "signavi-material-catalog.csv", rows)
+  } catch (error) {
+    console.error("EXPORT MATERIALS CSV ERROR:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to export materials CSV"
+    })
+  }
+}
+
+export const importMaterialsCSV = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "CSV file is required"
+      })
+    }
+
+    res.status(501).json({
+      success: false,
+      message: "CSV import route is connected, but parsing is not implemented yet"
+    })
+  } catch (error) {
+    console.error("IMPORT MATERIALS CSV ERROR:", error)
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to import materials CSV"
+    })
   }
 }
