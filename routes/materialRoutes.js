@@ -15,30 +15,62 @@ import upload from "../middleware/upload.js"
 
 const router = express.Router()
 
-/* ================= MATERIAL CATALOG ================= */
+/* =========================================================
+   MATERIAL CATALOG ROUTES
+========================================================= */
 
-router.get("/", getMaterials)
+router.get("/", (req, res, next) => {
+  console.log("📦 GET /api/materials")
+  next()
+}, getMaterials)
 
-router.get("/search", searchMaterials)
+router.get("/search", (req, res, next) => {
+  console.log("🔍 GET /api/materials/search")
+  next()
+}, searchMaterials)
 
-router.get("/export", exportMaterialsCSV)
+router.get("/export", (req, res, next) => {
+  console.log("⬇️ GET /api/materials/export")
+  next()
+}, exportMaterialsCSV)
 
 router.post(
   "/import",
   upload.single("file"),
+  (req, res, next) => {
+    console.log("⬆️ POST /api/materials/import")
+    next()
+  },
   importMaterialsCSV
 )
 
-/* ================= MATERIAL DETAILS ================= */
+/* =========================================================
+   MATERIAL DETAILS
+   KEEP THESE BELOW SEARCH / EXPORT ROUTES
+========================================================= */
 
-router.get("/:id", getMaterialById)
+router.get("/:id", (req, res, next) => {
+  console.log(`📄 GET MATERIAL: ${req.params.id}`)
+  next()
+}, getMaterialById)
 
-/* ================= MATERIAL MANAGEMENT ================= */
+/* =========================================================
+   MATERIAL MANAGEMENT
+========================================================= */
 
-router.post("/", createMaterial)
+router.post("/", (req, res, next) => {
+  console.log("➕ CREATE MATERIAL")
+  next()
+}, createMaterial)
 
-router.put("/:id", updateMaterial)
+router.put("/:id", (req, res, next) => {
+  console.log(`✏️ UPDATE MATERIAL: ${req.params.id}`)
+  next()
+}, updateMaterial)
 
-router.delete("/:id", deleteMaterial)
+router.delete("/:id", (req, res, next) => {
+  console.log(`🗑️ DELETE MATERIAL: ${req.params.id}`)
+  next()
+}, deleteMaterial)
 
 export default router
