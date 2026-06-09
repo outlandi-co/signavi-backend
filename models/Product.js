@@ -299,18 +299,14 @@ const productSchema = new mongoose.Schema(
     storefront: {
       type: String,
       enum: ["signavi", "signavistudio", "both"],
-      default: "both",
+      default: "signavi",
       index: true
     },
 
     salesChannel: {
       type: String,
-      enum: [
-        "signavi_store",
-        "signavi_studio",
-        "admin_custom"
-      ],
-      default: "signavi_studio",
+      enum: ["signavi_store", "signavistudio_store", "admin_custom"],
+      default: "signavi_store",
       index: true
     },
 

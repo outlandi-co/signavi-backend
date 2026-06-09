@@ -97,6 +97,50 @@ const generateSku = (name = "PRODUCT") => {
   return `${cleanName || "PRODUCT"}-${Date.now()}-${random}`
 }
 
+const normalizeStorefront = (value = "") => {
+  const clean = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, "")
+
+  if (clean === "signavistudio") return "signavistudio"
+  if (clean === "signavi") return "signavi"
+  if (clean === "both") return "both"
+
+  return ""
+}
+
+const getStorefrontFromRequest = (req) => {
+  const origin = String(req.headers.origin || "").toLowerCase()
+  const referer = String(req.headers.referer || "").toLowerCase()
+
+  const source = `${origin} ${referer}`
+
+  // Check studio first because it includes "signavi" in the name
+  if (source.includes("signavistudio.store")) {
+    return "signavistudio"
+  }
+
+  if (source.includes("signavi.store")) {
+    return "signavi"
+  }
+
+  const fromBody = normalizeStorefront(req.body?.storefront)
+  if (fromBody) return fromBody
+
+  const fromQuery = normalizeStorefront(req.query?.storefront)
+  if (fromQuery) return fromQuery
+
+  return "signavi"
+}
+
+const getSalesChannelFromStorefront = (storefront) => {
+  if (storefront === "signavistudio") return "signavistudio_store"
+  if (storefront === "signavi") return "signavi_store"
+
+  return "admin_custom"
+}
+
 const normalizeSize = (s) => {
   if (!s) return null
 
@@ -130,15 +174,15 @@ const normalizeSize = (s) => {
     "12 INCH": "12 inch",
     "12 IN": "12 inch",
     "12IN": "12 inch",
-    "12\"": "12 inch",
+    '12"': "12 inch",
     "18 INCH": "18 inch",
     "18 IN": "18 inch",
     "18IN": "18 inch",
-    "18\"": "18 inch",
+    '18"': "18 inch",
     "24 INCH": "24 inch",
     "24 IN": "24 inch",
     "24IN": "24 inch",
-    "24\"": "24 inch",
+    '24"': "24 inch",
     "11 OZ": "11 oz",
     "11OZ": "11 oz",
     "15 OZ": "15 oz",
@@ -266,6 +310,9 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       })
     }
 
+    const storefront = getStorefrontFromRequest(req)
+    const salesChannel = getSalesChannelFromStorefront(storefront)
+
     const productType = normalizeProductType(req.body.productType)
 
     const digitalProduct = normalizeDigitalProduct(
@@ -300,6 +347,8 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       name,
       category,
       productType,
+      storefront,
+      salesChannel,
       price,
       basePrice,
       listPrice,
@@ -416,6 +465,10 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       description: description || "",
       category: String(category).trim(),
 
+      storefront,
+      salesChannel,
+      storefrontVisible: toBoolean(req.body.storefrontVisible, true),
+
       productType,
       digitalProduct: finalDigitalProduct,
 
@@ -446,7 +499,11 @@ router.post("/", upload.array("images", 20), async (req, res) => {
       originalPrice: discountUpdates.originalPrice || 0
     })
 
-    console.log("✅ PRODUCT CREATED:", product.name)
+    console.log("✅ PRODUCT CREATED:", {
+      name: product.name,
+      storefront: product.storefront,
+      salesChannel: product.salesChannel
+    })
 
     return res.status(201).json({
       success: true,
@@ -467,7 +524,9 @@ router.post("/", upload.array("images", 20), async (req, res) => {
 
 router.get("/", async (req, res) => {
   try {
-    const { storefrontVisible, storefront, category, search } = req.query
+    const { storefrontVisible, category, search } = req.query
+
+    const requestedStorefront = getStorefrontFromRequest(req)
 
     const filter = {}
     const andFilters = []
@@ -476,9 +535,12 @@ router.get("/", async (req, res) => {
       filter.storefrontVisible = true
     }
 
-    if (storefront) {
+    if (requestedStorefront) {
       andFilters.push({
-        $or: [{ storefront }, { storefront: "both" }]
+        $or: [
+          { storefront: requestedStorefront },
+          { storefront: "both" }
+        ]
       })
     }
 
@@ -515,11 +577,18 @@ router.get("/", async (req, res) => {
       filter.$and = andFilters
     }
 
+    console.log("🛒 PRODUCT FETCH FILTER:", {
+      origin: req.headers.origin || "",
+      requestedStorefront,
+      filter
+    })
+
     const products = await Product.find(filter).sort({ createdAt: -1 })
 
     return res.json({
       success: true,
       count: products.length,
+      storefront: requestedStorefront,
       data: products
     })
   } catch (err) {
@@ -595,6 +664,14 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
 
       colorMap[normalizedColor].push(`/uploads/${file.filename}`)
     })
+
+    const storefront = getStorefrontFromRequest(req)
+    updates.storefront = storefront
+    updates.salesChannel = getSalesChannelFromStorefront(storefront)
+
+    if (req.body.storefrontVisible !== undefined) {
+      updates.storefrontVisible = toBoolean(req.body.storefrontVisible, true)
+    }
 
     if (req.body.sku !== undefined) {
       const nextSku = String(req.body.sku || "").trim()
@@ -736,7 +813,12 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
 
     Object.assign(updates, discountUpdates)
 
-    console.log("🔥 PRODUCT UPDATE:", updates)
+    console.log("🔥 PRODUCT UPDATE:", {
+      id: req.params.id,
+      storefront: updates.storefront,
+      salesChannel: updates.salesChannel,
+      updates
+    })
 
     const updated = await Product.findByIdAndUpdate(req.params.id, updates, {
       new: true,
