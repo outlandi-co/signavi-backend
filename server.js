@@ -17,6 +17,8 @@ import Order from "./models/Order.js"
 
 /* ================= ROUTES ================= */
 
+import materialRoutes from "./routes/materialRoutes.js"
+
 import productRoutes from "./routes/products.js"
 import orderRoutes from "./routes/orders.js"
 import invoiceRoutes from "./routes/invoiceRoutes.js"
@@ -324,6 +326,36 @@ app.get("/api/export-taxes", async (req, res) => {
 })
 
 /* ================= ROUTES ================= */
+
+/* ================= MATERIAL CATALOG ================= */
+/*
+|--------------------------------------------------------------------------
+| Shared Material Catalog System
+|--------------------------------------------------------------------------
+|
+| Used By:
+| - signavistudio.store
+| - signavi.store
+|
+| Includes:
+| - HTV Materials
+| - Adhesive Vinyl
+| - DTF Supplies
+| - Screen Print Supplies
+| - Laser Materials
+| - Supplier References
+| - Color Libraries
+| - Inventory Tracking
+| - Price Monitoring
+|
+| Current Catalog:
+| - Siser EasyWeed
+|
+|--------------------------------------------------------------------------
+*/
+
+app.use("/api/materials", materialRoutes)
+console.log("📦 MATERIAL CATALOG ROUTE MOUNTED")
 
 app.use("/api/products", productRoutes)
 
