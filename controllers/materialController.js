@@ -1,3 +1,6 @@
+import { Readable } from "stream"
+import csvParser from "csv-parser"
+
 import Material from "../models/Material.js"
 
 const csvEscape = (value) => {
@@ -19,6 +22,112 @@ const sendCSV = (res, filename, rows) => {
   )
 
   res.send(csv)
+}
+
+const toNumber = (value, fallback = 0) => {
+  if (value === null || value === undefined || value === "") return fallback
+
+  const number = Number(value)
+
+  return Number.isNaN(number) ? fallback : number
+}
+
+const splitInstructions = (value) => {
+  if (!value) return []
+
+  return String(value)
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+const parseCSVBuffer = (buffer) => {
+  return new Promise((resolve, reject) => {
+    const rows = []
+
+    Readable.from(buffer)
+      .pipe(csvParser())
+      .on("data", (row) => {
+        rows.push(row)
+      })
+      .on("end", () => {
+        resolve(rows)
+      })
+      .on("error", reject)
+  })
+}
+
+const buildMaterialFromRow = (row) => {
+  return {
+    id: row.id,
+    brand: row.brand || "",
+    productName: row.productName || "",
+    fullName: row.fullName || row.productName || "",
+
+    category: row.category || "",
+    materialType: row.materialType || "",
+    unit: row.unit || "yard",
+    skuPrefix: row.skuPrefix || "",
+
+    price: toNumber(row.price),
+    regularPrice: toNumber(row.regularPrice),
+    currency: row.currency || "USD",
+
+    dimensions: {
+      listedWidth: row.listedWidth || "",
+      actualWidth: row.actualWidth || "",
+      lengthPerUnit: row.lengthPerUnit || "",
+      thickness: row.thickness || ""
+    },
+
+    specs: {
+      composition: row.composition || "",
+      backing: row.backing || "",
+      finish: row.finish || "",
+      blade: row.blade || "",
+      certification: row.certification || ""
+    },
+
+    source: {
+      supplierId: row.supplierId || "",
+      vendor: row.vendor || "",
+      url: row.sourceUrl || "",
+      lastChecked: row.lastChecked || new Date().toISOString().slice(0, 10)
+    },
+
+    careInstructions: splitInstructions(row.careInstructions),
+
+    applicationInstructions: splitInstructions(row.applicationInstructions),
+
+    priceWatch: {
+      enabled: true,
+      currentPrice: toNumber(row.price),
+      previousPrice: toNumber(row.regularPrice || row.price),
+      alertOnChange: true,
+      lastChecked: null
+    },
+
+    inventory: {
+      trackInventory: true,
+      quantityOnHand: 0,
+      reorderPoint: 5
+    },
+
+    colors: [],
+
+    active: true
+  }
+}
+
+const buildColorFromRow = (row) => {
+  if (!row.colorSku && !row.colorName && !row.hex) return null
+
+  return {
+    sku: row.colorSku || "",
+    name: row.colorName || "",
+    hex: row.hex || "#000000",
+    stock: toNumber(row.stock)
+  }
 }
 
 export const getMaterials = async (req, res) => {
@@ -214,16 +323,73 @@ export const importMaterialsCSV = async (req, res) => {
       })
     }
 
-    res.status(501).json({
-      success: false,
-      message: "CSV import route is connected, but parsing is not implemented yet"
+    const rows = await parseCSVBuffer(req.file.buffer)
+
+    if (!rows.length) {
+      return res.status(400).json({
+        success: false,
+        message: "CSV file is empty"
+      })
+    }
+
+    const groupedMaterials = new Map()
+
+    rows.forEach((row) => {
+      if (!row.id) return
+
+      if (!groupedMaterials.has(row.id)) {
+        groupedMaterials.set(row.id, buildMaterialFromRow(row))
+      }
+
+      const material = groupedMaterials.get(row.id)
+      const color = buildColorFromRow(row)
+
+      if (color) {
+        const exists = material.colors.some(
+          (item) => item.sku === color.sku
+        )
+
+        if (!exists) {
+          material.colors.push(color)
+        }
+      }
+    })
+
+    let created = 0
+    let updated = 0
+
+    for (const material of groupedMaterials.values()) {
+      const existing = await Material.findOne({ id: material.id })
+
+      if (existing) {
+        await Material.findOneAndUpdate(
+          { id: material.id },
+          material,
+          { new: true, runValidators: true }
+        )
+
+        updated += 1
+      } else {
+        await Material.create(material)
+        created += 1
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Materials CSV imported successfully",
+      rowsProcessed: rows.length,
+      materialsProcessed: groupedMaterials.size,
+      created,
+      updated
     })
   } catch (error) {
     console.error("IMPORT MATERIALS CSV ERROR:", error)
 
     res.status(500).json({
       success: false,
-      message: "Failed to import materials CSV"
+      message: "Failed to import materials CSV",
+      error: error.message
     })
   }
 }
