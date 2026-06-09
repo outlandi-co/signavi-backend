@@ -83,26 +83,42 @@ console.log("\n🔥 SERVER READY 🚀\n")
 
 const allowedOrigins = [
   "https://signavistudio.store",
+  "https://www.signavistudio.store",
+
   "https://signavi.store",
+  "https://www.signavi.store",
+
   "http://localhost:5173",
-  "http://localhost:5174"
+  "http://localhost:5174",
+  "http://localhost:3000"
 ]
 
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true)
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true)
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true)
-      }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true)
+    }
 
-      console.warn("❌ CORS BLOCKED:", origin)
-      return callback(new Error("Not allowed by CORS"))
-    },
-    credentials: true
-  })
-)
+    console.warn("❌ CORS BLOCKED:", origin)
+    return callback(new Error(`Not allowed by CORS: ${origin}`))
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204
+}
+
+app.use(cors(corsOptions))
+
+/* ================= REQUEST DEBUG ================= */
+
+app.use((req, res, next) => {
+  console.log("🌐 ORIGIN:", req.headers.origin || "No origin")
+  console.log("➡️ REQUEST:", req.method, req.originalUrl)
+  next()
+})
 
 /* ================= SQUARE WEBHOOK RAW BODY ================= */
 
@@ -331,31 +347,6 @@ app.get("/api/export-taxes", async (req, res) => {
 /* ================= ROUTES ================= */
 
 /* ================= MATERIAL CATALOG ================= */
-/*
-|--------------------------------------------------------------------------
-| Shared Material Catalog System
-|--------------------------------------------------------------------------
-|
-| Used By:
-| - signavistudio.store
-| - signavi.store
-|
-| Includes:
-| - HTV Materials
-| - Adhesive Vinyl
-| - DTF Supplies
-| - Screen Print Supplies
-| - Laser Materials
-| - Supplier References
-| - Color Libraries
-| - Inventory Tracking
-| - Price Monitoring
-|
-| Current Catalog:
-| - Siser EasyWeed
-|
-|--------------------------------------------------------------------------
-*/
 
 app.use("/api/materials", materialRoutes)
 console.log("📦 MATERIAL CATALOG ROUTE MOUNTED")
