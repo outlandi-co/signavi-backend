@@ -129,7 +129,6 @@ const getStorefrontFromRequest = (req) => {
   const fromQuery = normalizeStorefront(req.query?.storefront)
   if (fromQuery) return fromQuery
 
-  // Studio must be checked first because it includes "signavi"
   if (source.includes("signavistudio.store")) {
     return "signavi_studio"
   }
@@ -296,6 +295,61 @@ const getDiscountUpdates = (body = {}) => {
 
   return updates
 }
+
+/* ================= DEBUG ROUTES ================= */
+
+router.get("/debug/counts", async (req, res) => {
+  try {
+    const all = await Product.countDocuments()
+
+    const studio = await Product.countDocuments({
+      storefront: "signavi_studio"
+    })
+
+    const store = await Product.countDocuments({
+      storefront: "signavi_store"
+    })
+
+    const latest = await Product.find()
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .select("name storefront salesChannel storefrontVisible active createdAt")
+
+    return res.json({
+      success: true,
+      collection: Product.collection.name,
+      all,
+      studio,
+      store,
+      latest
+    })
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    })
+  }
+})
+
+router.get("/debug/all", async (req, res) => {
+  try {
+    const products = await Product.find({})
+      .select("name storefront salesChannel storefrontVisible active createdAt")
+      .sort({ createdAt: -1 })
+
+    return res.json({
+      success: true,
+      collection: Product.collection.name,
+      count: products.length,
+      data: products
+    })
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      error: err.message
+    })
+  }
+})
 
 /* ================= CREATE PRODUCT ================= */
 
@@ -556,6 +610,24 @@ router.get("/", async (req, res) => {
       requestedStorefront,
       filter
     })
+
+    console.log("🔍 FINAL PRODUCT FILTER")
+    console.log(JSON.stringify(filter, null, 2))
+
+    const matchingProducts = await Product.find({
+      storefront: requestedStorefront
+    }).select("name storefront salesChannel storefrontVisible active")
+
+    console.log(
+      "📦 MATCHING PRODUCTS:",
+      matchingProducts.map((product) => ({
+        name: product.name,
+        storefront: product.storefront,
+        salesChannel: product.salesChannel,
+        storefrontVisible: product.storefrontVisible,
+        active: product.active
+      }))
+    )
 
     const products = await Product.find(filter).sort({ createdAt: -1 })
 
