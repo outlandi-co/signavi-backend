@@ -665,13 +665,22 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
       colorMap[normalizedColor].push(`/uploads/${file.filename}`)
     })
 
-    const storefront = getStorefrontFromRequest(req)
+    if (req.body.storefront !== undefined) {
+  const storefront = normalizeStorefront(req.body.storefront)
+
+  if (storefront) {
     updates.storefront = storefront
     updates.salesChannel = getSalesChannelFromStorefront(storefront)
+  }
+}
 
-    if (req.body.storefrontVisible !== undefined) {
-      updates.storefrontVisible = toBoolean(req.body.storefrontVisible, true)
-    }
+if (req.body.salesChannel !== undefined) {
+  updates.salesChannel = String(req.body.salesChannel || "").trim()
+}
+
+if (req.body.storefrontVisible !== undefined) {
+  updates.storefrontVisible = toBoolean(req.body.storefrontVisible, true)
+}
 
     if (req.body.sku !== undefined) {
       const nextSku = String(req.body.sku || "").trim()
