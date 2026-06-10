@@ -4,8 +4,10 @@ const colorSchema = new mongoose.Schema(
   {
     sku: { type: String, required: true, trim: true },
     name: { type: String, required: true, trim: true },
-    hex: { type: String, required: true, trim: true },
-    stock: { type: Number, default: 0 }
+    hex: { type: String, default: "#999999", trim: true },
+    stock: { type: Number, default: 0 },
+    reorderPoint: { type: Number, default: 2 },
+    location: { type: String, default: "HTV Rack" }
   },
   { _id: false }
 )

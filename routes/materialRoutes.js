@@ -11,6 +11,8 @@ import {
   importMaterialsCSV
 } from "../controllers/materialController.js"
 
+import { generateMaterial } from "../controllers/materialGeneratorController.js"
+
 import upload from "../middleware/upload.js"
 
 const router = express.Router()
@@ -45,8 +47,18 @@ router.post(
 )
 
 /* =========================================================
+   MATERIAL GENERATOR
+   KEEP THIS ABOVE /:id
+========================================================= */
+
+router.post("/generate", (req, res, next) => {
+  console.log("⚡ POST /api/materials/generate")
+  next()
+}, generateMaterial)
+
+/* =========================================================
    MATERIAL DETAILS
-   KEEP THESE BELOW SEARCH / EXPORT ROUTES
+   KEEP THESE BELOW SEARCH / EXPORT / GENERATE ROUTES
 ========================================================= */
 
 router.get("/:id", (req, res, next) => {
