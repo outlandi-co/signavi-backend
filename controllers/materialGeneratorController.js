@@ -14,10 +14,12 @@ const makeSkuCode = (colorName = "") => {
     .trim()
     .split(/\s+/)
 
-  return words
+  const code = words
     .map((word) => word.slice(0, 3).toUpperCase())
     .join("")
     .slice(0, 8)
+
+  return code || "COLOR"
 }
 
 const guessHex = (name = "") => {
@@ -89,54 +91,56 @@ export const generateMaterial = async (req, res) => {
 
     const generatedId = slugify(`${brand}-${productName}`)
 
-    const material = await Material.findOneAndUpdate(
-      { id: generatedId },
-      {
-        id: generatedId,
-        brand,
-        productName,
-        fullName: fullName || `${brand} ${productName}`,
-        category,
-        materialType,
-        unit,
-        skuPrefix,
-        price: Number(price),
-        regularPrice: regularPrice ? Number(regularPrice) : undefined,
-        currency: "USD",
+    const materialData = {
+      id: generatedId,
+      brand,
+      productName,
+      fullName: fullName || `${brand} ${productName}`,
+      category,
+      materialType,
+      unit,
+      skuPrefix,
+      price: Number(price),
+      regularPrice: regularPrice ? Number(regularPrice) : undefined,
+      currency: "USD",
 
-        dimensions: {
-          listedWidth,
-          actualWidth,
-          lengthPerUnit: '36"',
-          thickness
-        },
-
-        source: {
-          supplierId: "heat-press-nation",
-          vendor: "HeatPressNation",
-          url: sourceUrl,
-          lastChecked: new Date().toISOString().slice(0, 10)
-        },
-
-        inventory: {
-          trackInventory: true,
-          reorderPoint: 5,
-          quantityOnHand: 0
-        },
-
-        colors,
-        active: true
+      dimensions: {
+        listedWidth,
+        actualWidth,
+        lengthPerUnit: '36"',
+        thickness
       },
-      {
-        new: true,
-        upsert: true,
-        runValidators: true
-      }
-    )
+
+      source: {
+        supplierId: "heat-press-nation",
+        vendor: "HeatPressNation",
+        url: sourceUrl,
+        lastChecked: new Date().toISOString().slice(0, 10)
+      },
+
+      inventory: {
+        trackInventory: true,
+        reorderPoint: 5,
+        quantityOnHand: 0
+      },
+
+      colors,
+      active: true
+    }
+
+    let material = await Material.findOne({ id: generatedId })
+
+    if (material) {
+      material.set(materialData)
+      await material.save()
+    } else {
+      material = await Material.create(materialData)
+    }
 
     res.status(201).json({
       success: true,
-      material
+      material,
+      updatedExisting: Boolean(material.createdAt && material.updatedAt && material.createdAt.getTime() !== material.updatedAt.getTime())
     })
   } catch (err) {
     console.error("❌ GENERATE MATERIAL ERROR:", err)
