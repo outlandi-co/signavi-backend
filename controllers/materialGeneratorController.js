@@ -25,10 +25,9 @@ const guessHex = (name = "") => {
 
   if (color.includes("white")) return "#FFFFFF"
   if (color.includes("black")) return "#000000"
-  if (color.includes("red")) return "#C8102E"
-  if (color.includes("blue")) return "#0057B8"
   if (color.includes("royal")) return "#0047AB"
   if (color.includes("navy")) return "#002D72"
+  if (color.includes("burgundy")) return "#800020"
   if (color.includes("yellow")) return "#FFD100"
   if (color.includes("green")) return "#009639"
   if (color.includes("orange")) return "#FF6A13"
@@ -37,12 +36,13 @@ const guessHex = (name = "") => {
   if (color.includes("gold")) return "#D4AF37"
   if (color.includes("silver")) return "#C0C0C0"
   if (color.includes("brown")) return "#6F4E37"
-  if (color.includes("burgundy")) return "#800020"
   if (color.includes("aqua")) return "#00B5E2"
   if (color.includes("mint")) return "#98FF98"
   if (color.includes("coral")) return "#FF7F50"
   if (color.includes("lavender")) return "#B497D6"
   if (color.includes("lime")) return "#A4D65E"
+  if (color.includes("red")) return "#C8102E"
+  if (color.includes("blue")) return "#0057B8"
 
   return "#999999"
 }
@@ -87,42 +87,52 @@ export const generateMaterial = async (req, res) => {
       location: "HTV Rack"
     }))
 
-    const material = await Material.create({
-      id: slugify(`${brand}-${productName}`),
-      brand,
-      productName,
-      fullName: fullName || `${brand} ${productName}`,
-      category,
-      materialType,
-      unit,
-      skuPrefix,
-      price: Number(price),
-      regularPrice: regularPrice ? Number(regularPrice) : undefined,
-      currency: "USD",
+    const generatedId = slugify(`${brand}-${productName}`)
 
-      dimensions: {
-        listedWidth,
-        actualWidth,
-        lengthPerUnit: '36"',
-        thickness
+    const material = await Material.findOneAndUpdate(
+      { id: generatedId },
+      {
+        id: generatedId,
+        brand,
+        productName,
+        fullName: fullName || `${brand} ${productName}`,
+        category,
+        materialType,
+        unit,
+        skuPrefix,
+        price: Number(price),
+        regularPrice: regularPrice ? Number(regularPrice) : undefined,
+        currency: "USD",
+
+        dimensions: {
+          listedWidth,
+          actualWidth,
+          lengthPerUnit: '36"',
+          thickness
+        },
+
+        source: {
+          supplierId: "heat-press-nation",
+          vendor: "HeatPressNation",
+          url: sourceUrl,
+          lastChecked: new Date().toISOString().slice(0, 10)
+        },
+
+        inventory: {
+          trackInventory: true,
+          reorderPoint: 5,
+          quantityOnHand: 0
+        },
+
+        colors,
+        active: true
       },
-
-      source: {
-        supplierId: "heat-press-nation",
-        vendor: "HeatPressNation",
-        url: sourceUrl,
-        lastChecked: new Date().toISOString().slice(0, 10)
-      },
-
-      inventory: {
-        trackInventory: true,
-        reorderPoint: 5,
-        quantityOnHand: 0
-      },
-
-      colors,
-      active: true
-    })
+      {
+        new: true,
+        upsert: true,
+        runValidators: true
+      }
+    )
 
     res.status(201).json({
       success: true,
