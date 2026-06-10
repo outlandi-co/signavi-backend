@@ -18,6 +18,9 @@ import Order from "./models/Order.js"
 /* ================= ROUTES ================= */
 
 import materialRoutes from "./routes/materialRoutes.js"
+import supplierRoutes from "./routes/supplierRoutes.js"
+import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js"
+import estimateRoutes from "./routes/estimateRoutes.js"
 
 import productRoutes from "./routes/products.js"
 import orderRoutes from "./routes/orders.js"
@@ -25,37 +28,24 @@ import invoiceRoutes from "./routes/invoiceRoutes.js"
 
 import authRoutes from "./routes/authRoutes.js"
 import logoutRoutes from "./routes/logout.js"
-
 import cartRoutes from "./routes/cart.js"
-
 import productionRoutes from "./routes/production.js"
-
 import quoteRoutes from "./routes/quotes.js"
-
 import expenseRoutes from "./routes/expenses.js"
-
 import pricingRoutes from "./routes/pricing.js"
-
 import customerRoutes from "./routes/customers.js"
 
 import squareRoutes from "./routes/square.js"
 import squareWebhook from "./routes/squareWebhook.js"
-
 import shippingRoutes from "./routes/shipping.js"
 
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 import adminEmailWebhookRoutes from "./routes/admin/adminEmailWebhookRoutes.js"
 
 import supportRoutes from "./routes/support/supportRoutes.js"
-
 import aiChatRoutes from "./routes/aiChat.js"
-
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
-
 import notificationRoutes from "./routes/notifications.js"
-
-import supplierRoutes from "./routes/supplierRoutes.js"
-import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js"
 
 /* ================= PATH SETUP ================= */
 
@@ -84,10 +74,8 @@ console.log("\n🔥 SERVER READY 🚀\n")
 const allowedOrigins = [
   "https://signavistudio.store",
   "https://www.signavistudio.store",
-
   "https://signavi.store",
   "https://www.signavi.store",
-
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:3000"
@@ -230,7 +218,6 @@ app.get("/api/orders/export", async (req, res) => {
         "Delivered At",
         "Archived At"
       ],
-
       ...orders.map((order) => [
         order._id,
         order.customerName || "",
@@ -311,7 +298,6 @@ app.get("/api/export-taxes", async (req, res) => {
         "Margin %",
         "Status"
       ],
-
       ...orders.map((order) => [
         formatCSVDate(order.paidAt),
         formatCSVDate(order.createdAt),
@@ -351,42 +337,71 @@ app.get("/api/export-taxes", async (req, res) => {
 app.use("/api/materials", materialRoutes)
 console.log("📦 MATERIAL CATALOG ROUTE MOUNTED")
 
+/* ================= SUPPLIERS ================= */
+
 app.use("/api/suppliers", supplierRoutes)
 console.log("🏢 SUPPLIER ROUTE MOUNTED")
+
+/* ================= PURCHASE ORDERS ================= */
 
 app.use("/api/purchase-orders", purchaseOrderRoutes)
 console.log("📋 PURCHASE ORDER ROUTE MOUNTED")
 
+/* ================= ESTIMATES / PRODUCTION CALCULATOR ================= */
+
+app.use("/api/estimates", estimateRoutes)
+console.log("🧮 ESTIMATE ROUTE MOUNTED")
+
+/* ================= PRODUCTS ================= */
+
 app.use("/api/products", productRoutes)
+
+/* ================= ORDERS ================= */
 
 app.use("/api/orders", orderRoutes)
 console.log("🔥 ORDERS ROUTES ACTIVE")
 
+/* ================= INVOICES ================= */
+
 app.use("/api/invoices", invoiceRoutes)
 console.log("🧾 INVOICE ROUTE MOUNTED")
+
+/* ================= AUTH ================= */
 
 app.use("/api/auth", authRoutes)
 console.log("🔐 AUTH ROUTES LOADED")
 
 app.use("/api/logout", logoutRoutes)
 
+/* ================= CART ================= */
+
 app.use("/api/cart", cartRoutes)
 
+/* ================= PRODUCTION ================= */
+
 app.use("/api/production", productionRoutes)
+
+/* ================= QUOTES ================= */
 
 app.use("/api/quotes", quoteRoutes)
 console.log("🔥 QUOTES ROUTE LOADED")
 
+/* ================= EXPENSES / PRICING / CUSTOMERS ================= */
+
 app.use("/api/expenses", expenseRoutes)
-
 app.use("/api/pricing", pricingRoutes)
-
 app.use("/api/customers", customerRoutes)
+
+/* ================= SQUARE ================= */
 
 app.use("/api/square", squareRoutes)
 console.log("💳 SQUARE ROUTE LOADED")
 
+/* ================= SHIPPING ================= */
+
 app.use("/api/shipping", shippingRoutes)
+
+/* ================= ORDER WORKFLOW ================= */
 
 app.use("/api/order-workflow", orderWorkflowRoutes)
 
