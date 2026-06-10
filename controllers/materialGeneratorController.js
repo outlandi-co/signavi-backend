@@ -49,6 +49,97 @@ const guessHex = (name = "") => {
   return "#999999"
 }
 
+const defaultAdheresTo = [
+  "100% Cotton",
+  "Poly/Cotton Blends",
+  "100% Uncoated Polyester",
+  "Leather"
+]
+
+const defaultApplicationInstructions = [
+  "Cut in reverse",
+  "Weed excess material",
+  "Preheat garment for 2-3 seconds",
+  "Apply design at 305°F / 150°C",
+  "Use medium pressure for 10-15 seconds",
+  "Peel carrier hot or cold"
+]
+
+const glitterApplicationInstructions = [
+  "Cut in reverse",
+  "Weed excess material",
+  "Preheat garment for 2-3 seconds",
+  "Apply design at 320°F / 160°C",
+  "Use firm pressure for 15-20 seconds",
+  "Peel carrier warm"
+]
+
+const defaultCareInstructions = [
+  "Wait 24 hours before first wash",
+  "Machine wash warm with mild detergent",
+  "Do not dry clean",
+  "Hang item to dry",
+  "Do not bleach",
+  "Dry at normal setting"
+]
+
+const glitterCareInstructions = [
+  "Wait 24 hours before first wash",
+  "Machine wash warm or cold with mild detergent",
+  "Do not dry clean",
+  "Hang item to dry",
+  "Do not bleach",
+  "Dry at normal setting"
+]
+
+const defaultAccessories = [
+  "Siser Hook Tool",
+  "Siser Color Guide",
+  "Pro-Grade Non-Stick Sheet",
+  "Pro-Grade Parchment Paper",
+  "Sof-Fusion Pressing Pillows"
+]
+
+const getMaterialDefaults = (productName = "") => {
+  const name = productName.toLowerCase()
+
+  if (name.includes("glitter")) {
+    return {
+      materialType: "Glitter Heat Transfer Vinyl",
+      adheresTo: [
+        "100% Cotton",
+        "Poly/Cotton Blends",
+        "100% Uncoated Polyester"
+      ],
+      applicationInstructions: glitterApplicationInstructions,
+      careInstructions: glitterCareInstructions,
+      recommendedAccessories: defaultAccessories,
+      specs: {
+        composition: "PVC",
+        backing: "Adhesive Backing",
+        finish: "Glitter",
+        blade: "45° or 60°",
+        certification: "CPSIA Certified"
+      }
+    }
+  }
+
+  return {
+    materialType: "Heat Transfer Vinyl",
+    adheresTo: defaultAdheresTo,
+    applicationInstructions: defaultApplicationInstructions,
+    careInstructions: defaultCareInstructions,
+    recommendedAccessories: defaultAccessories,
+    specs: {
+      composition: "Polyurethane",
+      backing: "Pressure Sensitive",
+      finish: "Semi-gloss",
+      blade: "45° or 60°",
+      certification: "CPSIA Certified"
+    }
+  }
+}
+
 export const generateMaterial = async (req, res) => {
   try {
     const {
@@ -56,7 +147,7 @@ export const generateMaterial = async (req, res) => {
       productName,
       fullName,
       category = "HTV",
-      materialType = "Heat Transfer Vinyl",
+      materialType,
       unit = "yard",
       skuPrefix,
       price,
@@ -74,6 +165,8 @@ export const generateMaterial = async (req, res) => {
         message: "productName, skuPrefix, price, and colorText are required"
       })
     }
+
+    const defaults = getMaterialDefaults(productName)
 
     const colorNames = colorText
       .split("\n")
@@ -97,7 +190,7 @@ export const generateMaterial = async (req, res) => {
       productName,
       fullName: fullName || `${brand} ${productName}`,
       category,
-      materialType,
+      materialType: materialType || defaults.materialType,
       unit,
       skuPrefix,
       price: Number(price),
@@ -110,6 +203,12 @@ export const generateMaterial = async (req, res) => {
         lengthPerUnit: '36"',
         thickness
       },
+
+      specs: defaults.specs,
+      adheresTo: defaults.adheresTo,
+      applicationInstructions: defaults.applicationInstructions,
+      careInstructions: defaults.careInstructions,
+      recommendedAccessories: defaults.recommendedAccessories,
 
       source: {
         supplierId: "heat-press-nation",
@@ -140,7 +239,11 @@ export const generateMaterial = async (req, res) => {
     res.status(201).json({
       success: true,
       material,
-      updatedExisting: Boolean(material.createdAt && material.updatedAt && material.createdAt.getTime() !== material.updatedAt.getTime())
+      updatedExisting: Boolean(
+        material.createdAt &&
+          material.updatedAt &&
+          material.createdAt.getTime() !== material.updatedAt.getTime()
+      )
     })
   } catch (err) {
     console.error("❌ GENERATE MATERIAL ERROR:", err)
