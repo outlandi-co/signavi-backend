@@ -11,6 +11,7 @@ const makeSkuCode = (colorName = "") => {
   const words = colorName
     .replace(/glitter/gi, "")
     .replace(/fluorescent/gi, "fl")
+    .replace(/electric/gi, "el")
     .trim()
     .split(/\s+/)
 
@@ -24,6 +25,54 @@ const makeSkuCode = (colorName = "") => {
 
 const guessHex = (name = "") => {
   const color = name.toLowerCase()
+
+  if (color.includes("white opal")) return "#F8F6FF"
+  if (color.includes("silver lens")) return "#C0C0C0"
+  if (color.includes("gold lens")) return "#D4AF37"
+  if (color.includes("rose gold")) return "#B76E79"
+  if (color.includes("orange soda")) return "#FF7A00"
+  if (color.includes("green apple")) return "#8DC63F"
+  if (color.includes("vegas gold")) return "#C5B358"
+  if (color.includes("texas orange")) return "#BF5700"
+  if (color.includes("lemon lime")) return "#DFFF00"
+  if (color.includes("sunrise coral")) return "#FF7E67"
+  if (color.includes("sea glass")) return "#9FD8CB"
+  if (color.includes("sweet mint")) return "#98FF98"
+  if (color.includes("frosty mint")) return "#CFFFE5"
+  if (color.includes("purple berry")) return "#7D3C98"
+  if (color.includes("ballerina pink")) return "#F2C1D1"
+  if (color.includes("calypso coral")) return "#FF6F61"
+  if (color.includes("cobalt blue")) return "#0047AB"
+  if (color.includes("celestial blue")) return "#4997D0"
+  if (color.includes("bright orchid")) return "#D65282"
+  if (color.includes("bubble gum")) return "#FF85C1"
+  if (color.includes("charcoal")) return "#36454F"
+  if (color.includes("coffee")) return "#6F4E37"
+  if (color.includes("wisteria")) return "#C9A0DC"
+  if (color.includes("totally teal")) return "#008080"
+  if (color.includes("blue teal")) return "#008C8C"
+  if (color.includes("peacock teal")) return "#008C8C"
+  if (color.includes("teal")) return "#008080"
+  if (color.includes("spearmint")) return "#7FFFD4"
+  if (color.includes("turquoise")) return "#40E0D0"
+  if (color.includes("cranberry")) return "#B31B34"
+  if (color.includes("grape")) return "#6F2DA8"
+  if (color.includes("peach fuzz")) return "#FFBE98"
+  if (color.includes("tungsten")) return "#7A7A7A"
+  if (color.includes("frosted blueberry")) return "#6A8DFF"
+  if (color.includes("columbia")) return "#B9D9EB"
+  if (color.includes("olive")) return "#708238"
+  if (color.includes("eucalyptus")) return "#5F8575"
+  if (color.includes("fresh grass")) return "#4CBB17"
+  if (color.includes("cool aqua")) return "#66D9E8"
+  if (color.includes("storm blue")) return "#4F6D7A"
+  if (color.includes("blue horizon")) return "#4A90E2"
+  if (color.includes("red earth")) return "#8A3324"
+  if (color.includes("medium purple")) return "#9370DB"
+  if (color.includes("veri peri")) return "#6667AB"
+  if (color.includes("dark gold")) return "#B8860B"
+  if (color.includes("chestnut")) return "#954535"
+  if (color.includes("sun yellow")) return "#FFD100"
 
   if (color.includes("white")) return "#FFFFFF"
   if (color.includes("black")) return "#000000"
@@ -45,6 +94,13 @@ const guessHex = (name = "") => {
   if (color.includes("lime")) return "#A4D65E"
   if (color.includes("red")) return "#C8102E"
   if (color.includes("blue")) return "#0057B8"
+  if (color.includes("gray")) return "#808080"
+  if (color.includes("grey")) return "#808080"
+  if (color.includes("lemon")) return "#FFF44F"
+  if (color.includes("sun")) return "#FDB813"
+  if (color.includes("pearl")) return "#F8F6F0"
+  if (color.includes("copper")) return "#B87333"
+  if (color.includes("cherry")) return "#C21833"
 
   return "#999999"
 }
@@ -74,6 +130,24 @@ const glitterApplicationInstructions = [
   "Peel carrier warm"
 ]
 
+const stretchApplicationInstructions = [
+  "Cut in reverse",
+  "Weed excess material",
+  "Preheat garment for 2-3 seconds",
+  "Apply design at 320°F / 160°C",
+  "Use firm pressure for 20 seconds",
+  "Peel carrier hot or cold"
+]
+
+const ecoStretchApplicationInstructions = [
+  "Cut in reverse",
+  "Weed excess material",
+  "Preheat garment for 2-3 seconds",
+  "Apply design at 250°F / 120°C",
+  "Use medium pressure for 10-15 seconds",
+  "Peel carrier hot"
+]
+
 const defaultCareInstructions = [
   "Wait 24 hours before first wash",
   "Machine wash warm with mild detergent",
@@ -90,6 +164,17 @@ const glitterCareInstructions = [
   "Hang item to dry",
   "Do not bleach",
   "Dry at normal setting"
+]
+
+const ecoStretchCareInstructions = [
+  "Wait 24 hours before first wash",
+  "Machine wash cold with mild detergent",
+  "Do not dry clean",
+  "Hang item to dry",
+  "Do not bleach",
+  "Dry at low setting",
+  "Do not use fabric softener",
+  "Wash regularly or inside-out"
 ]
 
 const defaultAccessories = [
@@ -118,6 +203,84 @@ const getMaterialDefaults = (productName = "") => {
         composition: "PVC",
         backing: "Adhesive Backing",
         finish: "Glitter",
+        blade: "45° or 60°",
+        certification: "CPSIA Certified"
+      }
+    }
+  }
+
+  if (name.includes("ecostretch")) {
+    return {
+      materialType: "Eco Stretch Heat Transfer Vinyl",
+      adheresTo: [
+        "100% Cotton",
+        "Poly/Cotton Blends",
+        "100% Uncoated Polyester",
+        "Lycra / Spandex"
+      ],
+      applicationInstructions: ecoStretchApplicationInstructions,
+      careInstructions: ecoStretchCareInstructions,
+      recommendedAccessories: defaultAccessories,
+      specs: {
+        composition: "Water-Based Polyurethane",
+        backing: "Pressure Sensitive",
+        finish: "Matte (Silver, Gold, Vegas Gold, and Rose Gold have a Glossy Finish)",
+        blade: "45° or 60°",
+        certification: "CPSIA Certified"
+      }
+    }
+  }
+
+  if (name.includes("stretch")) {
+    return {
+      materialType: "Stretch Heat Transfer Vinyl",
+      adheresTo: [
+        "100% Cotton",
+        "Poly/Cotton Blends",
+        "100% Uncoated Polyester",
+        "Lycra / Spandex"
+      ],
+      applicationInstructions: stretchApplicationInstructions,
+      careInstructions: defaultCareInstructions,
+      recommendedAccessories: defaultAccessories,
+      specs: {
+        composition: "Polyurethane",
+        backing: "Pressure Sensitive",
+        finish: "True Matte Finish",
+        blade: "45° or 60°",
+        certification: "CPSIA Certified"
+      }
+    }
+  }
+
+  if (name.includes("matte")) {
+    return {
+      materialType: "Heat Transfer Vinyl",
+      adheresTo: defaultAdheresTo,
+      applicationInstructions: defaultApplicationInstructions,
+      careInstructions: defaultCareInstructions,
+      recommendedAccessories: defaultAccessories,
+      specs: {
+        composition: "Polyurethane",
+        backing: "Pressure Sensitive",
+        finish: "Matte",
+        blade: "45° or 60°",
+        certification: "CPSIA Certified"
+      }
+    }
+  }
+
+  if (name.includes("electric")) {
+    return {
+      materialType: "Electric Heat Transfer Vinyl",
+      adheresTo: defaultAdheresTo,
+      applicationInstructions: defaultApplicationInstructions,
+      careInstructions: defaultCareInstructions,
+      recommendedAccessories: defaultAccessories,
+      specs: {
+        composition: "Polyurethane",
+        backing: "Pressure Sensitive",
+        finish: "Semi-gloss",
         blade: "45° or 60°",
         certification: "CPSIA Certified"
       }
@@ -156,7 +319,14 @@ export const generateMaterial = async (req, res) => {
       actualWidth,
       thickness,
       colorText = "",
-      sourceUrl = ""
+      sourceUrl = "",
+
+      // JSON override fields from the Admin Materials generator textarea
+      specs,
+      adheresTo,
+      applicationInstructions,
+      careInstructions,
+      recommendedAccessories
     } = req.body
 
     if (!productName || !skuPrefix || !price || !colorText) {
@@ -204,11 +374,14 @@ export const generateMaterial = async (req, res) => {
         thickness
       },
 
-      specs: defaults.specs,
-      adheresTo: defaults.adheresTo,
-      applicationInstructions: defaults.applicationInstructions,
-      careInstructions: defaults.careInstructions,
-      recommendedAccessories: defaults.recommendedAccessories,
+      specs: specs || defaults.specs,
+      adheresTo: adheresTo || defaults.adheresTo,
+      applicationInstructions:
+        applicationInstructions || defaults.applicationInstructions,
+      careInstructions:
+        careInstructions || defaults.careInstructions,
+      recommendedAccessories:
+        recommendedAccessories || defaults.recommendedAccessories,
 
       source: {
         supplierId: "heat-press-nation",
