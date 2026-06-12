@@ -321,7 +321,6 @@ export const generateMaterial = async (req, res) => {
       colorText = "",
       sourceUrl = "",
 
-      // JSON override fields from the Admin Materials generator textarea
       specs,
       adheresTo,
       applicationInstructions,
