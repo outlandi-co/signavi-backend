@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
+
+  "overrides": {
+    "mongoose": {
+      "mongodb": "7.4.0"
+    }
+  },
+
   "scripts": {
     "dev": "nodemon --config nodemon.json server.js",
     "dev:watch": "nodemon server.js --ignore uploads --ignore labels --ignore *.log --ignore *.tmp",
@@ -11,6 +18,7 @@
     "clean": "rimraf logs tmp",
     "rebuild": "npm run clean && npm install"
   },
+
   "dependencies": {
     "axios": "^1.14.0",
     "bcrypt": "^6.0.0",
@@ -24,6 +32,7 @@
     "express": "^5.2.1",
     "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.3",
+    "mongodb": "7.4.0",
     "mongoose": "^9.3.0",
     "multer": "^2.1.1",
     "node-cron": "^4.2.1",
@@ -36,6 +45,7 @@
     "square": "^44.0.1",
     "stripe": "^20.4.1"
   },
+
   "devDependencies": {
     "nodemon": "^3.1.14",
     "rimraf": "^6.0.1"
