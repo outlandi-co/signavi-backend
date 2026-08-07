@@ -6,17 +6,47 @@ const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL ||
   "admin@signavistudio.store"
 
+const INFO_EMAIL =
+  process.env.INFO_EMAIL ||
+  "info@signavistudio.store"
+
+const QUOTES_EMAIL =
+  process.env.QUOTES_EMAIL ||
+  "quotes@signavistudio.store"
+
 const cleanEmail = (value = "") => {
   const match = value.match(/<(.+?)>/)
-  return (match ? match[1] : value).trim().toLowerCase()
+
+  return (match ? match[1] : value)
+    .trim()
+    .toLowerCase()
+}
+
+const getChannel = (to = "") => {
+  const email = cleanEmail(to)
+
+  if (email === QUOTES_EMAIL.toLowerCase()) {
+    return "quotes"
+  }
+
+  return "info"
 }
 
 export const receiveInboundEmail = async (req, res) => {
   try {
     const from = cleanEmail(req.body.from || "")
-    const to = cleanEmail(req.body.to || ADMIN_EMAIL)
-    const subject = req.body.subject || "Customer Reply"
-    const text = req.body.text || req.body.html || ""
+    const to = cleanEmail(req.body.to || INFO_EMAIL)
+
+    const subject =
+      req.body.subject ||
+      "Customer Message"
+
+    const text =
+      req.body.text ||
+      req.body.html ||
+      ""
+
+    const channel = getChannel(to)
 
     if (!from || !text) {
       return res.status(400).json({
@@ -27,20 +57,24 @@ export const receiveInboundEmail = async (req, res) => {
 
     let thread = await AdminEmailThread.findOne({
       customerEmail: from,
-      subject
+      subject,
+      channel
     })
 
     if (!thread) {
       thread = await AdminEmailThread.create({
         customerEmail: from,
         subject,
+        channel,
         lastMessage: text,
-        unread: true
+        unread: true,
+        archived: false
       })
     } else {
       thread.lastMessage = text
       thread.unread = true
       thread.archived = false
+
       await thread.save()
     }
 
@@ -57,19 +91,39 @@ export const receiveInboundEmail = async (req, res) => {
 
     const notification = await Notification.create({
       userEmail: ADMIN_EMAIL,
-      title: "Customer Reply",
-      text: `${from} replied: ${text.slice(0, 120)}`,
+
+      title:
+        channel === "quotes"
+          ? "New Quote Email"
+          : "New Information Email",
+
+      text: `${from}: ${text.slice(0, 120)}`,
+
       type: "admin",
-      link: "/admin/emails",
+
+      link:
+        `/admin/emails?channel=${channel}`,
+
       read: false,
       archived: false
     })
 
-    req.app.get("io")?.emit("adminNotification", notification)
-    req.app.get("io")?.emit("customerEmailReply", {
-      thread,
-      message
-    })
+    req.app
+      .get("io")
+      ?.emit(
+        "adminNotification",
+        notification
+      )
+
+    req.app
+      .get("io")
+      ?.emit(
+        "customerEmailReply",
+        {
+          thread,
+          message
+        }
+      )
 
     res.json({
       success: true,
@@ -79,7 +133,10 @@ export const receiveInboundEmail = async (req, res) => {
       }
     })
   } catch (error) {
-    console.error("❌ INBOUND EMAIL ERROR:", error)
+    console.error(
+      "❌ INBOUND EMAIL ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,

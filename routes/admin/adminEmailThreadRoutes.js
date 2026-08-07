@@ -7,10 +7,13 @@ import AdminEmailMessage from "../../models/AdminEmailMessage.js"
 
 const router = express.Router()
 
-const FROM_EMAIL =
-  process.env.SENDGRID_FROM_EMAIL ||
-  process.env.EMAIL_FROM ||
-  "admin@signavistudio.store"
+const INFO_EMAIL =
+  process.env.INFO_EMAIL ||
+  "info@signavistudio.store"
+
+const QUOTES_EMAIL =
+  process.env.QUOTES_EMAIL ||
+  "quotes@signavistudio.store"
 
 if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY)
@@ -27,20 +30,41 @@ const buildHtml = (message = "") => {
   `
 }
 
+const getFromEmail = (channel = "info") => {
+  return channel === "quotes"
+    ? QUOTES_EMAIL
+    : INFO_EMAIL
+}
+
 /* ================= GET THREADS ================= */
 
 router.get("/", requireAuth, async (req, res) => {
   try {
-    const threads = await AdminEmailThread.find({
+    const { channel } = req.query
+
+    const filter = {
       archived: false
-    }).sort({ updatedAt: -1 })
+    }
+
+    if (
+      channel === "info" ||
+      channel === "quotes"
+    ) {
+      filter.channel = channel
+    }
+
+    const threads = await AdminEmailThread.find(filter)
+      .sort({ updatedAt: -1 })
 
     res.json({
       success: true,
       data: threads
     })
   } catch (error) {
-    console.error("❌ GET THREADS ERROR:", error)
+    console.error(
+      "❌ GET THREADS ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -53,16 +77,31 @@ router.get("/", requireAuth, async (req, res) => {
 
 router.get("/archived", requireAuth, async (req, res) => {
   try {
-    const threads = await AdminEmailThread.find({
+    const { channel } = req.query
+
+    const filter = {
       archived: true
-    }).sort({ updatedAt: -1 })
+    }
+
+    if (
+      channel === "info" ||
+      channel === "quotes"
+    ) {
+      filter.channel = channel
+    }
+
+    const threads = await AdminEmailThread.find(filter)
+      .sort({ updatedAt: -1 })
 
     res.json({
       success: true,
       data: threads
     })
   } catch (error) {
-    console.error("❌ GET ARCHIVED THREADS ERROR:", error)
+    console.error(
+      "❌ GET ARCHIVED THREADS ERROR:",
+      error
+    )
 
     res.status(500).json({
       success: false,
@@ -73,176 +112,248 @@ router.get("/archived", requireAuth, async (req, res) => {
 
 /* ================= RESTORE THREAD ================= */
 
-router.patch("/:threadId/restore", requireAuth, async (req, res) => {
-  try {
-    const thread = await AdminEmailThread.findByIdAndUpdate(
-      req.params.threadId,
-      {
-        archived: false
-      },
-      {
-        new: true
-      }
-    )
+router.patch(
+  "/:threadId/restore",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const thread =
+        await AdminEmailThread.findByIdAndUpdate(
+          req.params.threadId,
+          {
+            archived: false
+          },
+          {
+            new: true
+          }
+        )
 
-    if (!thread) {
-      return res.status(404).json({
+      if (!thread) {
+        return res.status(404).json({
+          success: false,
+          message: "Thread not found"
+        })
+      }
+
+      req.app
+        .get("io")
+        ?.emit("threadRestored", thread)
+
+      res.json({
+        success: true,
+        data: thread
+      })
+    } catch (error) {
+      console.error(
+        "❌ RESTORE THREAD ERROR:",
+        error
+      )
+
+      res.status(500).json({
         success: false,
-        message: "Thread not found"
+        message: "Failed to restore thread"
       })
     }
-
-    req.app.get("io")?.emit("threadRestored", thread)
-
-    res.json({
-      success: true,
-      data: thread
-    })
-  } catch (error) {
-    console.error("❌ RESTORE THREAD ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to restore thread"
-    })
   }
-})
+)
 
 /* ================= GET THREAD MESSAGES ================= */
 
-router.get("/:threadId/messages", requireAuth, async (req, res) => {
-  try {
-    const messages = await AdminEmailMessage.find({
-      threadId: req.params.threadId
-    }).sort({ createdAt: 1 })
+router.get(
+  "/:threadId/messages",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const messages =
+        await AdminEmailMessage.find({
+          threadId: req.params.threadId
+        }).sort({ createdAt: 1 })
 
-    await AdminEmailThread.findByIdAndUpdate(
-      req.params.threadId,
-      {
-        unread: false
-      },
-      {
-        new: true
-      }
-    )
+      await AdminEmailThread.findByIdAndUpdate(
+        req.params.threadId,
+        {
+          unread: false
+        },
+        {
+          new: true
+        }
+      )
 
-    res.json({
-      success: true,
-      data: messages
-    })
-  } catch (error) {
-    console.error("❌ GET THREAD MESSAGES ERROR:", error)
+      res.json({
+        success: true,
+        data: messages
+      })
+    } catch (error) {
+      console.error(
+        "❌ GET THREAD MESSAGES ERROR:",
+        error
+      )
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to load messages"
-    })
+      res.status(500).json({
+        success: false,
+        message: "Failed to load messages"
+      })
+    }
   }
-})
+)
 
 /* ================= REPLY TO THREAD ================= */
 
-router.post("/:threadId/reply", requireAuth, async (req, res) => {
-  try {
-    const { message = "" } = req.body || {}
+router.post(
+  "/:threadId/reply",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        message = ""
+      } = req.body || {}
 
-    if (!message.trim()) {
-      return res.status(400).json({
+      if (!message.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Reply message is required"
+        })
+      }
+
+      const thread =
+        await AdminEmailThread.findById(
+          req.params.threadId
+        )
+
+      if (!thread) {
+        return res.status(404).json({
+          success: false,
+          message: "Thread not found"
+        })
+      }
+
+      const fromEmail =
+        getFromEmail(thread.channel)
+
+      const html =
+        buildHtml(message)
+
+      await sgMail.send({
+        to: thread.customerEmail,
+
+        from: {
+          email: fromEmail,
+          name: "SignaVi Studio"
+        },
+
+        subject:
+          thread.subject ||
+          "SignaVi Studio Reply",
+
+        text: message,
+        html
+      })
+
+      const savedMessage =
+        await AdminEmailMessage.create({
+          threadId: thread._id,
+
+          direction: "outbound",
+
+          senderEmail: fromEmail,
+
+          senderName:
+            "SignaVi Studio",
+
+          to:
+            thread.customerEmail,
+
+          subject:
+            thread.subject ||
+            "SignaVi Studio Reply",
+
+          message,
+
+          html,
+
+          read: true
+        })
+
+      thread.lastMessage = message
+      thread.unread = false
+      thread.archived = false
+
+      await thread.save()
+
+      req.app
+        .get("io")
+        ?.emit(
+          "customerEmailReply",
+          {
+            thread,
+            message: savedMessage
+          }
+        )
+
+      res.json({
+        success: true,
+        data: savedMessage
+      })
+    } catch (error) {
+      console.error(
+        "❌ REPLY THREAD ERROR:",
+        error
+      )
+
+      res.status(500).json({
         success: false,
-        message: "Reply message is required"
+        message: "Failed to send reply"
       })
     }
-
-    const thread = await AdminEmailThread.findById(req.params.threadId)
-
-    if (!thread) {
-      return res.status(404).json({
-        success: false,
-        message: "Thread not found"
-      })
-    }
-
-    const html = buildHtml(message)
-
-    await sgMail.send({
-      to: thread.customerEmail,
-      from: FROM_EMAIL,
-      subject: thread.subject || "SignaVi Studio Reply",
-      text: message,
-      html
-    })
-
-    const savedMessage = await AdminEmailMessage.create({
-      threadId: thread._id,
-      direction: "outbound",
-      senderEmail: req.user?.email || FROM_EMAIL,
-      senderName: "SignaVi Studio",
-      to: thread.customerEmail,
-      subject: thread.subject || "SignaVi Studio Reply",
-      message,
-      html,
-      read: true
-    })
-
-    thread.lastMessage = message
-    thread.unread = false
-    thread.archived = false
-
-    await thread.save()
-
-    req.app.get("io")?.emit("customerEmailReply", {
-      thread,
-      message: savedMessage
-    })
-
-    res.json({
-      success: true,
-      data: savedMessage
-    })
-  } catch (error) {
-    console.error("❌ REPLY THREAD ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to send reply"
-    })
   }
-})
+)
 
 /* ================= ARCHIVE THREAD ================= */
 
-router.patch("/:threadId/archive", requireAuth, async (req, res) => {
-  try {
-    const thread = await AdminEmailThread.findByIdAndUpdate(
-      req.params.threadId,
-      {
-        archived: true,
-        unread: false
-      },
-      {
-        new: true
-      }
-    )
+router.patch(
+  "/:threadId/archive",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const thread =
+        await AdminEmailThread.findByIdAndUpdate(
+          req.params.threadId,
+          {
+            archived: true,
+            unread: false
+          },
+          {
+            new: true
+          }
+        )
 
-    if (!thread) {
-      return res.status(404).json({
+      if (!thread) {
+        return res.status(404).json({
+          success: false,
+          message: "Thread not found"
+        })
+      }
+
+      req.app
+        .get("io")
+        ?.emit("threadArchived", thread)
+
+      res.json({
+        success: true,
+        data: thread
+      })
+    } catch (error) {
+      console.error(
+        "❌ ARCHIVE THREAD ERROR:",
+        error
+      )
+
+      res.status(500).json({
         success: false,
-        message: "Thread not found"
+        message: "Failed to archive thread"
       })
     }
-
-    res.json({
-      success: true,
-      data: thread
-    })
-  } catch (error) {
-    console.error("❌ ARCHIVE THREAD ERROR:", error)
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to archive thread"
-    })
   }
-})
+)
 
 export default router

@@ -19,6 +19,12 @@ const adminEmailThreadSchema = new mongoose.Schema(
       default: ""
     },
 
+    channel: {
+      type: String,
+      enum: ["info", "quotes"],
+      default: "info"
+    },
+
     lastMessage: {
       type: String,
       default: ""

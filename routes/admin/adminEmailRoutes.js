@@ -15,10 +15,13 @@ const upload = multer({
   }
 })
 
-const FROM_EMAIL =
-  process.env.SENDGRID_FROM_EMAIL ||
-  process.env.EMAIL_FROM ||
-  "admin@signavistudio.store"
+const INFO_EMAIL =
+  process.env.INFO_EMAIL ||
+  "info@signavistudio.store"
+
+const QUOTES_EMAIL =
+  process.env.QUOTES_EMAIL ||
+  "quotes@signavistudio.store"
 
 if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY)
@@ -27,12 +30,20 @@ if (process.env.SENDGRID_API_KEY) {
   console.warn("⚠️ SENDGRID_API_KEY missing")
 }
 
+/* ================= HELPERS ================= */
+
 const buildHtml = (message = "") => `
   <div style="font-family: Arial, sans-serif; color:#111; line-height:1.6;">
     <h2>SignaVi Studio</h2>
     <p>${String(message).replace(/\n/g, "<br/>")}</p>
   </div>
 `
+
+const getFromEmail = (channel = "info") => {
+  return channel === "quotes"
+    ? QUOTES_EMAIL
+    : INFO_EMAIL
+}
 
 const mapSendGridAttachments = (files = []) => {
   return files.map((file) => ({
@@ -65,6 +76,7 @@ router.post(
         bcc = "",
         subject = "",
         message = "",
+        channel = "info",
         customerId = null,
         customerName = ""
       } = req.body || {}
@@ -76,66 +88,141 @@ router.post(
         })
       }
 
-      const html = buildHtml(message)
-      const attachments = mapSendGridAttachments(req.files || [])
-      const attachmentMeta = mapAttachmentMeta(req.files || [])
+      const cleanChannel =
+        channel === "quotes"
+          ? "quotes"
+          : "info"
+
+      const fromEmail =
+        getFromEmail(cleanChannel)
+
+      const html =
+        buildHtml(message)
+
+      const attachments =
+        mapSendGridAttachments(
+          req.files || []
+        )
+
+      const attachmentMeta =
+        mapAttachmentMeta(
+          req.files || []
+        )
 
       await sgMail.send({
         to,
         cc: cc || undefined,
         bcc: bcc || undefined,
-        from: FROM_EMAIL,
+
+        from: {
+          email: fromEmail,
+          name: "SignaVi Studio"
+        },
+
         subject,
         text: message,
         html,
-        attachments: attachments.length ? attachments : undefined
+
+        attachments:
+          attachments.length
+            ? attachments
+            : undefined
       })
 
-      const email = await AdminEmail.create({
-        to,
-        cc,
-        bcc,
-        subject,
-        message,
-        html,
-        attachments: attachmentMeta,
-        status: "sent",
-        archived: false,
-        sentAt: new Date(),
-        createdBy: req.user?.email || FROM_EMAIL,
-        customerId: customerId || null,
-        customerName: customerName || ""
-      })
+      const email =
+        await AdminEmail.create({
+          to,
+          cc,
+          bcc,
+          subject,
+          message,
+          html,
+          attachments: attachmentMeta,
+
+          status: "sent",
+          archived: false,
+          sentAt: new Date(),
+
+          createdBy: fromEmail,
+
+          customerId:
+            customerId || null,
+
+          customerName:
+            customerName || ""
+        })
 
       res.json({
         success: true,
-        message: "Email sent successfully",
+        message:
+          cleanChannel === "quotes"
+            ? "Quote email sent successfully"
+            : "Information email sent successfully",
+
+        channel: cleanChannel,
+        from: fromEmail,
         data: email
       })
     } catch (err) {
-      console.error("❌ ADMIN EMAIL ERROR:", err?.response?.body || err)
+      console.error(
+        "❌ ADMIN EMAIL ERROR:",
+        err?.response?.body || err
+      )
 
       try {
+        const failedChannel =
+          req.body?.channel === "quotes"
+            ? "quotes"
+            : "info"
+
+        const failedFromEmail =
+          getFromEmail(
+            failedChannel
+          )
+
         await AdminEmail.create({
-          to: req.body?.to || "",
-          cc: req.body?.cc || "",
-          bcc: req.body?.bcc || "",
-          subject: req.body?.subject || "",
-          message: req.body?.message || "",
+          to:
+            req.body?.to || "",
+
+          cc:
+            req.body?.cc || "",
+
+          bcc:
+            req.body?.bcc || "",
+
+          subject:
+            req.body?.subject || "",
+
+          message:
+            req.body?.message || "",
+
           status: "failed",
           archived: false,
-          createdBy: req.user?.email || FROM_EMAIL,
-          customerId: req.body?.customerId || null,
-          customerName: req.body?.customerName || ""
+
+          createdBy:
+            failedFromEmail,
+
+          customerId:
+            req.body?.customerId ||
+            null,
+
+          customerName:
+            req.body?.customerName ||
+            ""
         })
       } catch (logErr) {
-        console.error("❌ EMAIL FAILED LOG ERROR:", logErr)
+        console.error(
+          "❌ EMAIL FAILED LOG ERROR:",
+          logErr
+        )
       }
 
       res.status(500).json({
         success: false,
         message: "Failed to send email",
-        error: err?.message || "Unknown error"
+        error:
+          err?.message ||
+          "Unknown error"
       })
     }
   }
@@ -143,222 +230,471 @@ router.post(
 
 /* ================= SAVE DRAFT ================= */
 
-router.post("/drafts", requireAuth, async (req, res) => {
-  try {
-    const {
-      to = "",
-      cc = "",
-      bcc = "",
-      subject = "",
-      message = "",
-      customerId = null,
-      customerName = ""
-    } = req.body || {}
+router.post(
+  "/drafts",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        to = "",
+        cc = "",
+        bcc = "",
+        subject = "",
+        message = "",
+        channel = "info",
+        customerId = null,
+        customerName = ""
+      } = req.body || {}
 
-    const draft = await AdminEmail.create({
-      to,
-      cc,
-      bcc,
-      subject,
-      message,
-      html: buildHtml(message),
-      status: "draft",
-      archived: false,
-      createdBy: req.user?.email || FROM_EMAIL,
-      customerId: customerId || null,
-      customerName: customerName || ""
-    })
+      const cleanChannel =
+        channel === "quotes"
+          ? "quotes"
+          : "info"
 
-    res.status(201).json({
-      success: true,
-      data: draft
-    })
-  } catch (err) {
-    console.error("❌ SAVE DRAFT ERROR:", err)
+      const fromEmail =
+        getFromEmail(cleanChannel)
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to save draft"
-    })
+      const draft =
+        await AdminEmail.create({
+          to,
+          cc,
+          bcc,
+          subject,
+          message,
+
+          html:
+            buildHtml(message),
+
+          status: "draft",
+          archived: false,
+
+          createdBy:
+            fromEmail,
+
+          customerId:
+            customerId || null,
+
+          customerName:
+            customerName || ""
+        })
+
+      res.status(201).json({
+        success: true,
+        channel: cleanChannel,
+        from: fromEmail,
+        data: draft
+      })
+    } catch (err) {
+      console.error(
+        "❌ SAVE DRAFT ERROR:",
+        err
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to save draft"
+      })
+    }
   }
-})
+)
 
 /* ================= SEND DRAFT ================= */
 
-router.patch("/drafts/:id/send", requireAuth, async (req, res) => {
-  try {
-    const draft = await AdminEmail.findById(req.params.id)
+router.patch(
+  "/drafts/:id/send",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const draft =
+        await AdminEmail.findById(
+          req.params.id
+        )
 
-    if (!draft) {
-      return res.status(404).json({
+      if (!draft) {
+        return res.status(404).json({
+          success: false,
+          message: "Draft not found"
+        })
+      }
+
+      if (
+        !draft.to ||
+        !draft.subject ||
+        !draft.message
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Draft needs To, subject, and message before sending"
+        })
+      }
+
+      const fromEmail =
+        draft.createdBy ===
+        QUOTES_EMAIL
+          ? QUOTES_EMAIL
+          : INFO_EMAIL
+
+      await sgMail.send({
+        to: draft.to,
+
+        cc:
+          draft.cc ||
+          undefined,
+
+        bcc:
+          draft.bcc ||
+          undefined,
+
+        from: {
+          email: fromEmail,
+          name: "SignaVi Studio"
+        },
+
+        subject:
+          draft.subject,
+
+        text:
+          draft.message,
+
+        html:
+          draft.html ||
+          buildHtml(
+            draft.message
+          )
+      })
+
+      draft.status = "sent"
+      draft.archived = false
+      draft.sentAt = new Date()
+      draft.createdBy = fromEmail
+
+      await draft.save()
+
+      res.json({
+        success: true,
+        from: fromEmail,
+        data: draft
+      })
+    } catch (err) {
+      console.error(
+        "❌ SEND DRAFT ERROR:",
+        err
+      )
+
+      res.status(500).json({
         success: false,
-        message: "Draft not found"
+        message:
+          "Failed to send draft"
       })
     }
-
-    if (!draft.to || !draft.subject || !draft.message) {
-      return res.status(400).json({
-        success: false,
-        message: "Draft needs To, subject, and message before sending"
-      })
-    }
-
-    await sgMail.send({
-      to: draft.to,
-      cc: draft.cc || undefined,
-      bcc: draft.bcc || undefined,
-      from: FROM_EMAIL,
-      subject: draft.subject,
-      text: draft.message,
-      html: draft.html || buildHtml(draft.message)
-    })
-
-    draft.status = "sent"
-    draft.archived = false
-    draft.sentAt = new Date()
-
-    await draft.save()
-
-    res.json({
-      success: true,
-      data: draft
-    })
-  } catch (err) {
-    console.error("❌ SEND DRAFT ERROR:", err)
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to send draft"
-    })
   }
-})
+)
 
 /* ================= FOLDERS ================= */
 
-router.get("/folder/:folder", requireAuth, async (req, res) => {
-  try {
-    const { folder } = req.params
+router.get(
+  "/folder/:folder",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        folder
+      } = req.params
 
-    const query = {}
+      const {
+        channel
+      } = req.query
 
-    if (folder === "sent") {
-      query.status = "sent"
-      query.archived = false
+      const query = {}
+
+      if (
+        folder === "sent"
+      ) {
+        query.status = "sent"
+        query.archived = false
+      }
+
+      if (
+        folder === "drafts"
+      ) {
+        query.status = "draft"
+        query.archived = false
+      }
+
+      if (
+        folder === "outbox"
+      ) {
+        query.status = {
+          $in: [
+            "queued",
+            "failed"
+          ]
+        }
+
+        query.archived = false
+      }
+
+      if (
+        folder === "archive"
+      ) {
+        query.archived = true
+      }
+
+      if (
+        folder === "all"
+      ) {
+        // no base filter
+      }
+
+      if (
+        channel === "quotes"
+      ) {
+        query.createdBy =
+          QUOTES_EMAIL
+      }
+
+      if (
+        channel === "info"
+      ) {
+        query.createdBy =
+          INFO_EMAIL
+      }
+
+      const emails =
+        await AdminEmail.find(
+          query
+        )
+          .sort({
+            sentAt: -1,
+            createdAt: -1
+          })
+          .limit(100)
+
+      res.json({
+        success: true,
+        data: emails
+      })
+    } catch (err) {
+      console.error(
+        "❌ EMAIL FOLDER ERROR:",
+        err
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load email folder"
+      })
     }
-
-    if (folder === "drafts") {
-      query.status = "draft"
-      query.archived = false
-    }
-
-    if (folder === "outbox") {
-      query.status = { $in: ["queued", "failed"] }
-      query.archived = false
-    }
-
-    if (folder === "archive") {
-      query.archived = true
-    }
-
-    if (folder === "all") {
-      // no filter
-    }
-
-    const emails = await AdminEmail.find(query)
-      .sort({ sentAt: -1, createdAt: -1 })
-      .limit(100)
-
-    res.json({
-      success: true,
-      data: emails
-    })
-  } catch (err) {
-    console.error("❌ EMAIL FOLDER ERROR:", err)
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to load email folder"
-    })
   }
-})
+)
 
-router.get("/sent", requireAuth, async (req, res) => {
-  req.params.folder = "sent"
-  return router.handle(req, res)
-})
+/* ================= SENT ================= */
+
+router.get(
+  "/sent",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        channel
+      } = req.query
+
+      const query = {
+        status: "sent",
+        archived: false
+      }
+
+      if (
+        channel === "quotes"
+      ) {
+        query.createdBy =
+          QUOTES_EMAIL
+      }
+
+      if (
+        channel === "info"
+      ) {
+        query.createdBy =
+          INFO_EMAIL
+      }
+
+      const emails =
+        await AdminEmail.find(
+          query
+        )
+          .sort({
+            sentAt: -1,
+            createdAt: -1
+          })
+          .limit(100)
+
+      res.json({
+        success: true,
+        data: emails
+      })
+    } catch (err) {
+      console.error(
+        "❌ SENT EMAIL ERROR:",
+        err
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load sent emails"
+      })
+    }
+  }
+)
 
 /* ================= HISTORY ================= */
 
-router.get("/history", requireAuth, async (req, res) => {
-  try {
-    const emails = await AdminEmail.find()
-      .sort({ createdAt: -1 })
-      .limit(100)
+router.get(
+  "/history",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        channel
+      } = req.query
 
-    res.json({
-      success: true,
-      data: emails
-    })
-  } catch (err) {
-    console.error("❌ EMAIL HISTORY ERROR:", err)
+      const query = {}
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to load email history"
-    })
+      if (
+        channel === "quotes"
+      ) {
+        query.createdBy =
+          QUOTES_EMAIL
+      }
+
+      if (
+        channel === "info"
+      ) {
+        query.createdBy =
+          INFO_EMAIL
+      }
+
+      const emails =
+        await AdminEmail.find(
+          query
+        )
+          .sort({
+            createdAt: -1
+          })
+          .limit(100)
+
+      res.json({
+        success: true,
+        data: emails
+      })
+    } catch (err) {
+      console.error(
+        "❌ EMAIL HISTORY ERROR:",
+        err
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load email history"
+      })
+    }
   }
-})
+)
 
-/* ================= ARCHIVE / RESTORE ================= */
+/* ================= ARCHIVE ================= */
 
-router.patch("/archive/:id", requireAuth, async (req, res) => {
-  try {
-    const email = await AdminEmail.findByIdAndUpdate(
-      req.params.id,
-      {
-        archived: true,
-        status: "archived"
-      },
-      { new: true }
-    )
+router.patch(
+  "/archive/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const email =
+        await AdminEmail.findByIdAndUpdate(
+          req.params.id,
+          {
+            archived: true,
+            status: "archived"
+          },
+          {
+            new: true
+          }
+        )
 
-    res.json({
-      success: true,
-      data: email
-    })
-  } catch (err) {
-    console.error("❌ EMAIL ARCHIVE ERROR:", err)
+      if (!email) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Email not found"
+        })
+      }
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to archive email"
-    })
+      res.json({
+        success: true,
+        data: email
+      })
+    } catch (err) {
+      console.error(
+        "❌ EMAIL ARCHIVE ERROR:",
+        err
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to archive email"
+      })
+    }
   }
-})
+)
 
-router.patch("/restore/:id", requireAuth, async (req, res) => {
-  try {
-    const email = await AdminEmail.findByIdAndUpdate(
-      req.params.id,
-      {
-        archived: false,
-        status: "sent"
-      },
-      { new: true }
-    )
+/* ================= RESTORE ================= */
 
-    res.json({
-      success: true,
-      data: email
-    })
-  } catch (err) {
-    console.error("❌ EMAIL RESTORE ERROR:", err)
+router.patch(
+  "/restore/:id",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const email =
+        await AdminEmail.findByIdAndUpdate(
+          req.params.id,
+          {
+            archived: false,
+            status: "sent"
+          },
+          {
+            new: true
+          }
+        )
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to restore email"
-    })
+      if (!email) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Email not found"
+        })
+      }
+
+      res.json({
+        success: true,
+        data: email
+      })
+    } catch (err) {
+      console.error(
+        "❌ EMAIL RESTORE ERROR:",
+        err
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to restore email"
+      })
+    }
   }
-})
+)
 
 export default router
