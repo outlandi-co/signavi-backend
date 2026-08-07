@@ -1,6 +1,22 @@
-import sgMail from "@sendgrid/mail"
+import { Resend } from "resend"
 
-sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+const RESEND_API_KEY =
+  process.env.RESEND_API_KEY || ""
+
+const INFO_EMAIL =
+  process.env.INFO_EMAIL ||
+  "info@signavistudio.store"
+
+const resend =
+  new Resend(RESEND_API_KEY)
+
+if (RESEND_API_KEY) {
+  console.log("📨 ORDER STATUS RESEND READY")
+} else {
+  console.warn(
+    "⚠️ RESEND_API_KEY missing for order status email"
+  )
+}
 
 /* =========================================================
    SEND ORDER STATUS EMAIL
@@ -11,14 +27,33 @@ export const sendOrderStatusEmail = async (
   status,
   order
 ) => {
-
   try {
+    if (!customerEmail) {
+      console.warn(
+        "⚠️ STATUS EMAIL SKIPPED: customer email missing"
+      )
+
+      return
+    }
+
+    if (!RESEND_API_KEY) {
+      throw new Error(
+        "RESEND_API_KEY is not configured"
+      )
+    }
 
     const subjectMap = {
-      production: "Your SignaVi order is now in production",
-      shipping: "Your SignaVi order is preparing for shipment",
-      shipped: "Your SignaVi order has shipped",
-      delivered: "Your SignaVi order has been delivered"
+      production:
+        "Your SignaVi order is now in production",
+
+      shipping:
+        "Your SignaVi order is preparing for shipment",
+
+      shipped:
+        "Your SignaVi order has shipped",
+
+      delivered:
+        "Your SignaVi order has been delivered"
     }
 
     const messageMap = {
@@ -44,12 +79,23 @@ export const sendOrderStatusEmail = async (
       "Your order status has been updated."
 
     const html = `
-      <div style="font-family: Arial; padding: 20px;">
+      <div
+        style="
+          font-family: Arial, sans-serif;
+          padding: 20px;
+          color: #111;
+          line-height: 1.6;
+        "
+      >
         <h2>SignaVi Studio</h2>
 
-        <p>Hello ${order.customerName || "Customer"},</p>
+        <p>
+          Hello ${order?.customerName || "Customer"},
+        </p>
 
-        <p>${message}</p>
+        <p>
+          ${message}
+        </p>
 
         <hr />
 
@@ -57,7 +103,7 @@ export const sendOrderStatusEmail = async (
 
         <p>
           <strong>Order ID:</strong>
-          ${order._id}
+          ${order?._id || ""}
         </p>
 
         <p>
@@ -67,17 +113,21 @@ export const sendOrderStatusEmail = async (
 
         <p>
           <strong>Total:</strong>
-          $${Number(order.finalPrice || 0).toFixed(2)}
+          $${Number(
+            order?.finalPrice ||
+            order?.price ||
+            0
+          ).toFixed(2)}
         </p>
 
         ${
-          order.trackingNumber
+          order?.trackingNumber
             ? `
-            <p>
-              <strong>Tracking:</strong>
-              ${order.trackingNumber}
-            </p>
-          `
+              <p>
+                <strong>Tracking:</strong>
+                ${order.trackingNumber}
+              </p>
+            `
             : ""
         }
 
@@ -89,26 +139,49 @@ export const sendOrderStatusEmail = async (
       </div>
     `
 
-    await sgMail.send({
-      to: customerEmail,
-
+    const {
+      data,
+      error
+    } = await resend.emails.send({
       from:
-        process.env.EMAIL_FROM ||
-        "admin@signavistudio.store",
+        `SignaVi Studio <${INFO_EMAIL}>`,
+
+      to: [
+        customerEmail
+      ],
 
       subject,
+
+      text:
+        message,
+
       html
     })
 
+    if (error) {
+      console.error(
+        "❌ RESEND STATUS EMAIL ERROR:",
+        error
+      )
+
+      throw new Error(
+        error.message ||
+        "Failed to send order status email"
+      )
+    }
+
     console.log(
-      `📧 STATUS EMAIL SENT: ${status}`
+      `📧 STATUS EMAIL SENT: ${status}`,
+      data?.id || ""
     )
 
+    return data
   } catch (err) {
-
     console.error(
       "❌ STATUS EMAIL ERROR:",
-      err.response?.body || err.message
+      err?.message || err
     )
+
+    return null
   }
 }

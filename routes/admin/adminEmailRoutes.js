@@ -1,6 +1,6 @@
 import express from "express"
 import multer from "multer"
-import sgMail from "@sendgrid/mail"
+import { Resend } from "resend"
 
 import { requireAuth } from "../../middleware/requireAuth.js"
 import AdminEmail from "../../models/AdminEmail.js"
@@ -15,6 +15,8 @@ const upload = multer({
   }
 })
 
+/* ================= EMAIL CONFIG ================= */
+
 const INFO_EMAIL =
   process.env.INFO_EMAIL ||
   "info@signavistudio.store"
@@ -23,19 +25,30 @@ const QUOTES_EMAIL =
   process.env.QUOTES_EMAIL ||
   "quotes@signavistudio.store"
 
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY)
-  console.log("📧 ADMIN EMAIL ROUTE READY")
+const RESEND_API_KEY =
+  process.env.RESEND_API_KEY || ""
+
+const resend =
+  new Resend(RESEND_API_KEY)
+
+if (RESEND_API_KEY) {
+  console.log("📨 ADMIN EMAIL RESEND ROUTE READY")
 } else {
-  console.warn("⚠️ SENDGRID_API_KEY missing")
+  console.warn("⚠️ RESEND_API_KEY missing")
 }
 
 /* ================= HELPERS ================= */
 
 const buildHtml = (message = "") => `
-  <div style="font-family: Arial, sans-serif; color:#111; line-height:1.6;">
+  <div style="
+    font-family: Arial, sans-serif;
+    color:#111;
+    line-height:1.6;
+  ">
     <h2>SignaVi Studio</h2>
-    <p>${String(message).replace(/\n/g, "<br/>")}</p>
+    <p>
+      ${String(message).replace(/\n/g, "<br/>")}
+    </p>
   </div>
 `
 
@@ -45,21 +58,101 @@ const getFromEmail = (channel = "info") => {
     : INFO_EMAIL
 }
 
-const mapSendGridAttachments = (files = []) => {
+const splitEmails = (value = "") => {
+  if (!value) return undefined
+
+  const emails =
+    String(value)
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+
+  return emails.length
+    ? emails
+    : undefined
+}
+
+const mapResendAttachments = (files = []) => {
   return files.map((file) => ({
-    content: file.buffer.toString("base64"),
-    filename: file.originalname,
-    type: file.mimetype,
-    disposition: "attachment"
+    filename:
+      file.originalname,
+
+    content:
+      file.buffer
   }))
 }
 
 const mapAttachmentMeta = (files = []) => {
   return files.map((file) => ({
-    fileName: file.originalname,
-    mimeType: file.mimetype,
-    size: file.size
+    fileName:
+      file.originalname,
+
+    mimeType:
+      file.mimetype,
+
+    size:
+      file.size
   }))
+}
+
+const sendWithResend = async ({
+  to,
+  cc,
+  bcc,
+  fromEmail,
+  subject,
+  message,
+  html,
+  attachments = []
+}) => {
+  if (!RESEND_API_KEY) {
+    throw new Error(
+      "RESEND_API_KEY is not configured"
+    )
+  }
+
+  const {
+    data,
+    error
+  } = await resend.emails.send({
+    from:
+      `SignaVi Studio <${fromEmail}>`,
+
+    to:
+      splitEmails(to),
+
+    cc:
+      splitEmails(cc),
+
+    bcc:
+      splitEmails(bcc),
+
+    subject,
+
+    text:
+      message,
+
+    html,
+
+    attachments:
+      attachments.length
+        ? attachments
+        : undefined
+  })
+
+  if (error) {
+    console.error(
+      "❌ RESEND SEND ERROR:",
+      error
+    )
+
+    throw new Error(
+      error.message ||
+      "Resend failed to send email"
+    )
+  }
+
+  return data
 }
 
 /* ================= SEND EMAIL ================= */
@@ -81,10 +174,15 @@ router.post(
         customerName = ""
       } = req.body || {}
 
-      if (!to || !subject || !message) {
+      if (
+        !to ||
+        !subject ||
+        !message
+      ) {
         return res.status(400).json({
           success: false,
-          message: "To, subject, and message are required"
+          message:
+            "To, subject, and message are required"
         })
       }
 
@@ -94,13 +192,15 @@ router.post(
           : "info"
 
       const fromEmail =
-        getFromEmail(cleanChannel)
+        getFromEmail(
+          cleanChannel
+        )
 
       const html =
         buildHtml(message)
 
       const attachments =
-        mapSendGridAttachments(
+        mapResendAttachments(
           req.files || []
         )
 
@@ -109,41 +209,49 @@ router.post(
           req.files || []
         )
 
-      await sgMail.send({
-        to,
-        cc: cc || undefined,
-        bcc: bcc || undefined,
+      const resendResult =
+        await sendWithResend({
+          to,
+          cc,
+          bcc,
+          fromEmail,
+          subject,
+          message,
+          html,
+          attachments
+        })
 
-        from: {
-          email: fromEmail,
-          name: "SignaVi Studio"
-        },
-
-        subject,
-        text: message,
-        html,
-
-        attachments:
-          attachments.length
-            ? attachments
-            : undefined
-      })
+      console.log(
+        "✅ RESEND EMAIL SENT:",
+        resendResult?.id
+      )
 
       const email =
         await AdminEmail.create({
           to,
           cc,
           bcc,
+
           subject,
+
           message,
+
           html,
-          attachments: attachmentMeta,
 
-          status: "sent",
-          archived: false,
-          sentAt: new Date(),
+          attachments:
+            attachmentMeta,
 
-          createdBy: fromEmail,
+          status:
+            "sent",
+
+          archived:
+            false,
+
+          sentAt:
+            new Date(),
+
+          createdBy:
+            fromEmail,
 
           customerId:
             customerId || null,
@@ -154,24 +262,38 @@ router.post(
 
       res.json({
         success: true,
+
         message:
           cleanChannel === "quotes"
             ? "Quote email sent successfully"
             : "Information email sent successfully",
 
-        channel: cleanChannel,
-        from: fromEmail,
-        data: email
+        provider:
+          "resend",
+
+        resendId:
+          resendResult?.id ||
+          null,
+
+        channel:
+          cleanChannel,
+
+        from:
+          fromEmail,
+
+        data:
+          email
       })
     } catch (err) {
       console.error(
         "❌ ADMIN EMAIL ERROR:",
-        err?.response?.body || err
+        err
       )
 
       try {
         const failedChannel =
-          req.body?.channel === "quotes"
+          req.body?.channel ===
+          "quotes"
             ? "quotes"
             : "info"
 
@@ -182,22 +304,30 @@ router.post(
 
         await AdminEmail.create({
           to:
-            req.body?.to || "",
+            req.body?.to ||
+            "",
 
           cc:
-            req.body?.cc || "",
+            req.body?.cc ||
+            "",
 
           bcc:
-            req.body?.bcc || "",
+            req.body?.bcc ||
+            "",
 
           subject:
-            req.body?.subject || "",
+            req.body?.subject ||
+            "",
 
           message:
-            req.body?.message || "",
+            req.body?.message ||
+            "",
 
-          status: "failed",
-          archived: false,
+          status:
+            "failed",
+
+          archived:
+            false,
 
           createdBy:
             failedFromEmail,
@@ -219,7 +349,10 @@ router.post(
 
       res.status(500).json({
         success: false,
-        message: "Failed to send email",
+
+        message:
+          "Failed to send email",
+
         error:
           err?.message ||
           "Unknown error"
@@ -252,38 +385,57 @@ router.post(
           : "info"
 
       const fromEmail =
-        getFromEmail(cleanChannel)
+        getFromEmail(
+          cleanChannel
+        )
 
       const draft =
         await AdminEmail.create({
           to,
           cc,
           bcc,
+
           subject,
+
           message,
 
           html:
-            buildHtml(message),
+            buildHtml(
+              message
+            ),
 
-          status: "draft",
-          archived: false,
+          status:
+            "draft",
+
+          archived:
+            false,
 
           createdBy:
             fromEmail,
 
           customerId:
-            customerId || null,
+            customerId ||
+            null,
 
           customerName:
-            customerName || ""
+            customerName ||
+            ""
         })
 
-      res.status(201).json({
-        success: true,
-        channel: cleanChannel,
-        from: fromEmail,
-        data: draft
-      })
+      res
+        .status(201)
+        .json({
+          success: true,
+
+          channel:
+            cleanChannel,
+
+          from:
+            fromEmail,
+
+          data:
+            draft
+        })
     } catch (err) {
       console.error(
         "❌ SAVE DRAFT ERROR:",
@@ -292,6 +444,7 @@ router.post(
 
       res.status(500).json({
         success: false,
+
         message:
           "Failed to save draft"
       })
@@ -314,7 +467,8 @@ router.patch(
       if (!draft) {
         return res.status(404).json({
           success: false,
-          message: "Draft not found"
+          message:
+            "Draft not found"
         })
       }
 
@@ -325,6 +479,7 @@ router.patch(
       ) {
         return res.status(400).json({
           success: false,
+
           message:
             "Draft needs To, subject, and message before sending"
         })
@@ -336,46 +491,66 @@ router.patch(
           ? QUOTES_EMAIL
           : INFO_EMAIL
 
-      await sgMail.send({
-        to: draft.to,
+      const resendResult =
+        await sendWithResend({
+          to:
+            draft.to,
 
-        cc:
-          draft.cc ||
-          undefined,
+          cc:
+            draft.cc,
 
-        bcc:
-          draft.bcc ||
-          undefined,
+          bcc:
+            draft.bcc,
 
-        from: {
-          email: fromEmail,
-          name: "SignaVi Studio"
-        },
+          fromEmail,
 
-        subject:
-          draft.subject,
+          subject:
+            draft.subject,
 
-        text:
-          draft.message,
+          message:
+            draft.message,
 
-        html:
-          draft.html ||
-          buildHtml(
-            draft.message
-          )
-      })
+          html:
+            draft.html ||
+            buildHtml(
+              draft.message
+            )
+        })
 
-      draft.status = "sent"
-      draft.archived = false
-      draft.sentAt = new Date()
-      draft.createdBy = fromEmail
+      console.log(
+        "✅ RESEND DRAFT SENT:",
+        resendResult?.id
+      )
+
+      draft.status =
+        "sent"
+
+      draft.archived =
+        false
+
+      draft.sentAt =
+        new Date()
+
+      draft.createdBy =
+        fromEmail
 
       await draft.save()
 
       res.json({
         success: true,
-        from: fromEmail,
-        data: draft
+
+        provider:
+          "resend",
+
+        resendId:
+          resendResult?.id ||
+          null,
+
+        from:
+          fromEmail,
+
+        data:
+          draft
       })
     } catch (err) {
       console.error(
@@ -385,8 +560,13 @@ router.patch(
 
       res.status(500).json({
         success: false,
+
         message:
-          "Failed to send draft"
+          "Failed to send draft",
+
+        error:
+          err?.message ||
+          "Unknown error"
       })
     }
   }
@@ -412,15 +592,21 @@ router.get(
       if (
         folder === "sent"
       ) {
-        query.status = "sent"
-        query.archived = false
+        query.status =
+          "sent"
+
+        query.archived =
+          false
       }
 
       if (
         folder === "drafts"
       ) {
-        query.status = "draft"
-        query.archived = false
+        query.status =
+          "draft"
+
+        query.archived =
+          false
       }
 
       if (
@@ -433,13 +619,15 @@ router.get(
           ]
         }
 
-        query.archived = false
+        query.archived =
+          false
       }
 
       if (
         folder === "archive"
       ) {
-        query.archived = true
+        query.archived =
+          true
       }
 
       if (
@@ -484,6 +672,7 @@ router.get(
 
       res.status(500).json({
         success: false,
+
         message:
           "Failed to load email folder"
       })
@@ -503,8 +692,11 @@ router.get(
       } = req.query
 
       const query = {
-        status: "sent",
-        archived: false
+        status:
+          "sent",
+
+        archived:
+          false
       }
 
       if (
@@ -543,6 +735,7 @@ router.get(
 
       res.status(500).json({
         success: false,
+
         message:
           "Failed to load sent emails"
       })
@@ -598,6 +791,7 @@ router.get(
 
       res.status(500).json({
         success: false,
+
         message:
           "Failed to load email history"
       })
@@ -616,11 +810,15 @@ router.patch(
         await AdminEmail.findByIdAndUpdate(
           req.params.id,
           {
-            archived: true,
-            status: "archived"
+            archived:
+              true,
+
+            status:
+              "archived"
           },
           {
-            new: true
+            returnDocument:
+              "after"
           }
         )
 
@@ -644,6 +842,7 @@ router.patch(
 
       res.status(500).json({
         success: false,
+
         message:
           "Failed to archive email"
       })
@@ -662,11 +861,15 @@ router.patch(
         await AdminEmail.findByIdAndUpdate(
           req.params.id,
           {
-            archived: false,
-            status: "sent"
+            archived:
+              false,
+
+            status:
+              "sent"
           },
           {
-            new: true
+            returnDocument:
+              "after"
           }
         )
 
@@ -690,6 +893,7 @@ router.patch(
 
       res.status(500).json({
         success: false,
+
         message:
           "Failed to restore email"
       })

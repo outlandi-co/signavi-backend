@@ -1,11 +1,13 @@
 import express from "express"
-import sgMail from "@sendgrid/mail"
+import { Resend } from "resend"
 
 import { requireAuth } from "../../middleware/requireAuth.js"
 import AdminEmailThread from "../../models/AdminEmailThread.js"
 import AdminEmailMessage from "../../models/AdminEmailMessage.js"
 
 const router = express.Router()
+
+/* ================= EMAIL CONFIG ================= */
 
 const INFO_EMAIL =
   process.env.INFO_EMAIL ||
@@ -15,17 +17,31 @@ const QUOTES_EMAIL =
   process.env.QUOTES_EMAIL ||
   "quotes@signavistudio.store"
 
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+const RESEND_API_KEY =
+  process.env.RESEND_API_KEY || ""
+
+const resend = new Resend(RESEND_API_KEY)
+
+if (RESEND_API_KEY) {
+  console.log("📨 RESEND THREAD EMAIL READY")
+} else {
+  console.warn("⚠️ RESEND_API_KEY missing")
 }
 
 /* ================= HELPERS ================= */
 
 const buildHtml = (message = "") => {
   return `
-    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;">
+    <div style="
+      font-family:Arial,sans-serif;
+      line-height:1.6;
+      color:#111;
+    ">
       <h2>SignaVi Studio</h2>
-      <p>${String(message).replace(/\n/g, "<br/>")}</p>
+
+      <p>
+        ${String(message).replace(/\n/g, "<br/>")}
+      </p>
     </div>
   `
 }
@@ -36,79 +52,134 @@ const getFromEmail = (channel = "info") => {
     : INFO_EMAIL
 }
 
-/* ================= GET THREADS ================= */
+const sendResendEmail = async ({
+  to,
+  fromEmail,
+  subject,
+  message,
+  html
+}) => {
+  if (!RESEND_API_KEY) {
+    throw new Error(
+      "RESEND_API_KEY is not configured"
+    )
+  }
 
-router.get("/", requireAuth, async (req, res) => {
-  try {
-    const { channel } = req.query
-
-    const filter = {
-      archived: false
-    }
-
-    if (
-      channel === "info" ||
-      channel === "quotes"
-    ) {
-      filter.channel = channel
-    }
-
-    const threads = await AdminEmailThread.find(filter)
-      .sort({ updatedAt: -1 })
-
-    res.json({
-      success: true,
-      data: threads
+  const { data, error } =
+    await resend.emails.send({
+      from: `SignaVi Studio <${fromEmail}>`,
+      to: [to],
+      subject,
+      text: message,
+      html
     })
-  } catch (error) {
+
+  if (error) {
     console.error(
-      "❌ GET THREADS ERROR:",
+      "❌ RESEND EMAIL ERROR:",
       error
     )
 
-    res.status(500).json({
-      success: false,
-      message: "Failed to load threads"
-    })
+    throw new Error(
+      error.message ||
+      "Resend failed to send email"
+    )
   }
-})
+
+  return data
+}
+
+/* ================= GET THREADS ================= */
+
+router.get(
+  "/",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { channel } = req.query
+
+      const filter = {
+        archived: false
+      }
+
+      if (
+        channel === "info" ||
+        channel === "quotes"
+      ) {
+        filter.channel = channel
+      }
+
+      const threads =
+        await AdminEmailThread.find(
+          filter
+        ).sort({
+          updatedAt: -1
+        })
+
+      res.json({
+        success: true,
+        data: threads
+      })
+    } catch (error) {
+      console.error(
+        "❌ GET THREADS ERROR:",
+        error
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load threads"
+      })
+    }
+  }
+)
 
 /* ================= GET ARCHIVED THREADS ================= */
 
-router.get("/archived", requireAuth, async (req, res) => {
-  try {
-    const { channel } = req.query
+router.get(
+  "/archived",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const { channel } = req.query
 
-    const filter = {
-      archived: true
+      const filter = {
+        archived: true
+      }
+
+      if (
+        channel === "info" ||
+        channel === "quotes"
+      ) {
+        filter.channel = channel
+      }
+
+      const threads =
+        await AdminEmailThread.find(
+          filter
+        ).sort({
+          updatedAt: -1
+        })
+
+      res.json({
+        success: true,
+        data: threads
+      })
+    } catch (error) {
+      console.error(
+        "❌ GET ARCHIVED THREADS ERROR:",
+        error
+      )
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to load archived threads"
+      })
     }
-
-    if (
-      channel === "info" ||
-      channel === "quotes"
-    ) {
-      filter.channel = channel
-    }
-
-    const threads = await AdminEmailThread.find(filter)
-      .sort({ updatedAt: -1 })
-
-    res.json({
-      success: true,
-      data: threads
-    })
-  } catch (error) {
-    console.error(
-      "❌ GET ARCHIVED THREADS ERROR:",
-      error
-    )
-
-    res.status(500).json({
-      success: false,
-      message: "Failed to load archived threads"
-    })
   }
-})
+)
 
 /* ================= RESTORE THREAD ================= */
 
@@ -124,7 +195,7 @@ router.patch(
             archived: false
           },
           {
-            new: true
+            returnDocument: "after"
           }
         )
 
@@ -137,7 +208,10 @@ router.patch(
 
       req.app
         .get("io")
-        ?.emit("threadRestored", thread)
+        ?.emit(
+          "threadRestored",
+          thread
+        )
 
       res.json({
         success: true,
@@ -151,7 +225,8 @@ router.patch(
 
       res.status(500).json({
         success: false,
-        message: "Failed to restore thread"
+        message:
+          "Failed to restore thread"
       })
     }
   }
@@ -166,8 +241,11 @@ router.get(
     try {
       const messages =
         await AdminEmailMessage.find({
-          threadId: req.params.threadId
-        }).sort({ createdAt: 1 })
+          threadId:
+            req.params.threadId
+        }).sort({
+          createdAt: 1
+        })
 
       await AdminEmailThread.findByIdAndUpdate(
         req.params.threadId,
@@ -175,7 +253,7 @@ router.get(
           unread: false
         },
         {
-          new: true
+          returnDocument: "after"
         }
       )
 
@@ -191,7 +269,8 @@ router.get(
 
       res.status(500).json({
         success: false,
-        message: "Failed to load messages"
+        message:
+          "Failed to load messages"
       })
     }
   }
@@ -211,7 +290,8 @@ router.post(
       if (!message.trim()) {
         return res.status(400).json({
           success: false,
-          message: "Reply message is required"
+          message:
+            "Reply message is required"
         })
       }
 
@@ -228,34 +308,50 @@ router.post(
       }
 
       const fromEmail =
-        getFromEmail(thread.channel)
+        getFromEmail(
+          thread.channel
+        )
+
+      const subject =
+        thread.subject ||
+        "SignaVi Studio Reply"
 
       const html =
         buildHtml(message)
 
-      await sgMail.send({
-        to: thread.customerEmail,
+      /* ================= SEND WITH RESEND ================= */
 
-        from: {
-          email: fromEmail,
-          name: "SignaVi Studio"
-        },
+      const resendResult =
+        await sendResendEmail({
+          to:
+            thread.customerEmail,
 
-        subject:
-          thread.subject ||
-          "SignaVi Studio Reply",
+          fromEmail,
 
-        text: message,
-        html
-      })
+          subject,
+
+          message,
+
+          html
+        })
+
+      console.log(
+        "✅ RESEND THREAD REPLY SENT:",
+        resendResult?.id
+      )
+
+      /* ================= SAVE MESSAGE ================= */
 
       const savedMessage =
         await AdminEmailMessage.create({
-          threadId: thread._id,
+          threadId:
+            thread._id,
 
-          direction: "outbound",
+          direction:
+            "outbound",
 
-          senderEmail: fromEmail,
+          senderEmail:
+            fromEmail,
 
           senderName:
             "SignaVi Studio",
@@ -263,22 +359,30 @@ router.post(
           to:
             thread.customerEmail,
 
-          subject:
-            thread.subject ||
-            "SignaVi Studio Reply",
+          subject,
 
           message,
 
           html,
 
-          read: true
+          read:
+            true
         })
 
-      thread.lastMessage = message
-      thread.unread = false
-      thread.archived = false
+      /* ================= UPDATE THREAD ================= */
+
+      thread.lastMessage =
+        message
+
+      thread.unread =
+        false
+
+      thread.archived =
+        false
 
       await thread.save()
+
+      /* ================= SOCKET ================= */
 
       req.app
         .get("io")
@@ -286,13 +390,26 @@ router.post(
           "customerEmailReply",
           {
             thread,
-            message: savedMessage
+            message:
+              savedMessage
           }
         )
 
       res.json({
         success: true,
-        data: savedMessage
+
+        provider:
+          "resend",
+
+        from:
+          fromEmail,
+
+        resendId:
+          resendResult?.id ||
+          null,
+
+        data:
+          savedMessage
       })
     } catch (error) {
       console.error(
@@ -302,7 +419,13 @@ router.post(
 
       res.status(500).json({
         success: false,
-        message: "Failed to send reply"
+
+        message:
+          "Failed to send reply",
+
+        error:
+          error?.message ||
+          "Unknown error"
       })
     }
   }
@@ -323,20 +446,24 @@ router.patch(
             unread: false
           },
           {
-            new: true
+            returnDocument: "after"
           }
         )
 
       if (!thread) {
         return res.status(404).json({
           success: false,
-          message: "Thread not found"
+          message:
+            "Thread not found"
         })
       }
 
       req.app
         .get("io")
-        ?.emit("threadArchived", thread)
+        ?.emit(
+          "threadArchived",
+          thread
+        )
 
       res.json({
         success: true,
@@ -350,7 +477,8 @@ router.patch(
 
       res.status(500).json({
         success: false,
-        message: "Failed to archive thread"
+        message:
+          "Failed to archive thread"
       })
     }
   }

@@ -1,5 +1,5 @@
 import crypto from "crypto"
-import sgMail from "@sendgrid/mail"
+import { Resend } from "resend"
 import { SquareClient, SquareEnvironment } from "square"
 
 import Invoice from "../models/Invoice.js"
@@ -18,9 +18,9 @@ const LOGO_URL =
   `${CLIENT_URL.replace(/\/$/, "")}/signavi-logo.png`
 
 const FROM_EMAIL =
-  process.env.SENDGRID_FROM_EMAIL ||
+  process.env.INFO_EMAIL ||
   process.env.EMAIL_FROM ||
-  "admin@signavistudio.store"
+  "info@signavistudio.store"
 
 const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL ||
@@ -31,9 +31,9 @@ const squareClient = new SquareClient({
   environment: SquareEnvironment.Production
 })
 
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY)
-}
+const resend = new Resend(
+  process.env.RESEND_API_KEY
+)
 
 const emitAdminNotification = (req, notification) => {
   req.app.get("io")?.emit("adminNotification", notification)
@@ -261,12 +261,16 @@ export const sendInvoiceEmail = async (req, res) => {
       </div>
     `
 
-    await sgMail.send({
-      to: invoice.customerEmail,
-      from: FROM_EMAIL,
-      subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
-      html
-    })
+   const { error } = await resend.emails.send({
+  from: `SignaVi Studio <${FROM_EMAIL}>`,
+  to: [invoice.customerEmail],
+  subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+  html
+})
+
+if (error) {
+  throw new Error(error.message)
+}
 
     await AdminEmail.create({
       to: invoice.customerEmail,
