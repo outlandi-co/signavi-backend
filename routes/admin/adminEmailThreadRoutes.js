@@ -1,5 +1,5 @@
 import express from "express"
-import { Resend } from "resend"
+import sgMail from "@sendgrid/mail"
 
 import { requireAuth } from "../../middleware/requireAuth.js"
 import AdminEmailThread from "../../models/AdminEmailThread.js"
@@ -9,6 +9,10 @@ const router = express.Router()
 
 /* ================= EMAIL CONFIG ================= */
 
+const SUPPORT_EMAIL =
+  process.env.SUPPORT_EMAIL ||
+  "support@signavistudio.store"
+
 const INFO_EMAIL =
   process.env.INFO_EMAIL ||
   "info@signavistudio.store"
@@ -17,26 +21,31 @@ const QUOTES_EMAIL =
   process.env.QUOTES_EMAIL ||
   "quotes@signavistudio.store"
 
-const RESEND_API_KEY =
-  process.env.RESEND_API_KEY || ""
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(
+    process.env.SENDGRID_API_KEY
+  )
 
-const resend = new Resend(RESEND_API_KEY)
-
-if (RESEND_API_KEY) {
-  console.log("📨 RESEND THREAD EMAIL READY")
+  console.log(
+    "📧 SENDGRID THREAD EMAIL READY"
+  )
 } else {
-  console.warn("⚠️ RESEND_API_KEY missing")
+  console.warn(
+    "⚠️ SENDGRID_API_KEY missing"
+  )
 }
 
 /* ================= HELPERS ================= */
 
 const buildHtml = (message = "") => {
   return `
-    <div style="
-      font-family:Arial,sans-serif;
-      line-height:1.6;
-      color:#111;
-    ">
+    <div
+      style="
+        font-family: Arial, sans-serif;
+        color:#111;
+        line-height:1.6;
+      "
+    >
       <h2>SignaVi Studio</h2>
 
       <p>
@@ -47,46 +56,64 @@ const buildHtml = (message = "") => {
 }
 
 const getFromEmail = (channel = "info") => {
-  return channel === "quotes"
-    ? QUOTES_EMAIL
-    : INFO_EMAIL
+  switch (channel) {
+    case "support":
+      return SUPPORT_EMAIL
+
+    case "quotes":
+      return QUOTES_EMAIL
+
+    case "info":
+    default:
+      return INFO_EMAIL
+  }
 }
 
-const sendResendEmail = async ({
+const isValidChannel = (channel = "") => {
+  return [
+    "info",
+    "quotes",
+    "support"
+  ].includes(channel)
+}
+
+const sendSendGridEmail = async ({
   to,
   fromEmail,
   subject,
   message,
   html
 }) => {
-  if (!RESEND_API_KEY) {
+  if (
+    !process.env.SENDGRID_API_KEY
+  ) {
     throw new Error(
-      "RESEND_API_KEY is not configured"
+      "SENDGRID_API_KEY is not configured"
     )
   }
 
-  const { data, error } =
-    await resend.emails.send({
-      from: `SignaVi Studio <${fromEmail}>`,
-      to: [to],
-      subject,
-      text: message,
-      html
-    })
+  await sgMail.send({
+    to,
 
-  if (error) {
-    console.error(
-      "❌ RESEND EMAIL ERROR:",
-      error
-    )
+    from: {
+      email:
+        fromEmail,
 
-    throw new Error(
-      error.message ||
-      "Resend failed to send email"
-    )
+      name:
+        "SignaVi Studio"
+    },
+
+    subject,
+
+    text:
+      message,
+
+    html
+  })
+
+  return {
+    success: true
   }
-
-  return data
 }
 
 /* ================= GET THREADS ================= */
@@ -96,29 +123,34 @@ router.get(
   requireAuth,
   async (req, res) => {
     try {
-      const { channel } = req.query
+      const {
+        channel
+      } = req.query
 
       const filter = {
         archived: false
       }
 
       if (
-        channel === "info" ||
-        channel === "quotes"
+        isValidChannel(
+          channel
+        )
       ) {
-        filter.channel = channel
+        filter.channel =
+          channel
       }
 
       const threads =
-        await AdminEmailThread.find(
-          filter
-        ).sort({
-          updatedAt: -1
-        })
+        await AdminEmailThread
+          .find(filter)
+          .sort({
+            updatedAt: -1
+          })
 
       res.json({
         success: true,
-        data: threads
+        data:
+          threads
       })
     } catch (error) {
       console.error(
@@ -126,11 +158,14 @@ router.get(
         error
       )
 
-      res.status(500).json({
-        success: false,
-        message:
-          "Failed to load threads"
-      })
+      res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            "Failed to load threads"
+        })
     }
   }
 )
@@ -142,29 +177,35 @@ router.get(
   requireAuth,
   async (req, res) => {
     try {
-      const { channel } = req.query
+      const {
+        channel
+      } = req.query
 
       const filter = {
         archived: true
       }
 
       if (
-        channel === "info" ||
-        channel === "quotes"
+        isValidChannel(
+          channel
+        )
       ) {
-        filter.channel = channel
+        filter.channel =
+          channel
       }
 
       const threads =
-        await AdminEmailThread.find(
-          filter
-        ).sort({
-          updatedAt: -1
-        })
+        await AdminEmailThread
+          .find(filter)
+          .sort({
+            updatedAt: -1
+          })
 
       res.json({
         success: true,
-        data: threads
+
+        data:
+          threads
       })
     } catch (error) {
       console.error(
@@ -172,11 +213,14 @@ router.get(
         error
       )
 
-      res.status(500).json({
-        success: false,
-        message:
-          "Failed to load archived threads"
-      })
+      res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            "Failed to load archived threads"
+        })
     }
   }
 )
@@ -189,21 +233,29 @@ router.patch(
   async (req, res) => {
     try {
       const thread =
-        await AdminEmailThread.findByIdAndUpdate(
-          req.params.threadId,
-          {
-            archived: false
-          },
-          {
-            returnDocument: "after"
-          }
-        )
+        await AdminEmailThread
+          .findByIdAndUpdate(
+            req.params.threadId,
+            {
+              archived:
+                false
+            },
+            {
+              returnDocument:
+                "after"
+            }
+          )
 
       if (!thread) {
-        return res.status(404).json({
-          success: false,
-          message: "Thread not found"
-        })
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Thread not found"
+          })
       }
 
       req.app
@@ -215,7 +267,9 @@ router.patch(
 
       res.json({
         success: true,
-        data: thread
+
+        data:
+          thread
       })
     } catch (error) {
       console.error(
@@ -223,11 +277,14 @@ router.patch(
         error
       )
 
-      res.status(500).json({
-        success: false,
-        message:
-          "Failed to restore thread"
-      })
+      res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            "Failed to restore thread"
+        })
     }
   }
 )
@@ -239,27 +296,44 @@ router.get(
   requireAuth,
   async (req, res) => {
     try {
-      const messages =
-        await AdminEmailMessage.find({
-          threadId:
+      const thread =
+        await AdminEmailThread
+          .findById(
             req.params.threadId
-        }).sort({
-          createdAt: 1
-        })
+          )
 
-      await AdminEmailThread.findByIdAndUpdate(
-        req.params.threadId,
-        {
-          unread: false
-        },
-        {
-          returnDocument: "after"
-        }
-      )
+      if (!thread) {
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Thread not found"
+          })
+      }
+
+      const messages =
+        await AdminEmailMessage
+          .find({
+            threadId:
+              req.params.threadId
+          })
+          .sort({
+            createdAt: 1
+          })
+
+      thread.unread =
+        false
+
+      await thread.save()
 
       res.json({
         success: true,
-        data: messages
+
+        data:
+          messages
       })
     } catch (error) {
       console.error(
@@ -267,11 +341,14 @@ router.get(
         error
       )
 
-      res.status(500).json({
-        success: false,
-        message:
-          "Failed to load messages"
-      })
+      res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            "Failed to load messages"
+        })
     }
   }
 )
@@ -287,24 +364,36 @@ router.post(
         message = ""
       } = req.body || {}
 
-      if (!message.trim()) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Reply message is required"
-        })
+      if (
+        !message.trim()
+      ) {
+        return res
+          .status(400)
+          .json({
+            success:
+              false,
+
+            message:
+              "Reply message is required"
+          })
       }
 
       const thread =
-        await AdminEmailThread.findById(
-          req.params.threadId
-        )
+        await AdminEmailThread
+          .findById(
+            req.params.threadId
+          )
 
       if (!thread) {
-        return res.status(404).json({
-          success: false,
-          message: "Thread not found"
-        })
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Thread not found"
+          })
       }
 
       const fromEmail =
@@ -317,57 +406,68 @@ router.post(
         "SignaVi Studio Reply"
 
       const html =
-        buildHtml(message)
+        buildHtml(
+          message
+        )
 
-      /* ================= SEND WITH RESEND ================= */
+      /* ================= SEND WITH SENDGRID ================= */
 
-      const resendResult =
-        await sendResendEmail({
+      await sendSendGridEmail({
+        to:
+          thread.customerEmail,
+
+        fromEmail,
+
+        subject,
+
+        message,
+
+        html
+      })
+
+      console.log(
+        "✅ SENDGRID THREAD REPLY SENT:",
+        {
           to:
             thread.customerEmail,
 
-          fromEmail,
+          from:
+            fromEmail,
 
-          subject,
-
-          message,
-
-          html
-        })
-
-      console.log(
-        "✅ RESEND THREAD REPLY SENT:",
-        resendResult?.id
+          channel:
+            thread.channel
+        }
       )
 
       /* ================= SAVE MESSAGE ================= */
 
       const savedMessage =
-        await AdminEmailMessage.create({
-          threadId:
-            thread._id,
+        await AdminEmailMessage
+          .create({
+            threadId:
+              thread._id,
 
-          direction:
-            "outbound",
+            direction:
+              "outbound",
 
-          senderEmail:
-            fromEmail,
+            senderEmail:
+              fromEmail,
 
-          senderName:
-            "SignaVi Studio",
+            senderName:
+              "SignaVi Studio",
 
-          to:
-            thread.customerEmail,
+            to:
+              thread.customerEmail,
 
-          subject,
+            subject,
 
-          message,
+            message,
 
-          html,
+            html,
 
-          read:
-            true
-        })
+            read:
+              true
+          })
 
       /* ================= UPDATE THREAD ================= */
 
@@ -390,6 +490,7 @@ router.post(
           "customerEmailReply",
           {
             thread,
+
             message:
               savedMessage
           }
@@ -399,14 +500,13 @@ router.post(
         success: true,
 
         provider:
-          "resend",
+          "sendgrid",
 
         from:
           fromEmail,
 
-        resendId:
-          resendResult?.id ||
-          null,
+        channel:
+          thread.channel,
 
         data:
           savedMessage
@@ -414,19 +514,26 @@ router.post(
     } catch (error) {
       console.error(
         "❌ REPLY THREAD ERROR:",
-        error
+        error?.response?.body ||
+          error
       )
 
-      res.status(500).json({
-        success: false,
+      res
+        .status(500)
+        .json({
+          success:
+            false,
 
-        message:
-          "Failed to send reply",
+          message:
+            "Failed to send reply",
 
-        error:
-          error?.message ||
-          "Unknown error"
-      })
+          error:
+            error?.response
+              ?.body
+              ?.errors ||
+            error?.message ||
+            "Unknown error"
+        })
     }
   }
 )
@@ -439,23 +546,32 @@ router.patch(
   async (req, res) => {
     try {
       const thread =
-        await AdminEmailThread.findByIdAndUpdate(
-          req.params.threadId,
-          {
-            archived: true,
-            unread: false
-          },
-          {
-            returnDocument: "after"
-          }
-        )
+        await AdminEmailThread
+          .findByIdAndUpdate(
+            req.params.threadId,
+            {
+              archived:
+                true,
+
+              unread:
+                false
+            },
+            {
+              returnDocument:
+                "after"
+            }
+          )
 
       if (!thread) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Thread not found"
-        })
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Thread not found"
+          })
       }
 
       req.app
@@ -467,7 +583,9 @@ router.patch(
 
       res.json({
         success: true,
-        data: thread
+
+        data:
+          thread
       })
     } catch (error) {
       console.error(
@@ -475,11 +593,15 @@ router.patch(
         error
       )
 
-      res.status(500).json({
-        success: false,
-        message:
-          "Failed to archive thread"
-      })
+      res
+        .status(500)
+        .json({
+          success:
+            false,
+
+          message:
+            "Failed to archive thread"
+        })
     }
   }
 )

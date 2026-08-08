@@ -1,7 +1,4 @@
-import { Resend } from "resend"
-
-const RESEND_API_KEY =
-  process.env.RESEND_API_KEY || ""
+import sgMail from "@sendgrid/mail"
 
 const INFO_EMAIL =
   process.env.INFO_EMAIL ||
@@ -12,14 +9,23 @@ const CLIENT_URL =
   process.env.CLIENT_URL ||
   "https://signavistudio.store"
 
-const resend =
-  new Resend(RESEND_API_KEY)
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(
+    process.env.SENDGRID_API_KEY
+  )
 
-if (RESEND_API_KEY) {
-  console.log("📨 RECEIPT RESEND READY")
+  console.log(
+    "📧 RECEIPT SENDGRID READY"
+  )
 } else {
-  console.warn("⚠️ RESEND_API_KEY missing for receipt email")
+  console.warn(
+    "⚠️ SENDGRID_API_KEY missing for receipt email"
+  )
 }
+
+/* =========================================================
+   HELPERS
+========================================================= */
 
 const formatMoney = (value) => {
   return Number(value || 0).toFixed(2)
@@ -33,6 +39,10 @@ const buildOrderUrl = (order) => {
   return `${CLIENT_URL}/customer/orders/${order._id}`
 }
 
+/* =========================================================
+   SEND RECEIPT EMAIL
+========================================================= */
+
 const sendReceiptEmail = async (order) => {
   try {
     if (!order?.email) {
@@ -43,9 +53,11 @@ const sendReceiptEmail = async (order) => {
       return null
     }
 
-    if (!RESEND_API_KEY) {
+    if (
+      !process.env.SENDGRID_API_KEY
+    ) {
       console.warn(
-        "📧 RECEIPT EMAIL SKIPPED: Missing RESEND_API_KEY"
+        "📧 RECEIPT EMAIL SKIPPED: Missing SENDGRID_API_KEY"
       )
 
       return null
@@ -65,7 +77,12 @@ const sendReceiptEmail = async (order) => {
 
         return `
           <tr>
-            <td style="padding:10px; border-bottom:1px solid #e5e7eb;">
+            <td
+              style="
+                padding:10px;
+                border-bottom:1px solid #e5e7eb;
+              "
+            >
               ${item.name || "Item"}
 
               ${
@@ -234,7 +251,11 @@ const sendReceiptEmail = async (order) => {
               "
             >
               <thead>
-                <tr style="background:#f8fafc;">
+                <tr
+                  style="
+                    background:#f8fafc;
+                  "
+                >
                   <th
                     style="
                       padding:10px;
@@ -312,7 +333,9 @@ const sendReceiptEmail = async (order) => {
                   justify-content:space-between;
                 "
               >
-                <span>Subtotal:</span>
+                <span>
+                  Subtotal:
+                </span>
 
                 <strong>
                   $${formatMoney(order.subtotal)}
@@ -326,7 +349,9 @@ const sendReceiptEmail = async (order) => {
                   justify-content:space-between;
                 "
               >
-                <span>Tax:</span>
+                <span>
+                  Tax:
+                </span>
 
                 <strong>
                   $${formatMoney(order.tax)}
@@ -340,7 +365,9 @@ const sendReceiptEmail = async (order) => {
                   justify-content:space-between;
                 "
               >
-                <span>Shipping:</span>
+                <span>
+                  Shipping:
+                </span>
 
                 <strong>
                   $${formatMoney(order.shipping)}
@@ -363,7 +390,9 @@ const sendReceiptEmail = async (order) => {
                   font-size:18px;
                 "
               >
-                <span>Total Paid:</span>
+                <span>
+                  Total Paid:
+                </span>
 
                 <strong>
                   $${formatMoney(order.finalPrice)}
@@ -371,7 +400,11 @@ const sendReceiptEmail = async (order) => {
               </p>
             </div>
 
-            <div style="margin-top:24px;">
+            <div
+              style="
+                margin-top:24px;
+              "
+            >
               <a
                 href="${receiptUrl}"
                 target="_blank"
@@ -417,6 +450,7 @@ const sendReceiptEmail = async (order) => {
             >
               If the receipt button does not open,
               copy and paste this link into your browser:
+
               <br/>
 
               <a
@@ -450,34 +484,24 @@ const sendReceiptEmail = async (order) => {
       </div>
     `
 
-    const {
-      data,
-      error
-    } = await resend.emails.send({
-      from:
-        `SignaVi Studio <${INFO_EMAIL}>`,
+    const [response] =
+      await sgMail.send({
+        to:
+          order.email,
 
-      to: [
-        order.email
-      ],
+        from: {
+          email:
+            INFO_EMAIL,
 
-      subject:
-        `Receipt for Order ${order._id} - SignaVi Studio`,
+          name:
+            "SignaVi Studio"
+        },
 
-      html
-    })
+        subject:
+          `Receipt for Order ${order._id} - SignaVi Studio`,
 
-    if (error) {
-      console.error(
-        "❌ RESEND RECEIPT EMAIL ERROR:",
-        error
-      )
-
-      throw new Error(
-        error.message ||
-        "Resend failed to send receipt email"
-      )
-    }
+        html
+      })
 
     console.log(
       "📧 RECEIPT EMAIL SENT SUCCESSFULLY:",
@@ -488,17 +512,19 @@ const sendReceiptEmail = async (order) => {
         orderId:
           order._id,
 
-        resendId:
-          data?.id || null
+        statusCode:
+          response?.statusCode ||
+          null
       }
     )
 
-    return data
-
+    return response
   } catch (err) {
     console.error(
       "❌ SEND RECEIPT EMAIL ERROR:",
-      err?.message || err
+      err?.response?.body ||
+      err?.message ||
+      err
     )
 
     throw err

@@ -1,8 +1,5 @@
-import { Resend } from "resend"
+import sgMail from "@sendgrid/mail"
 import fs from "fs"
-
-const RESEND_API_KEY =
-  process.env.RESEND_API_KEY || ""
 
 const INFO_EMAIL =
   process.env.INFO_EMAIL ||
@@ -13,13 +10,18 @@ const CLIENT_URL =
   process.env.CLIENT_URL ||
   "https://signavistudio.store"
 
-const resend =
-  new Resend(RESEND_API_KEY)
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(
+    process.env.SENDGRID_API_KEY
+  )
 
-if (RESEND_API_KEY) {
-  console.log("📨 ORDER EMAIL RESEND READY")
+  console.log(
+    "📧 ORDER EMAIL SENDGRID READY"
+  )
 } else {
-  console.warn("⚠️ RESEND_API_KEY missing")
+  console.warn(
+    "⚠️ SENDGRID_API_KEY missing"
+  )
 }
 
 /* =========================================================
@@ -61,9 +63,11 @@ export const sendOrderStatusEmail = async (
       return null
     }
 
-    if (!RESEND_API_KEY) {
+    if (
+      !process.env.SENDGRID_API_KEY
+    ) {
       console.warn(
-        "EMAIL SKIPPED: Missing RESEND_API_KEY"
+        "EMAIL SKIPPED: Missing SENDGRID_API_KEY"
       )
 
       return null
@@ -82,7 +86,8 @@ export const sendOrderStatusEmail = async (
       {
         to,
         status,
-        orderId: order?._id
+        orderId:
+          order._id
       }
     )
 
@@ -142,7 +147,10 @@ export const sendOrderStatusEmail = async (
           <div style="padding:28px;">
     `
 
-    if (status === "payment_required") {
+    if (
+      status ===
+      "payment_required"
+    ) {
       subject =
         "Payment Required - SignaVi Studio"
 
@@ -224,9 +232,9 @@ export const sendOrderStatusEmail = async (
           </a>
         </p>
       `
-    }
-
-    else if (status === "denied") {
+    } else if (
+      status === "denied"
+    ) {
       subject =
         "Order Update - SignaVi Studio"
 
@@ -252,9 +260,9 @@ export const sendOrderStatusEmail = async (
           Please contact SignaVi Studio if you have questions.
         </p>
       `
-    }
-
-    else if (status === "invoice") {
+    } else if (
+      status === "invoice"
+    ) {
       subject =
         "Invoice - SignaVi Studio"
 
@@ -317,9 +325,9 @@ export const sendOrderStatusEmail = async (
           View Invoice
         </a>
       `
-    }
-
-    else if (status === "shipped") {
+    } else if (
+      status === "shipped"
+    ) {
       subject =
         "Your Order Has Shipped - SignaVi Studio"
 
@@ -341,9 +349,7 @@ export const sendOrderStatusEmail = async (
           Your order has shipped. Thank you for choosing SignaVi Studio.
         </p>
       `
-    }
-
-    else {
+    } else {
       html += `
         <h2
           style="
@@ -407,64 +413,68 @@ export const sendOrderStatusEmail = async (
       fs.existsSync(invoicePath)
     ) {
       const fileData =
-        fs.readFileSync(invoicePath)
+        fs.readFileSync(
+          invoicePath
+        )
 
       attachments.push({
+        content:
+          fileData.toString(
+            "base64"
+          ),
+
         filename:
           `invoice-${order._id}.pdf`,
 
-        content:
-          fileData
+        type:
+          "application/pdf",
+
+        disposition:
+          "attachment"
       })
     }
 
-    const {
-      data,
-      error
-    } = await resend.emails.send({
-      from:
-        `SignaVi Studio <${INFO_EMAIL}>`,
+    const [response] =
+      await sgMail.send({
+        from: {
+          email:
+            INFO_EMAIL,
 
-      to: [to],
+          name:
+            "SignaVi Studio"
+        },
 
-      subject,
+        to,
 
-      html,
+        subject,
 
-      attachments:
-        attachments.length
-          ? attachments
-          : undefined
-    })
+        html,
 
-    if (error) {
-      console.error(
-        "❌ RESEND ORDER EMAIL ERROR:",
-        error
-      )
-
-      throw new Error(
-        error.message ||
-        "Resend failed to send order email"
-      )
-    }
+        attachments:
+          attachments.length
+            ? attachments
+            : undefined
+      })
 
     console.log(
       "EMAIL SENT SUCCESSFULLY:",
       {
         to,
         subject,
-        resendId:
-          data?.id || null
+
+        statusCode:
+          response?.statusCode ||
+          null
       }
     )
 
-    return data
-
+    return response
   } catch (err) {
     console.error(
       "❌ ORDER EMAIL ERROR:",
-      err?.message || err
+      err?.response?.body ||
+      err?.message ||
+      err
     )
 
     return null

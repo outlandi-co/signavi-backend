@@ -1,20 +1,20 @@
-import { Resend } from "resend"
-
-const RESEND_API_KEY =
-  process.env.RESEND_API_KEY || ""
+import sgMail from "@sendgrid/mail"
 
 const INFO_EMAIL =
   process.env.INFO_EMAIL ||
   "info@signavistudio.store"
 
-const resend =
-  new Resend(RESEND_API_KEY)
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(
+    process.env.SENDGRID_API_KEY
+  )
 
-if (RESEND_API_KEY) {
-  console.log("📨 ORDER STATUS RESEND READY")
+  console.log(
+    "📧 ORDER STATUS SENDGRID READY"
+  )
 } else {
   console.warn(
-    "⚠️ RESEND_API_KEY missing for order status email"
+    "⚠️ SENDGRID_API_KEY missing for order status email"
   )
 }
 
@@ -33,12 +33,14 @@ export const sendOrderStatusEmail = async (
         "⚠️ STATUS EMAIL SKIPPED: customer email missing"
       )
 
-      return
+      return null
     }
 
-    if (!RESEND_API_KEY) {
+    if (
+      !process.env.SENDGRID_API_KEY
+    ) {
       throw new Error(
-        "RESEND_API_KEY is not configured"
+        "SENDGRID_API_KEY is not configured"
       )
     }
 
@@ -139,47 +141,46 @@ export const sendOrderStatusEmail = async (
       </div>
     `
 
-    const {
-      data,
-      error
-    } = await resend.emails.send({
-      from:
-        `SignaVi Studio <${INFO_EMAIL}>`,
+    const [response] =
+      await sgMail.send({
+        to:
+          customerEmail,
 
-      to: [
-        customerEmail
-      ],
+        from: {
+          email:
+            INFO_EMAIL,
 
-      subject,
+          name:
+            "SignaVi Studio"
+        },
 
-      text:
-        message,
+        subject,
 
-      html
-    })
+        text:
+          message,
 
-    if (error) {
-      console.error(
-        "❌ RESEND STATUS EMAIL ERROR:",
-        error
-      )
-
-      throw new Error(
-        error.message ||
-        "Failed to send order status email"
-      )
-    }
+        html
+      })
 
     console.log(
       `📧 STATUS EMAIL SENT: ${status}`,
-      data?.id || ""
+      {
+        to:
+          customerEmail,
+
+        statusCode:
+          response?.statusCode ||
+          null
+      }
     )
 
-    return data
+    return response
   } catch (err) {
     console.error(
       "❌ STATUS EMAIL ERROR:",
-      err?.message || err
+      err?.response?.body ||
+      err?.message ||
+      err
     )
 
     return null

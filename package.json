@@ -3,13 +3,11 @@
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
-
   "overrides": {
     "mongoose": {
       "mongodb": "7.4.0"
     }
   },
-
   "scripts": {
     "dev": "nodemon --config nodemon.json server.js",
     "dev:watch": "nodemon server.js --ignore uploads --ignore labels --ignore *.log --ignore *.tmp",
@@ -18,8 +16,8 @@
     "clean": "rimraf logs tmp",
     "rebuild": "npm run clean && npm install"
   },
-
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "axios": "^1.14.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
@@ -40,12 +38,10 @@
     "openai": "^6.37.0",
     "pdfkit": "^0.18.0",
     "qrcode": "^1.5.4",
-    "resend": "^6.18.1",
     "socket.io": "^4.8.3",
     "square": "^44.0.1",
     "stripe": "^20.4.1"
   },
-
   "devDependencies": {
     "nodemon": "^3.1.14",
     "rimraf": "^6.0.1"

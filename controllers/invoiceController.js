@@ -1,5 +1,5 @@
 import crypto from "crypto"
-import { Resend } from "resend"
+import sgMail from "@sendgrid/mail"
 import { SquareClient, SquareEnvironment } from "square"
 
 import Invoice from "../models/Invoice.js"
@@ -31,9 +31,19 @@ const squareClient = new SquareClient({
   environment: SquareEnvironment.Production
 })
 
-const resend = new Resend(
-  process.env.RESEND_API_KEY
-)
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(
+    process.env.SENDGRID_API_KEY
+  )
+
+  console.log(
+    "📧 INVOICE SENDGRID READY"
+  )
+} else {
+  console.warn(
+    "⚠️ SENDGRID_API_KEY missing for invoice email"
+  )
+}
 
 const emitAdminNotification = (req, notification) => {
   req.app.get("io")?.emit("adminNotification", notification)
@@ -261,16 +271,45 @@ export const sendInvoiceEmail = async (req, res) => {
       </div>
     `
 
-   const { error } = await resend.emails.send({
-  from: `SignaVi Studio <${FROM_EMAIL}>`,
-  to: [invoice.customerEmail],
-  subject: `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
-  html
-})
-
-if (error) {
-  throw new Error(error.message)
+   if (!process.env.SENDGRID_API_KEY) {
+  throw new Error(
+    "SENDGRID_API_KEY is not configured"
+  )
 }
+
+const [sendGridResponse] =
+  await sgMail.send({
+    to:
+      invoice.customerEmail,
+
+    from: {
+      email:
+        FROM_EMAIL,
+
+      name:
+        "SignaVi Studio"
+    },
+
+    subject:
+      `Invoice ${invoice.invoiceNumber} from SignaVi Studio`,
+
+    html
+  })
+
+console.log(
+  "📧 INVOICE EMAIL SENT WITH SENDGRID:",
+  {
+    to:
+      invoice.customerEmail,
+
+    invoiceNumber:
+      invoice.invoiceNumber,
+
+    statusCode:
+      sendGridResponse?.statusCode ||
+      null
+  }
+)
 
     await AdminEmail.create({
       to: invoice.customerEmail,

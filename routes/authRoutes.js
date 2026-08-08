@@ -2,7 +2,7 @@ import express from "express"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import crypto from "crypto"
-import { Resend } from "resend"
+import sgMail from "@sendgrid/mail"
 
 import User from "../models/User.js"
 import { requireAuth } from "../middleware/requireAuth.js"
@@ -11,22 +11,22 @@ const router = express.Router()
 
 /* ================= EMAIL CONFIG ================= */
 
-const RESEND_API_KEY =
-  process.env.RESEND_API_KEY || ""
-
 const INFO_EMAIL =
   process.env.INFO_EMAIL ||
   process.env.EMAIL_FROM ||
   "info@signavistudio.store"
 
-const resend =
-  new Resend(RESEND_API_KEY)
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(
+    process.env.SENDGRID_API_KEY
+  )
 
-if (RESEND_API_KEY) {
-  console.log("📨 AUTH RESEND READY")
+  console.log(
+    "📧 AUTH SENDGRID READY"
+  )
 } else {
   console.warn(
-    "⚠️ RESEND_API_KEY missing for auth email"
+    "⚠️ SENDGRID_API_KEY missing for auth email"
   )
 }
 
@@ -407,16 +407,16 @@ router.post(
         })
       }
 
-      if (!RESEND_API_KEY) {
-        console.error(
-          "❌ Missing RESEND_API_KEY"
-        )
+      if (!process.env.SENDGRID_API_KEY) {
+  console.error(
+    "❌ Missing SENDGRID_API_KEY"
+  )
 
-        return res.status(500).json({
-          message:
-            "Email service not configured"
-        })
-      }
+  return res.status(500).json({
+    message:
+      "Email service not configured"
+  })
+}
 
       const cleanEmail =
         email
@@ -638,49 +638,39 @@ If you did not request a password reset, you can ignore this message.
         </div>
       `
 
-      /* ================= SEND WITH RESEND ================= */
+/* ================= SEND WITH SENDGRID ================= */
 
-      const {
-        data,
-        error
-      } = await resend.emails.send({
-        from:
-          `SignaVi Studio <${INFO_EMAIL}>`,
+const [sendGridResponse] =
+  await sgMail.send({
+    to:
+      user.email,
 
-        to: [
-          user.email
-        ],
+    from: {
+      email:
+        INFO_EMAIL,
 
-        subject,
+      name:
+        "SignaVi Studio"
+    },
 
-        text,
+    subject,
 
-        html
-      })
+    text,
 
-      if (error) {
-        console.error(
-          "❌ RESEND PASSWORD EMAIL ERROR:",
-          error
-        )
+    html
+  })
 
-        throw new Error(
-          error.message ||
-          "Failed to send reset email"
-        )
-      }
+console.log(
+  "📧 RESET EMAIL SENT WITH SENDGRID:",
+  {
+    email:
+      user.email,
 
-      console.log(
-        "📧 RESET EMAIL SENT:",
-        {
-          email:
-            user.email,
-
-          resendId:
-            data?.id ||
-            null
-        }
-      )
+    statusCode:
+      sendGridResponse?.statusCode ||
+      null
+  }
+)
 
       res.json({
         message:

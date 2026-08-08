@@ -20,10 +20,10 @@ const adminEmailThreadSchema = new mongoose.Schema(
     },
 
     channel: {
-      type: String,
-      enum: ["info", "quotes"],
-      default: "info"
-    },
+  type: String,
+  enum: ["info", "quotes", "support"],
+  default: "info"
+},
 
     lastMessage: {
       type: String,
