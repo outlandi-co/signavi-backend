@@ -1,6 +1,12 @@
+import { v2 as cloudinary } from "cloudinary"
+
 import AdminEmailThread from "../models/AdminEmailThread.js"
 import AdminEmailMessage from "../models/AdminEmailMessage.js"
 import Notification from "../models/Notification.js"
+
+/* =========================================================
+   EMAIL CONFIG
+========================================================= */
 
 const ADMIN_EMAIL =
   process.env.ADMIN_EMAIL ||
@@ -16,35 +22,74 @@ const INFO_EMAIL =
 
 const QUOTES_EMAIL =
   process.env.QUOTES_EMAIL ||
-  "quotes@signavistudio.store"
+  "quote@signavistudio.store"
+
+/* =========================================================
+   CLOUDINARY CONFIG
+========================================================= */
+
+cloudinary.config({
+  cloud_name:
+    process.env.CLOUDINARY_CLOUD_NAME ||
+    process.env.CLOUDINARY_NAME,
+
+  api_key:
+    process.env.CLOUDINARY_API_KEY ||
+    process.env.CLOUDINARY_KEY,
+
+  api_secret:
+    process.env.CLOUDINARY_API_SECRET ||
+    process.env.CLOUDINARY_SECRET
+})
+
+/* =========================================================
+   EMAIL HELPERS
+========================================================= */
 
 const cleanEmail = (value = "") => {
-  const match = value.match(/<(.+?)>/)
+  const match =
+    String(value).match(/<(.+?)>/)
 
-  return (match ? match[1] : value)
+  return (
+    match
+      ? match[1]
+      : String(value)
+  )
     .trim()
     .toLowerCase()
 }
 
 const getChannel = (to = "") => {
-  const email = cleanEmail(to)
+  const email =
+    cleanEmail(to)
 
-  if (email === SUPPORT_EMAIL.toLowerCase()) {
+  if (
+    email ===
+    SUPPORT_EMAIL.toLowerCase()
+  ) {
     return "support"
   }
 
-  if (email === QUOTES_EMAIL.toLowerCase()) {
+  if (
+    email ===
+    QUOTES_EMAIL.toLowerCase()
+  ) {
     return "quotes"
   }
 
-  if (email === INFO_EMAIL.toLowerCase()) {
+  if (
+    email ===
+    INFO_EMAIL.toLowerCase()
+  ) {
     return "info"
   }
 
   return "info"
 }
 
-const getNotificationTitle = (channel) => {
+const getNotificationTitle = (
+  channel
+) => {
   switch (channel) {
     case "support":
       return "New Support Email"
@@ -58,173 +103,408 @@ const getNotificationTitle = (channel) => {
   }
 }
 
-export const receiveInboundEmail = async (req, res) => {
-  try {
-    const from =
-      cleanEmail(
-        req.body.from || ""
-      )
+/* =========================================================
+   ATTACHMENT HELPERS
+========================================================= */
 
-    const to =
-      cleanEmail(
-        req.body.to || INFO_EMAIL
-      )
+const sanitizeFileName = (
+  fileName = "attachment"
+) => {
+  return String(fileName)
+    .replace(/[^\w.\-() ]+/g, "_")
+    .trim()
+}
 
-    const subject =
-      req.body.subject ||
-      "Customer Message"
+const uploadAttachmentToCloudinary =
+  async (file) => {
+    return new Promise(
+      (resolve, reject) => {
+        const safeFileName =
+          sanitizeFileName(
+            file.originalname
+          )
 
-    const text =
-      req.body.text ||
-      req.body.html ||
-      ""
+        const uploadStream =
+          cloudinary.uploader.upload_stream(
+            {
+              folder:
+                "signavi/email-attachments",
 
-    const channel =
-      getChannel(to)
+              resource_type:
+                "auto",
 
-    if (!from || !text) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message:
-            "Inbound email missing sender or message"
-        })
+              use_filename:
+                true,
+
+              unique_filename:
+                true,
+
+              filename_override:
+                safeFileName
+            },
+
+            (error, result) => {
+              if (error) {
+                console.error(
+                  "❌ CLOUDINARY EMAIL ATTACHMENT ERROR:",
+                  error
+                )
+
+                return reject(
+                  error
+                )
+              }
+
+              resolve({
+                fileName:
+                  safeFileName,
+
+                mimeType:
+                  file.mimetype ||
+                  "",
+
+                size:
+                  file.size ||
+                  0,
+
+                url:
+                  result?.secure_url ||
+                  ""
+              })
+            }
+          )
+
+        uploadStream.end(
+          file.buffer
+        )
+      }
+    )
+  }
+
+const uploadInboundAttachments =
+  async (files = []) => {
+    if (
+      !Array.isArray(files) ||
+      files.length === 0
+    ) {
+      return []
     }
 
-    let thread =
-      await AdminEmailThread.findOne({
-        customerEmail:
-          from,
+    const attachments = []
 
-        subject,
+    for (const file of files) {
+      try {
+        const uploaded =
+          await uploadAttachmentToCloudinary(
+            file
+          )
 
-        channel
-      })
-
-    if (!thread) {
-      thread =
-        await AdminEmailThread.create({
-          customerEmail:
-            from,
-
-          subject,
-
-          channel,
-
-          lastMessage:
-            text,
-
-          unread:
-            true,
-
-          archived:
-            false
-        })
-    } else {
-      thread.lastMessage =
-        text
-
-      thread.unread =
-        true
-
-      thread.archived =
-        false
-
-      await thread.save()
+        attachments.push(
+          uploaded
+        )
+      } catch (error) {
+        console.error(
+          `❌ ATTACHMENT UPLOAD FAILED: ${file?.originalname || "unknown file"}`,
+          error?.message ||
+            error
+        )
+      }
     }
 
-    const message =
-      await AdminEmailMessage.create({
-        threadId:
-          thread._id,
+    return attachments
+  }
 
-        direction:
-          "inbound",
+/* =========================================================
+   RECEIVE INBOUND EMAIL
+========================================================= */
 
-        senderEmail:
-          from,
+export const receiveInboundEmail =
+  async (req, res) => {
+    try {
+      const from =
+        cleanEmail(
+          req.body.from || ""
+        )
 
-        to,
+      const to =
+        cleanEmail(
+          req.body.to ||
+            INFO_EMAIL
+        )
 
-        subject,
+      const subject =
+        req.body.subject ||
+        "Customer Message"
 
-        message:
-          text,
+      const text =
+        req.body.text ||
+        req.body.html ||
+        ""
 
-        html:
-          req.body.html || "",
+      const channel =
+        getChannel(to)
 
-        read:
-          false
-      })
+      /* ===============================================
+         UPLOAD ATTACHMENTS
+      =============================================== */
 
-    const notification =
-      await Notification.create({
-        userEmail:
-          ADMIN_EMAIL,
+      const attachments =
+        await uploadInboundAttachments(
+          req.files || []
+        )
 
-        title:
-          getNotificationTitle(
-            channel
-          ),
-
-        text:
-          `${from}: ${text.slice(0, 120)}`,
-
-        type:
-          "admin",
-
-        link:
-          `/admin/inbox?channel=${channel}`,
-
-        read:
-          false,
-
-        archived:
-          false
-      })
-
-    req.app
-      .get("io")
-      ?.emit(
-        "adminNotification",
-        notification
-      )
-
-    req.app
-      .get("io")
-      ?.emit(
-        "customerEmailReply",
+      console.log(
+        "📎 INBOUND ATTACHMENTS:",
         {
-          thread,
-          message
+          count:
+            attachments.length,
+
+          files:
+            attachments.map(
+              (item) =>
+                item.fileName
+            )
         }
       )
 
-    res.json({
-      success: true,
+      /* ===============================================
+         VALIDATION
 
-      channel,
+         Allow:
+         - message only
+         - attachment only
+         - message + attachment
+      =============================================== */
 
-      data: {
-        thread,
-        message
+      if (!from) {
+        return res
+          .status(400)
+          .json({
+            success:
+              false,
+
+            message:
+              "Inbound email missing sender"
+          })
       }
-    })
-  } catch (error) {
-    console.error(
-      "❌ INBOUND EMAIL ERROR:",
-      error
-    )
 
-    res
-      .status(500)
-      .json({
-        success: false,
+      if (
+        !text &&
+        attachments.length === 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            success:
+              false,
 
-        message:
-          error.message
+            message:
+              "Inbound email contains no message or attachments"
+          })
+      }
+
+      /* ===============================================
+         THREAD PREVIEW
+      =============================================== */
+
+      const lastMessage =
+        text ||
+        (
+          attachments.length === 1
+            ? `📎 ${attachments[0].fileName}`
+            : `📎 ${attachments.length} attachments`
+        )
+
+      /* ===============================================
+         FIND / CREATE THREAD
+      =============================================== */
+
+      let thread =
+        await AdminEmailThread.findOne(
+          {
+            customerEmail:
+              from,
+
+            subject,
+
+            channel
+          }
+        )
+
+      if (!thread) {
+        thread =
+          await AdminEmailThread.create(
+            {
+              customerEmail:
+                from,
+
+              subject,
+
+              channel,
+
+              lastMessage,
+
+              unread:
+                true,
+
+              archived:
+                false
+            }
+          )
+      } else {
+        thread.lastMessage =
+          lastMessage
+
+        thread.unread =
+          true
+
+        thread.archived =
+          false
+
+        await thread.save()
+      }
+
+      /* ===============================================
+         SAVE MESSAGE
+      =============================================== */
+
+      const message =
+        await AdminEmailMessage.create(
+          {
+            threadId:
+              thread._id,
+
+            direction:
+              "inbound",
+
+            senderEmail:
+              from,
+
+            to,
+
+            subject,
+
+            message:
+              text ||
+              "Attachment received.",
+
+            html:
+              req.body.html ||
+              "",
+
+            attachments,
+
+            read:
+              false
+          }
+        )
+
+      /* ===============================================
+         NOTIFICATION
+      =============================================== */
+
+      let notificationText =
+        text
+          ? `${from}: ${text.slice(
+              0,
+              120
+            )}`
+          : `${from}: Sent ${attachments.length} attachment${
+              attachments.length === 1
+                ? ""
+                : "s"
+            }`
+
+      if (
+        attachments.length > 0 &&
+        text
+      ) {
+        notificationText +=
+          ` 📎 ${attachments.length}`
+      }
+
+      const notification =
+        await Notification.create(
+          {
+            userEmail:
+              ADMIN_EMAIL,
+
+            title:
+              getNotificationTitle(
+                channel
+              ),
+
+            text:
+              notificationText,
+
+            type:
+              "admin",
+
+            link:
+              `/admin/inbox?channel=${channel}`,
+
+            read:
+              false,
+
+            archived:
+              false
+          }
+        )
+
+      /* ===============================================
+         SOCKET EVENTS
+      =============================================== */
+
+      req.app
+        .get("io")
+        ?.emit(
+          "adminNotification",
+          notification
+        )
+
+      req.app
+        .get("io")
+        ?.emit(
+          "customerEmailReply",
+          {
+            thread,
+            message
+          }
+        )
+
+      /* ===============================================
+         RESPONSE
+      =============================================== */
+
+      res.json({
+        success:
+          true,
+
+        channel,
+
+        attachmentCount:
+          attachments.length,
+
+        data: {
+          thread,
+          message
+        }
       })
+    } catch (error) {
+      console.error(
+        "❌ INBOUND EMAIL ERROR:",
+        error
+      )
+
+      res
+        .status(500)
+        .json({
+          success:
+            false,
+
+          message:
+            error?.message ||
+            "Failed to receive inbound email"
+        })
+    }
   }
-}
