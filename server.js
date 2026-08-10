@@ -48,6 +48,8 @@ import aiChatRoutes from "./routes/aiChat.js"
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
 import notificationRoutes from "./routes/notifications.js"
 
+import instagramRoutes from "./routes/instagramRoutes.js";
+
 /* ================= PATH SETUP ================= */
 
 const __filename = fileURLToPath(import.meta.url)
@@ -544,6 +546,8 @@ app.get(
 
 /* ================= ROUTES ================= */
 
+
+
 /* ================= MATERIAL CATALOG ================= */
 
 app.use(
@@ -765,6 +769,17 @@ app.use(
 console.log(
   "🛟 SUPPORT ROUTE MOUNTED"
 )
+
+/* ================= INSTAGRAM ================= */
+
+app.use(
+  "/api/instagram",
+  instagramRoutes
+);
+
+console.log(
+  "📸 INSTAGRAM ROUTE MOUNTED"
+);
 
 /* ================= SOCKET ================= */
 
