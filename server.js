@@ -49,6 +49,7 @@ import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
 import notificationRoutes from "./routes/notifications.js"
 
 import instagramRoutes from "./routes/instagramRoutes.js";
+import socialRoutes from "./routes/socialRoutes.js"
 
 /* ================= PATH SETUP ================= */
 
@@ -780,6 +781,17 @@ app.use(
 console.log(
   "📸 INSTAGRAM ROUTE MOUNTED"
 );
+
+/* ================= SOCIAL PUBLISHER ================= */
+
+app.use(
+  "/api/social",
+  socialRoutes
+)
+
+console.log(
+  "🌐 SOCIAL PUBLISHER ROUTE MOUNTED"
+)
 
 /* ================= SOCKET ================= */
 
