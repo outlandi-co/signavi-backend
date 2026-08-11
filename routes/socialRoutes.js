@@ -19,15 +19,10 @@ const upload = multer({
   dest: "temp/",
 
   limits: {
-    fileSize:
-      15 * 1024 * 1024
+    fileSize: 15 * 1024 * 1024
   },
 
-  fileFilter: (
-    req,
-    file,
-    cb
-  ) => {
+  fileFilter: (req, file, cb) => {
     const allowedTypes = [
       "image/jpeg",
       "image/png",
@@ -55,48 +50,9 @@ const upload = multer({
 ========================================================= */
 
 const sleep = (ms) =>
-  new Promise(
-    (resolve) =>
-      setTimeout(
-        resolve,
-        ms
-      )
+  new Promise((resolve) =>
+    setTimeout(resolve, ms)
   )
-
-async function requestJson(
-  url,
-  options = {}
-) {
-  const response =
-    await fetch(
-      url,
-      options
-    )
-
-  const data =
-    await response
-      .json()
-      .catch(() => ({}))
-
-  if (!response.ok) {
-    const error =
-      new Error(
-        data?.error?.message ||
-        data?.message ||
-        "API request failed"
-      )
-
-    error.status =
-      response.status
-
-    error.data =
-      data
-
-    throw error
-  }
-
-  return data
-}
 
 const isExpired = (
   expiresAt
@@ -118,10 +74,115 @@ const isExpired = (
     return false
   }
 
-  return (
-    Date.now() >=
-    expiration
-  )
+  return Date.now() >= expiration
+}
+
+/* =========================================================
+   GENERIC JSON REQUEST
+
+   Important:
+   TikTok can return HTTP 200 while still returning an
+   application-level error inside:
+       error.code
+       error.message
+========================================================= */
+
+async function requestJson(
+  url,
+  options = {},
+  {
+    platform = "API",
+    inspectTikTokError = false
+  } = {}
+) {
+  const response =
+    await fetch(
+      url,
+      options
+    )
+
+  const raw =
+    await response.text()
+
+  let data = {}
+
+  try {
+    data =
+      raw
+        ? JSON.parse(raw)
+        : {}
+  } catch {
+    data = {
+      raw
+    }
+  }
+
+  if (!response.ok) {
+    const message =
+      data?.error?.message ||
+      data?.message ||
+      `${platform} request failed with HTTP ${response.status}.`
+
+    const error =
+      new Error(message)
+
+    error.status =
+      response.status
+
+    error.code =
+      data?.error?.code ||
+      null
+
+    error.data =
+      data
+
+    throw error
+  }
+
+  /*
+   * TikTok APIs frequently return:
+   *
+   * {
+   *   data: {...},
+   *   error: {
+   *     code: "...",
+   *     message: "...",
+   *     log_id: "..."
+   *   }
+   * }
+   *
+   * even with HTTP 200.
+   */
+
+  if (
+    inspectTikTokError &&
+    data?.error?.code &&
+    data.error.code !== "ok"
+  ) {
+    const error =
+      new Error(
+        data.error.message ||
+        data.error.code ||
+        "TikTok API request failed."
+      )
+
+    error.status =
+      response.status
+
+    error.code =
+      data.error.code
+
+    error.logId =
+      data.error.log_id ||
+      null
+
+    error.data =
+      data
+
+    throw error
+  }
+
+  return data
 }
 
 /* =========================================================
@@ -222,23 +283,24 @@ async function publishInstagram({
       "https://graph.instagram.com/me"
     )
 
-  profileUrl
-    .searchParams
-    .set(
-      "fields",
-      "id,username"
-    )
+  profileUrl.searchParams.set(
+    "fields",
+    "id,username"
+  )
 
-  profileUrl
-    .searchParams
-    .set(
-      "access_token",
-      token
-    )
+  profileUrl.searchParams.set(
+    "access_token",
+    token
+  )
 
   const profile =
     await requestJson(
-      profileUrl
+      profileUrl,
+      {},
+      {
+        platform:
+          "Instagram"
+      }
     )
 
   if (!profile?.id) {
@@ -252,7 +314,7 @@ async function publishInstagram({
     profile.username
   )
 
-  /* ---------- CREATE MEDIA CONTAINER ---------- */
+  /* ---------- CREATE MEDIA ---------- */
 
   const createBody =
     new URLSearchParams()
@@ -287,6 +349,10 @@ async function publishInstagram({
 
         body:
           createBody.toString()
+      },
+      {
+        platform:
+          "Instagram"
       }
     )
 
@@ -301,7 +367,7 @@ async function publishInstagram({
     container.id
   )
 
-  /* ---------- WAIT FOR PROCESSING ---------- */
+  /* ---------- WAIT ---------- */
 
   let ready = false
 
@@ -315,27 +381,28 @@ async function publishInstagram({
         `https://graph.instagram.com/${container.id}`
       )
 
-    statusUrl
-      .searchParams
-      .set(
-        "fields",
-        "status_code,status"
-      )
+    statusUrl.searchParams.set(
+      "fields",
+      "status_code,status"
+    )
 
-    statusUrl
-      .searchParams
-      .set(
-        "access_token",
-        token
-      )
+    statusUrl.searchParams.set(
+      "access_token",
+      token
+    )
 
     const status =
       await requestJson(
-        statusUrl
+        statusUrl,
+        {},
+        {
+          platform:
+            "Instagram"
+        }
       )
 
     console.log(
-      `⏳ Instagram container status ${attempt}/20:`,
+      `⏳ Instagram status ${attempt}/20:`,
       status.status_code
     )
 
@@ -396,13 +463,12 @@ async function publishInstagram({
 
         body:
           publishBody.toString()
+      },
+      {
+        platform:
+          "Instagram"
       }
     )
-
-  console.log(
-    "✅ Instagram published:",
-    published.id
-  )
 
   return {
     success: true,
@@ -478,14 +544,12 @@ async function publishFacebook({
 
         body:
           body.toString()
+      },
+      {
+        platform:
+          "Facebook"
       }
     )
-
-  console.log(
-    "✅ Facebook published:",
-    result.post_id ||
-    result.id
-  )
 
   return {
     success: true,
@@ -501,11 +565,11 @@ async function publishFacebook({
 ========================================================= */
 
 function getTikTokToken() {
-  const tiktokAuth =
+  const auth =
     getTikTokAuth()
 
   if (
-    !tiktokAuth.accessToken
+    !auth.accessToken
   ) {
     throw new Error(
       "TikTok is not connected."
@@ -514,20 +578,19 @@ function getTikTokToken() {
 
   if (
     isExpired(
-      tiktokAuth.expiresAt
+      auth.expiresAt
     )
   ) {
     throw new Error(
-      "TikTok access token has expired. Reconnect or refresh TikTok."
+      "TikTok access token has expired. Reconnect TikTok."
     )
   }
 
   return {
     token:
-      tiktokAuth.accessToken,
+      auth.accessToken,
 
-    auth:
-      tiktokAuth
+    auth
   }
 }
 
@@ -561,26 +624,15 @@ async function getTikTokCreatorInfo() {
 
         body:
           JSON.stringify({})
+      },
+      {
+        platform:
+          "TikTok",
+
+        inspectTikTokError:
+          true
       }
     )
-
-  if (
-    response?.error?.code &&
-    response.error.code !==
-      "ok"
-  ) {
-    const error =
-      new Error(
-        response.error.message ||
-        response.error.code ||
-        "TikTok creator info failed."
-      )
-
-    error.data =
-      response
-
-    throw error
-  }
 
   const creator =
     response?.data
@@ -593,11 +645,79 @@ async function getTikTokCreatorInfo() {
 
   console.log(
     "✅ TikTok creator:",
-    creator.creator_username ||
-    "connected account"
+    {
+      username:
+        creator.creator_username ||
+        null,
+
+      privacyOptions:
+        creator
+          .privacy_level_options ||
+        [],
+
+      commentsDisabled:
+        creator.comment_disabled,
+
+      duetDisabled:
+        creator.duet_disabled,
+
+      stitchDisabled:
+        creator.stitch_disabled
+    }
   )
 
   return creator
+}
+
+/* =========================================================
+   FRIENDLY TIKTOK ERROR
+========================================================= */
+
+function getTikTokFriendlyError(
+  error
+) {
+  const code =
+    error?.code ||
+    error?.data
+      ?.error
+      ?.code ||
+    ""
+
+  const original =
+    error?.message ||
+    "TikTok publishing failed."
+
+  switch (code) {
+    case "url_ownership_unverified":
+      return (
+        "TikTok rejected the image URL because its domain is not verified. " +
+        "Photo posts must use an image hosted on a TikTok-verified domain or URL prefix."
+      )
+
+    case "scope_not_authorized":
+      return (
+        "TikTok authorization is missing the required publishing permission. " +
+        "Reconnect TikTok and approve video.publish."
+      )
+
+    case "access_token_invalid":
+      return (
+        "The TikTok access token is invalid or expired. Reconnect TikTok."
+      )
+
+    case "spam_risk_user_banned_from_posting":
+      return (
+        "TikTok has temporarily blocked posting for this account."
+      )
+
+    case "rate_limit_exceeded":
+      return (
+        "TikTok's posting rate limit was reached. Try again later."
+      )
+
+    default:
+      return original
+  }
 }
 
 /* =========================================================
@@ -616,7 +736,7 @@ async function publishTikTok({
     getTikTokToken()
 
   console.log(
-    "🎵 TikTok connected:",
+    "🎵 TikTok authenticated:",
     {
       openId:
         auth.openId,
@@ -626,13 +746,12 @@ async function publishTikTok({
     }
   )
 
-  /* ---------- CHECK SCOPE ---------- */
+  /* ---------- SCOPE ---------- */
 
   if (
-    !auth.scopes
-      ?.includes(
-        "video.publish"
-      )
+    !auth.scopes?.includes(
+      "video.publish"
+    )
   ) {
     throw new Error(
       "TikTok connection does not have the video.publish permission."
@@ -645,34 +764,48 @@ async function publishTikTok({
     await getTikTokCreatorInfo()
 
   const availablePrivacy =
-    creator
-      ?.privacy_level_options ||
-    []
+    Array.isArray(
+      creator
+        ?.privacy_level_options
+    )
+      ? creator
+          .privacy_level_options
+      : []
 
   console.log(
     "🎵 TikTok privacy options:",
     availablePrivacy
   )
 
-  let privacy =
-    privacyLevel
+  /* =====================================================
+     PRIVACY
 
-  /*
-   * Sandbox / unaudited TikTok apps commonly
-   * require SELF_ONLY.
-   */
+     Sandbox / unaudited clients should use SELF_ONLY.
+  ===================================================== */
+
+  let privacy =
+    String(
+      privacyLevel || ""
+    ).trim()
+
   if (
     !privacy ||
     !availablePrivacy.includes(
       privacy
     )
   ) {
-    privacy =
+    if (
       availablePrivacy.includes(
         "SELF_ONLY"
       )
-        ? "SELF_ONLY"
-        : availablePrivacy[0]
+    ) {
+      privacy =
+        "SELF_ONLY"
+    } else {
+      privacy =
+        availablePrivacy[0] ||
+        ""
+    }
   }
 
   if (!privacy) {
@@ -681,14 +814,53 @@ async function publishTikTok({
     )
   }
 
-  /* ---------- POST DATA ---------- */
+  /*
+   * Make sandbox behavior explicit.
+   */
+
+  if (
+    process.env
+      .TIKTOK_FORCE_PRIVATE ===
+      "true" &&
+    availablePrivacy.includes(
+      "SELF_ONLY"
+    )
+  ) {
+    privacy =
+      "SELF_ONLY"
+  }
+
+  /* ---------- CAPTION ---------- */
 
   const cleanCaption =
     String(
       caption || ""
     ).trim()
 
+  /* ---------- IMAGE URL ---------- */
+
+  if (!imageUrl) {
+    throw new Error(
+      "TikTok image URL is missing."
+    )
+  }
+
+  console.log(
+    "🎵 TikTok media URL:",
+    imageUrl
+  )
+
+  /* =====================================================
+     PAYLOAD
+  ===================================================== */
+
   const payload = {
+    media_type:
+      "PHOTO",
+
+    post_mode:
+      "DIRECT_POST",
+
     post_info: {
       title:
         cleanCaption
@@ -710,12 +882,6 @@ async function publishTikTok({
         ),
 
       auto_add_music:
-        false,
-
-      brand_content_toggle:
-        false,
-
-      brand_organic_toggle:
         true
     },
 
@@ -729,50 +895,110 @@ async function publishTikTok({
       photo_images: [
         imageUrl
       ]
-    },
-
-    post_mode:
-      "DIRECT_POST",
-
-    media_type:
-      "PHOTO"
+    }
   }
 
   console.log(
-    "🎵 Sending TikTok photo post..."
+    "🎵 TikTok publish payload:",
+    {
+      media_type:
+        payload.media_type,
+
+      post_mode:
+        payload.post_mode,
+
+      privacy_level:
+        payload
+          .post_info
+          .privacy_level,
+
+      imageUrl
+    }
   )
 
-  const result =
-    await requestJson(
-      "https://open.tiktokapis.com/v2/post/publish/content/init/",
-      {
-        method: "POST",
+  /* ---------- POST ---------- */
 
-        headers: {
-          Authorization:
-            `Bearer ${token}`,
+  let result
 
-          "Content-Type":
-            "application/json; charset=UTF-8"
+  try {
+    result =
+      await requestJson(
+        "https://open.tiktokapis.com/v2/post/publish/content/init/",
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${token}`,
+
+            "Content-Type":
+              "application/json; charset=UTF-8"
+          },
+
+          body:
+            JSON.stringify(
+              payload
+            )
         },
+        {
+          platform:
+            "TikTok",
 
-        body:
-          JSON.stringify(
-            payload
-          )
+          inspectTikTokError:
+            true
+        }
+      )
+  } catch (error) {
+    console.error(
+      "❌ TIKTOK API ERROR:",
+      {
+        status:
+          error.status,
+
+        code:
+          error.code,
+
+        message:
+          error.message,
+
+        logId:
+          error.logId,
+
+        data:
+          error.data
       }
     )
 
-  if (
-    result?.error?.code &&
-    result.error.code !==
-      "ok"
-  ) {
+    const friendly =
+      new Error(
+        getTikTokFriendlyError(
+          error
+        )
+      )
+
+    friendly.code =
+      error.code
+
+    friendly.status =
+      error.status
+
+    friendly.logId =
+      error.logId
+
+    friendly.data =
+      error.data
+
+    throw friendly
+  }
+
+  const publishId =
+    result?.data
+      ?.publish_id
+
+  if (!publishId) {
     const error =
       new Error(
-        result.error.message ||
-        result.error.code ||
-        "TikTok publish failed."
+        "TikTok accepted the request but did not return a publish ID."
       )
 
     error.data =
@@ -781,18 +1007,8 @@ async function publishTikTok({
     throw error
   }
 
-  const publishId =
-    result?.data
-      ?.publish_id
-
-  if (!publishId) {
-    throw new Error(
-      "TikTok accepted the request but did not return a publish ID."
-    )
-  }
-
   console.log(
-    "✅ TikTok publish request accepted:",
+    "✅ TikTok publish initialized:",
     publishId
   )
 
@@ -807,7 +1023,10 @@ async function publishTikTok({
       null,
 
     privacyLevel:
-      privacy
+      privacy,
+
+    status:
+      "PROCESSING"
   }
 }
 
@@ -820,11 +1039,8 @@ router.post(
   "/publish",
   upload.single("image"),
   async (req, res) => {
-    let uploadedPublicId =
-      null
-
     try {
-      /* ---------- IMAGE ---------- */
+      /* ---------- FILE ---------- */
 
       if (!req.file) {
         return res
@@ -846,7 +1062,7 @@ router.post(
           ""
         ).trim()
 
-      /* ---------- PLATFORM FLAGS ---------- */
+      /* ---------- FLAGS ---------- */
 
       const publishInstagramFlag =
         req.body.instagram ===
@@ -890,11 +1106,11 @@ router.post(
       )
 
       /* =====================================================
-         CLOUDINARY UPLOAD
+         CLOUDINARY
       ===================================================== */
 
       console.log(
-        "📤 Uploading social media image..."
+        "📤 Uploading social image..."
       )
 
       const uploaded =
@@ -914,9 +1130,6 @@ router.post(
       const imageUrl =
         uploaded.secure_url
 
-      uploadedPublicId =
-        uploaded.public_id
-
       console.log(
         "✅ Social image uploaded:",
         imageUrl
@@ -933,7 +1146,7 @@ router.post(
       ) {
         try {
           console.log(
-            "📸 Publishing to Instagram..."
+            "📸 Publishing Instagram..."
           )
 
           results.instagram =
@@ -947,7 +1160,7 @@ router.post(
           )
         } catch (error) {
           console.error(
-            "❌ Instagram publish failed:",
+            "❌ Instagram failed:",
             error.data ||
             error.message
           )
@@ -957,6 +1170,10 @@ router.post(
 
             message:
               error.message,
+
+            code:
+              error.code ||
+              null,
 
             details:
               error.data ||
@@ -974,7 +1191,7 @@ router.post(
       ) {
         try {
           console.log(
-            "📘 Publishing to Facebook..."
+            "📘 Publishing Facebook..."
           )
 
           results.facebook =
@@ -988,7 +1205,7 @@ router.post(
           )
         } catch (error) {
           console.error(
-            "❌ Facebook publish failed:",
+            "❌ Facebook failed:",
             error.data ||
             error.message
           )
@@ -998,6 +1215,10 @@ router.post(
 
             message:
               error.message,
+
+            code:
+              error.code ||
+              null,
 
             details:
               error.data ||
@@ -1015,7 +1236,7 @@ router.post(
       ) {
         try {
           console.log(
-            "🎵 Publishing to TikTok..."
+            "🎵 Publishing TikTok..."
           )
 
           results.tiktok =
@@ -1029,13 +1250,27 @@ router.post(
             })
 
           console.log(
-            "✅ TikTok publish request accepted"
+            "✅ TikTok publish initialized"
           )
         } catch (error) {
           console.error(
-            "❌ TikTok publish failed:",
-            error.data ||
-            error.message
+            "❌ TikTok failed:",
+            {
+              message:
+                error.message,
+
+              code:
+                error.code,
+
+              status:
+                error.status,
+
+              logId:
+                error.logId,
+
+              data:
+                error.data
+            }
           )
 
           results.tiktok = {
@@ -1043,6 +1278,22 @@ router.post(
 
             message:
               error.message,
+
+            code:
+              error.code ||
+              error
+                ?.data
+                ?.error
+                ?.code ||
+              null,
+
+            logId:
+              error.logId ||
+              error
+                ?.data
+                ?.error
+                ?.log_id ||
+              null,
 
             details:
               error.data ||
@@ -1052,7 +1303,7 @@ router.post(
       }
 
       /* =====================================================
-         RESULT SUMMARY
+         SUMMARY
       ===================================================== */
 
       const values =
@@ -1066,37 +1317,14 @@ router.post(
             item?.success
         )
 
-      const failed =
-        values.filter(
-          (item) =>
-            !item?.success
-        )
-
       const complete =
         values.length > 0 &&
         successful.length ===
           values.length
 
-      const anySuccessful =
-        successful.length > 0
-
-      console.log(
-        "🌐 SOCIAL PUBLISH COMPLETE:",
-        {
-          total:
-            values.length,
-
-          successful:
-            successful.length,
-
-          failed:
-            failed.length
-        }
-      )
-
       return res.json({
         success:
-          anySuccessful,
+          successful.length > 0,
 
         complete,
 
@@ -1120,7 +1348,7 @@ router.post(
             "Unable to publish social post."
         })
     } finally {
-      /* ---------- DELETE LOCAL TEMP FILE ---------- */
+      /* ---------- CLEAN LOCAL FILE ---------- */
 
       if (
         req.file?.path &&
@@ -1139,16 +1367,6 @@ router.post(
           )
         }
       }
-
-      /*
-       * IMPORTANT:
-       *
-       * Do NOT immediately delete the Cloudinary image here.
-       *
-       * Instagram and TikTok retrieve the media remotely
-       * after receiving the URL. Removing the Cloudinary
-       * image too early can cause media processing failures.
-       */
     }
   }
 )
