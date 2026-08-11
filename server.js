@@ -48,8 +48,10 @@ import aiChatRoutes from "./routes/aiChat.js"
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
 import notificationRoutes from "./routes/notifications.js"
 
-import instagramRoutes from "./routes/instagramRoutes.js";
+import instagramRoutes from "./routes/instagramRoutes.js"
 import socialRoutes from "./routes/socialRoutes.js"
+import tiktokRoutes from "./routes/tiktokRoutes.js"
+
 
 /* ================= PATH SETUP ================= */
 
@@ -791,6 +793,17 @@ app.use(
 
 console.log(
   "🌐 SOCIAL PUBLISHER ROUTE MOUNTED"
+)
+
+/* ================= TIKTOK ================= */
+
+app.use(
+  "/api/tiktok",
+  tiktokRoutes
+)
+
+console.log(
+  "🎵 TIKTOK ROUTE MOUNTED"
 )
 
 /* ================= SOCKET ================= */
