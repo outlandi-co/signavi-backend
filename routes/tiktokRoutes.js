@@ -1,7 +1,17 @@
 import express from "express"
 import crypto from "crypto"
 
+import {
+  getTikTokAuth,
+  setTikTokAuth,
+  clearTikTokAuth
+} from "../utils/tiktokAuthStore.js"
+
 const router = express.Router()
+
+/* =========================================================
+   CONFIG
+========================================================= */
 
 const TIKTOK_CLIENT_KEY =
   process.env.TIKTOK_CLIENT_KEY || ""
@@ -16,25 +26,6 @@ const TIKTOK_REDIRECT_URI =
 const FRONTEND_URL =
   process.env.FRONTEND_URL ||
   "https://signavistudio.store"
-
-/* =========================================================
-   TEMP TOKEN STORAGE
-   =========================================================
-
-   This is okay for the first sandbox connection test.
-
-   IMPORTANT:
-   Render can restart at any time, so this should eventually
-   move into MongoDB so the TikTok refresh token persists.
-========================================================= */
-
-let tiktokAuth = {
-  accessToken: "",
-  refreshToken: "",
-  openId: "",
-  scopes: [],
-  expiresAt: null
-}
 
 /* =========================================================
    HELPERS
@@ -59,7 +50,36 @@ const ensureTikTokConfig = (res) => {
 }
 
 const generateState = () => {
-  return crypto.randomBytes(24).toString("hex")
+  return crypto
+    .randomBytes(24)
+    .toString("hex")
+}
+
+const normalizeScopes = (
+  value = ""
+) => {
+  return String(value)
+    .split(",")
+    .map((scope) =>
+      scope.trim()
+    )
+    .filter(Boolean)
+}
+
+const calculateExpiresAt = (
+  expiresIn
+) => {
+  const seconds =
+    Number(expiresIn || 0)
+
+  if (!seconds) {
+    return null
+  }
+
+  return new Date(
+    Date.now() +
+    seconds * 1000
+  ).toISOString()
 }
 
 /* =========================================================
@@ -67,65 +87,108 @@ const generateState = () => {
    GET /api/tiktok/status
 ========================================================= */
 
-router.get("/status", (req, res) => {
-  res.json({
-    success: true,
+router.get(
+  "/status",
+  (req, res) => {
+    const tiktokAuth =
+      getTikTokAuth()
 
-    configured: Boolean(
-      TIKTOK_CLIENT_KEY &&
-      TIKTOK_CLIENT_SECRET &&
-      TIKTOK_REDIRECT_URI
-    ),
+    res.json({
+      success: true,
 
-    connected: Boolean(
-      tiktokAuth.accessToken
-    ),
+      configured: Boolean(
+        TIKTOK_CLIENT_KEY &&
+        TIKTOK_CLIENT_SECRET &&
+        TIKTOK_REDIRECT_URI
+      ),
 
-    openId:
-      tiktokAuth.openId || null,
+      connected: Boolean(
+        tiktokAuth.accessToken
+      ),
 
-    scopes:
-      tiktokAuth.scopes || [],
+      openId:
+        tiktokAuth.openId ||
+        null,
 
-    expiresAt:
-      tiktokAuth.expiresAt || null
-  })
-})
+      scopes:
+        tiktokAuth.scopes ||
+        [],
+
+      expiresAt:
+        tiktokAuth.expiresAt ||
+        null
+    })
+  }
+)
 
 /* =========================================================
    LOGIN
    GET /api/tiktok/login
 ========================================================= */
 
-router.get("/login", (req, res) => {
-  if (!ensureTikTokConfig(res)) return
+router.get(
+  "/login",
+  (req, res) => {
+    if (
+      !ensureTikTokConfig(res)
+    ) {
+      return
+    }
 
-  const state = generateState()
+    const state =
+      generateState()
 
-  const scopes = [
-    "user.info.basic",
-    "video.publish",
-    "video.upload"
-  ].join(",")
+    /*
+     * Keep OAuth state in an HTTP-only cookie.
+     * TikTok returns it to the callback.
+     */
+    res.cookie(
+      "tiktok_oauth_state",
+      state,
+      {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        maxAge:
+          10 * 60 * 1000
+      }
+    )
 
-  const params = new URLSearchParams({
-    client_key: TIKTOK_CLIENT_KEY,
-    scope: scopes,
-    response_type: "code",
-    redirect_uri: TIKTOK_REDIRECT_URI,
-    state
-  })
+    const scopes = [
+      "user.info.basic",
+      "video.publish",
+      "video.upload"
+    ].join(",")
 
-  const authUrl =
-    `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`
+    const params =
+      new URLSearchParams({
+        client_key:
+          TIKTOK_CLIENT_KEY,
 
-  console.log(
-    "🎵 TikTok OAuth redirect:",
-    authUrl
-  )
+        scope:
+          scopes,
 
-  res.redirect(authUrl)
-})
+        response_type:
+          "code",
+
+        redirect_uri:
+          TIKTOK_REDIRECT_URI,
+
+        state
+      })
+
+    const authUrl =
+      `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`
+
+    console.log(
+      "🎵 TikTok OAuth redirect ready"
+    )
+
+    return res.redirect(
+      authUrl
+    )
+  }
+)
 
 /* =========================================================
    CALLBACK
@@ -135,14 +198,22 @@ router.get("/login", (req, res) => {
 router.get(
   "/callback",
   async (req, res) => {
-    if (!ensureTikTokConfig(res)) return
+    if (
+      !ensureTikTokConfig(res)
+    ) {
+      return
+    }
 
     try {
       const {
         code,
+        state,
         error,
-        error_description: errorDescription
+        error_description:
+          errorDescription
       } = req.query
+
+      /* ---------- TIKTOK ERROR ---------- */
 
       if (error) {
         console.error(
@@ -154,21 +225,55 @@ router.get(
         )
 
         return res.redirect(
-          `${FRONTEND_URL}/admin/marketing?tiktok=error`
+          `${FRONTEND_URL}/admin/instagram?tiktok=error`
         )
       }
 
+      /* ---------- STATE ---------- */
+
+      const expectedState =
+        req.cookies
+          ?.tiktok_oauth_state
+
+      if (
+        !state ||
+        !expectedState ||
+        state !== expectedState
+      ) {
+        console.error(
+          "❌ TIKTOK OAUTH STATE MISMATCH"
+        )
+
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Invalid TikTok OAuth state."
+          })
+      }
+
+      res.clearCookie(
+        "tiktok_oauth_state"
+      )
+
+      /* ---------- CODE ---------- */
+
       if (!code) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "TikTok authorization code missing."
-        })
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "TikTok authorization code missing."
+          })
       }
 
       console.log(
         "🎵 TikTok authorization code received"
       )
+
+      /* ---------- TOKEN EXCHANGE ---------- */
 
       const body =
         new URLSearchParams({
@@ -199,12 +304,15 @@ router.get(
                 "application/x-www-form-urlencoded"
             },
 
-            body
+            body:
+              body.toString()
           }
         )
 
       const tokenData =
-        await tokenResponse.json()
+        await tokenResponse
+          .json()
+          .catch(() => ({}))
 
       console.log(
         "🎵 TikTok token response status:",
@@ -213,57 +321,53 @@ router.get(
 
       if (
         !tokenResponse.ok ||
-        !tokenData?.access_token
+        !tokenData
+          ?.access_token
       ) {
         console.error(
           "❌ TIKTOK TOKEN ERROR:",
           tokenData
         )
 
-        return res.status(
-          tokenResponse.status || 500
-        ).json({
-          success: false,
-          message:
-            "TikTok token exchange failed.",
-          error:
-            tokenData
-        })
-      }
-
-      const expiresIn =
-        Number(
-          tokenData.expires_in || 0
-        )
-
-      tiktokAuth = {
-        accessToken:
-          tokenData.access_token,
-
-        refreshToken:
-          tokenData.refresh_token || "",
-
-        openId:
-          tokenData.open_id || "",
-
-        scopes:
-          String(
-            tokenData.scope || ""
+        return res
+          .status(
+            tokenResponse.status ||
+            500
           )
-            .split(",")
-            .map((scope) =>
-              scope.trim()
-            )
-            .filter(Boolean),
-
-        expiresAt:
-          expiresIn
-            ? new Date(
-                Date.now() +
-                expiresIn * 1000
-              ).toISOString()
-            : null
+          .json({
+            success: false,
+            message:
+              "TikTok token exchange failed.",
+            error:
+              tokenData
+          })
       }
+
+      /* ---------- SAVE TOKEN ---------- */
+
+      const tiktokAuth =
+        setTikTokAuth({
+          accessToken:
+            tokenData.access_token,
+
+          refreshToken:
+            tokenData.refresh_token ||
+            "",
+
+          openId:
+            tokenData.open_id ||
+            "",
+
+          scopes:
+            normalizeScopes(
+              tokenData.scope
+            ),
+
+          expiresAt:
+            calculateExpiresAt(
+              tokenData.expires_in
+            )
+        })
 
       console.log(
         "✅ TikTok connected:",
@@ -280,7 +384,7 @@ router.get(
       )
 
       return res.redirect(
-        `${FRONTEND_URL}/admin/marketing?tiktok=connected`
+        `${FRONTEND_URL}/admin/instagram?tiktok=connected`
       )
     } catch (err) {
       console.error(
@@ -288,13 +392,15 @@ router.get(
         err
       )
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "TikTok callback failed.",
-        error:
-          err.message
-      })
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            "TikTok callback failed.",
+          error:
+            err.message
+        })
     }
   }
 )
@@ -307,15 +413,27 @@ router.get(
 router.post(
   "/refresh",
   async (req, res) => {
-    if (!ensureTikTokConfig(res)) return
+    if (
+      !ensureTikTokConfig(res)
+    ) {
+      return
+    }
 
     try {
-      if (!tiktokAuth.refreshToken) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "No TikTok refresh token available."
-        })
+      const currentAuth =
+        getTikTokAuth()
+
+      if (
+        !currentAuth
+          .refreshToken
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "No TikTok refresh token available."
+          })
       }
 
       const body =
@@ -330,7 +448,8 @@ router.post(
             "refresh_token",
 
           refresh_token:
-            tiktokAuth.refreshToken
+            currentAuth
+              .refreshToken
         })
 
       const response =
@@ -344,12 +463,15 @@ router.post(
                 "application/x-www-form-urlencoded"
             },
 
-            body
+            body:
+              body.toString()
           }
         )
 
       const data =
-        await response.json()
+        await response
+          .json()
+          .catch(() => ({}))
 
       if (
         !response.ok ||
@@ -360,52 +482,46 @@ router.post(
           data
         )
 
-        return res.status(
-          response.status || 500
-        ).json({
-          success: false,
-          message:
-            "TikTok token refresh failed.",
-          error:
-            data
-        })
-      }
-
-      const expiresIn =
-        Number(
-          data.expires_in || 0
-        )
-
-      tiktokAuth = {
-        accessToken:
-          data.access_token,
-
-        refreshToken:
-          data.refresh_token ||
-          tiktokAuth.refreshToken,
-
-        openId:
-          data.open_id ||
-          tiktokAuth.openId,
-
-        scopes:
-          String(
-            data.scope || ""
+        return res
+          .status(
+            response.status ||
+            500
           )
-            .split(",")
-            .map((scope) =>
-              scope.trim()
-            )
-            .filter(Boolean),
-
-        expiresAt:
-          expiresIn
-            ? new Date(
-                Date.now() +
-                expiresIn * 1000
-              ).toISOString()
-            : null
+          .json({
+            success: false,
+            message:
+              "TikTok token refresh failed.",
+            error:
+              data
+          })
       }
+
+      const tiktokAuth =
+        setTikTokAuth({
+          accessToken:
+            data.access_token,
+
+          refreshToken:
+            data.refresh_token ||
+            currentAuth.refreshToken,
+
+          openId:
+            data.open_id ||
+            currentAuth.openId,
+
+          scopes:
+            normalizeScopes(
+              data.scope ||
+              currentAuth
+                .scopes
+                .join(",")
+            ),
+
+          expiresAt:
+            calculateExpiresAt(
+              data.expires_in
+            )
+        })
 
       console.log(
         "✅ TikTok token refreshed"
@@ -413,11 +529,15 @@ router.post(
 
       return res.json({
         success: true,
+
         connected: true,
+
         openId:
           tiktokAuth.openId,
+
         scopes:
           tiktokAuth.scopes,
+
         expiresAt:
           tiktokAuth.expiresAt
       })
@@ -427,13 +547,15 @@ router.post(
         err
       )
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "TikTok refresh failed.",
-        error:
-          err.message
-      })
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            "TikTok refresh failed.",
+          error:
+            err.message
+        })
     }
   }
 )
@@ -441,21 +563,26 @@ router.post(
 /* =========================================================
    CREATOR INFO
    GET /api/tiktok/creator-info
-
-   TikTok requires creator information to be queried
-   before Direct Post.
 ========================================================= */
 
 router.get(
   "/creator-info",
   async (req, res) => {
     try {
-      if (!tiktokAuth.accessToken) {
-        return res.status(401).json({
-          success: false,
-          message:
-            "TikTok is not connected."
-        })
+      const tiktokAuth =
+        getTikTokAuth()
+
+      if (
+        !tiktokAuth
+          .accessToken
+      ) {
+        return res
+          .status(401)
+          .json({
+            success: false,
+            message:
+              "TikTok is not connected."
+          })
       }
 
       const response =
@@ -470,36 +597,46 @@ router.get(
 
               "Content-Type":
                 "application/json; charset=UTF-8"
-            },
-
-            body:
-              JSON.stringify({})
+            }
           }
         )
 
       const data =
-        await response.json()
+        await response
+          .json()
+          .catch(() => ({}))
 
-      if (!response.ok) {
+      if (
+        !response.ok ||
+        (
+          data?.error?.code &&
+          data.error.code !==
+            "ok"
+        )
+      ) {
         console.error(
           "❌ TIKTOK CREATOR INFO ERROR:",
           data
         )
 
-        return res.status(
-          response.status
-        ).json({
-          success: false,
-          message:
-            "Failed to retrieve TikTok creator info.",
-          error:
-            data
-        })
+        return res
+          .status(
+            response.status ||
+            500
+          )
+          .json({
+            success: false,
+            message:
+              "Failed to retrieve TikTok creator info.",
+            error:
+              data
+          })
       }
 
       return res.json({
         success: true,
-        data
+        data:
+          data.data
       })
     } catch (err) {
       console.error(
@@ -507,13 +644,15 @@ router.get(
         err
       )
 
-      return res.status(500).json({
-        success: false,
-        message:
-          "TikTok creator info failed.",
-        error:
-          err.message
-      })
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message:
+            "TikTok creator info failed.",
+          error:
+            err.message
+        })
     }
   }
 )
@@ -526,15 +665,13 @@ router.get(
 router.post(
   "/disconnect",
   (req, res) => {
-    tiktokAuth = {
-      accessToken: "",
-      refreshToken: "",
-      openId: "",
-      scopes: [],
-      expiresAt: null
-    }
+    clearTikTokAuth()
 
-    res.json({
+    console.log(
+      "🎵 TikTok disconnected"
+    )
+
+    return res.json({
       success: true,
       message:
         "TikTok disconnected."

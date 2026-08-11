@@ -4,21 +4,41 @@ import fs from "fs"
 
 import cloudinary from "../utils/cloudinary.js"
 
+import {
+  getTikTokAuth,
+  isTikTokConnected
+} from "../utils/tiktokAuthStore.js"
+
 const router = express.Router()
+
+/* =========================================================
+   UPLOAD
+========================================================= */
 
 const upload = multer({
   dest: "temp/",
+
   limits: {
-    fileSize: 15 * 1024 * 1024
+    fileSize:
+      15 * 1024 * 1024
   },
-  fileFilter: (req, file, cb) => {
+
+  fileFilter: (
+    req,
+    file,
+    cb
+  ) => {
     const allowedTypes = [
       "image/jpeg",
       "image/png",
       "image/webp"
     ]
 
-    if (!allowedTypes.includes(file.mimetype)) {
+    if (
+      !allowedTypes.includes(
+        file.mimetype
+      )
+    ) {
       return cb(
         new Error(
           "Social post must use a JPG, PNG, or WEBP image."
@@ -30,15 +50,18 @@ const upload = multer({
   }
 })
 
+/* =========================================================
+   HELPERS
+========================================================= */
+
 const sleep = (ms) =>
   new Promise(
     (resolve) =>
-      setTimeout(resolve, ms)
+      setTimeout(
+        resolve,
+        ms
+      )
   )
-
-/* =========================================================
-   GENERIC JSON REQUEST
-========================================================= */
 
 async function requestJson(
   url,
@@ -75,15 +98,60 @@ async function requestJson(
   return data
 }
 
+const isExpired = (
+  expiresAt
+) => {
+  if (!expiresAt) {
+    return false
+  }
+
+  const expiration =
+    new Date(
+      expiresAt
+    ).getTime()
+
+  if (
+    Number.isNaN(
+      expiration
+    )
+  ) {
+    return false
+  }
+
+  return (
+    Date.now() >=
+    expiration
+  )
+}
+
 /* =========================================================
-   SOCIAL CONNECTION STATUS
+   SOCIAL STATUS
    GET /api/social/status
 ========================================================= */
 
 router.get(
   "/status",
   async (req, res) => {
-    res.json({
+    const tiktokAuth =
+      getTikTokAuth()
+
+    const tiktokConfigured =
+      Boolean(
+        process.env
+          .TIKTOK_CLIENT_KEY &&
+        process.env
+          .TIKTOK_CLIENT_SECRET &&
+        process.env
+          .TIKTOK_REDIRECT_URI
+      )
+
+    const tiktokConnected =
+      isTikTokConnected() &&
+      !isExpired(
+        tiktokAuth.expiresAt
+      )
+
+    return res.json({
       success: true,
 
       platforms: {
@@ -107,10 +175,22 @@ router.get(
 
         tiktok: {
           configured:
-            Boolean(
-              process.env
-                .TIKTOK_ACCESS_TOKEN
-            )
+            tiktokConfigured,
+
+          connected:
+            tiktokConnected,
+
+          openId:
+            tiktokAuth.openId ||
+            null,
+
+          scopes:
+            tiktokAuth.scopes ||
+            [],
+
+          expiresAt:
+            tiktokAuth.expiresAt ||
+            null
         }
       }
     })
@@ -135,7 +215,7 @@ async function publishInstagram({
     )
   }
 
-  /* ---------- ACCOUNT ---------- */
+  /* ---------- PROFILE ---------- */
 
   const profileUrl =
     new URL(
@@ -167,7 +247,12 @@ async function publishInstagram({
     )
   }
 
-  /* ---------- CONTAINER ---------- */
+  console.log(
+    "📸 Instagram account:",
+    profile.username
+  )
+
+  /* ---------- CREATE MEDIA CONTAINER ---------- */
 
   const createBody =
     new URLSearchParams()
@@ -211,7 +296,12 @@ async function publishInstagram({
     )
   }
 
-  /* ---------- WAIT ---------- */
+  console.log(
+    "✅ Instagram container:",
+    container.id
+  )
+
+  /* ---------- WAIT FOR PROCESSING ---------- */
 
   let ready = false
 
@@ -245,7 +335,7 @@ async function publishInstagram({
       )
 
     console.log(
-      `📸 Instagram status ${attempt}/20:`,
+      `⏳ Instagram container status ${attempt}/20:`,
       status.status_code
     )
 
@@ -309,17 +399,24 @@ async function publishInstagram({
       }
     )
 
+  console.log(
+    "✅ Instagram published:",
+    published.id
+  )
+
   return {
     success: true,
+
     postId:
       published.id,
+
     username:
       profile.username
   }
 }
 
 /* =========================================================
-   FACEBOOK PAGE PUBLISHER
+   FACEBOOK PUBLISHER
 ========================================================= */
 
 async function publishFacebook({
@@ -384,6 +481,12 @@ async function publishFacebook({
       }
     )
 
+  console.log(
+    "✅ Facebook published:",
+    result.post_id ||
+    result.id
+  )
+
   return {
     success: true,
 
@@ -394,19 +497,53 @@ async function publishFacebook({
 }
 
 /* =========================================================
+   GET TIKTOK ACCESS TOKEN
+========================================================= */
+
+function getTikTokToken() {
+  const tiktokAuth =
+    getTikTokAuth()
+
+  if (
+    !tiktokAuth.accessToken
+  ) {
+    throw new Error(
+      "TikTok is not connected."
+    )
+  }
+
+  if (
+    isExpired(
+      tiktokAuth.expiresAt
+    )
+  ) {
+    throw new Error(
+      "TikTok access token has expired. Reconnect or refresh TikTok."
+    )
+  }
+
+  return {
+    token:
+      tiktokAuth.accessToken,
+
+    auth:
+      tiktokAuth
+  }
+}
+
+/* =========================================================
    TIKTOK CREATOR INFO
 ========================================================= */
 
 async function getTikTokCreatorInfo() {
-  const token =
-    process.env
-      .TIKTOK_ACCESS_TOKEN
+  const {
+    token
+  } =
+    getTikTokToken()
 
-  if (!token) {
-    throw new Error(
-      "TikTok is not configured."
-    )
-  }
+  console.log(
+    "🎵 Loading TikTok creator info..."
+  )
 
   const response =
     await requestJson(
@@ -420,21 +557,47 @@ async function getTikTokCreatorInfo() {
 
           "Content-Type":
             "application/json; charset=UTF-8"
-        }
+        },
+
+        body:
+          JSON.stringify({})
       }
     )
 
   if (
     response?.error?.code &&
-    response.error.code !== "ok"
+    response.error.code !==
+      "ok"
   ) {
+    const error =
+      new Error(
+        response.error.message ||
+        response.error.code ||
+        "TikTok creator info failed."
+      )
+
+    error.data =
+      response
+
+    throw error
+  }
+
+  const creator =
+    response?.data
+
+  if (!creator) {
     throw new Error(
-      response.error.message ||
-      response.error.code
+      "TikTok creator information was not returned."
     )
   }
 
-  return response.data
+  console.log(
+    "✅ TikTok creator:",
+    creator.creator_username ||
+    "connected account"
+  )
+
+  return creator
 }
 
 /* =========================================================
@@ -446,15 +609,37 @@ async function publishTikTok({
   caption,
   privacyLevel
 }) {
-  const token =
-    process.env
-      .TIKTOK_ACCESS_TOKEN
+  const {
+    token,
+    auth
+  } =
+    getTikTokToken()
 
-  if (!token) {
+  console.log(
+    "🎵 TikTok connected:",
+    {
+      openId:
+        auth.openId,
+
+      scopes:
+        auth.scopes
+    }
+  )
+
+  /* ---------- CHECK SCOPE ---------- */
+
+  if (
+    !auth.scopes
+      ?.includes(
+        "video.publish"
+      )
+  ) {
     throw new Error(
-      "TikTok is not configured."
+      "TikTok connection does not have the video.publish permission."
     )
   }
+
+  /* ---------- CREATOR INFO ---------- */
 
   const creator =
     await getTikTokCreatorInfo()
@@ -464,9 +649,18 @@ async function publishTikTok({
       ?.privacy_level_options ||
     []
 
+  console.log(
+    "🎵 TikTok privacy options:",
+    availablePrivacy
+  )
+
   let privacy =
     privacyLevel
 
+  /*
+   * Sandbox / unaudited TikTok apps commonly
+   * require SELF_ONLY.
+   */
   if (
     !privacy ||
     !availablePrivacy.includes(
@@ -487,15 +681,24 @@ async function publishTikTok({
     )
   }
 
+  /* ---------- POST DATA ---------- */
+
+  const cleanCaption =
+    String(
+      caption || ""
+    ).trim()
+
   const payload = {
     post_info: {
       title:
-        caption
-          ?.slice(0, 90) ||
-        "",
+        cleanCaption
+          .slice(
+            0,
+            90
+          ),
 
       description:
-        caption || "",
+        cleanCaption,
 
       privacy_level:
         privacy,
@@ -535,6 +738,10 @@ async function publishTikTok({
       "PHOTO"
   }
 
+  console.log(
+    "🎵 Sending TikTok photo post..."
+  )
+
   const result =
     await requestJson(
       "https://open.tiktokapis.com/v2/post/publish/content/init/",
@@ -558,24 +765,46 @@ async function publishTikTok({
 
   if (
     result?.error?.code &&
-    result.error.code !== "ok"
+    result.error.code !==
+      "ok"
   ) {
+    const error =
+      new Error(
+        result.error.message ||
+        result.error.code ||
+        "TikTok publish failed."
+      )
+
+    error.data =
+      result
+
+    throw error
+  }
+
+  const publishId =
+    result?.data
+      ?.publish_id
+
+  if (!publishId) {
     throw new Error(
-      result.error.message ||
-      result.error.code
+      "TikTok accepted the request but did not return a publish ID."
     )
   }
+
+  console.log(
+    "✅ TikTok publish request accepted:",
+    publishId
+  )
 
   return {
     success: true,
 
-    publishId:
-      result?.data
-        ?.publish_id,
+    publishId,
 
     username:
       creator
-        ?.creator_username,
+        ?.creator_username ||
+      null,
 
     privacyLevel:
       privacy
@@ -591,7 +820,12 @@ router.post(
   "/publish",
   upload.single("image"),
   async (req, res) => {
+    let uploadedPublicId =
+      null
+
     try {
+      /* ---------- IMAGE ---------- */
+
       if (!req.file) {
         return res
           .status(400)
@@ -603,12 +837,16 @@ router.post(
           })
       }
 
+      /* ---------- CAPTION ---------- */
+
       const caption =
         String(
           req.body
             ?.caption ||
           ""
         ).trim()
+
+      /* ---------- PLATFORM FLAGS ---------- */
 
       const publishInstagramFlag =
         req.body.instagram ===
@@ -637,7 +875,23 @@ router.post(
           })
       }
 
-      /* ---------- UPLOAD ONCE ---------- */
+      console.log(
+        "🌐 SOCIAL PUBLISH REQUEST:",
+        {
+          instagram:
+            publishInstagramFlag,
+
+          facebook:
+            publishFacebookFlag,
+
+          tiktok:
+            publishTikTokFlag
+        }
+      )
+
+      /* =====================================================
+         CLOUDINARY UPLOAD
+      ===================================================== */
 
       console.log(
         "📤 Uploading social media image..."
@@ -660,9 +914,19 @@ router.post(
       const imageUrl =
         uploaded.secure_url
 
+      uploadedPublicId =
+        uploaded.public_id
+
+      console.log(
+        "✅ Social image uploaded:",
+        imageUrl
+      )
+
       const results = {}
 
-      /* ---------- INSTAGRAM ---------- */
+      /* =====================================================
+         INSTAGRAM
+      ===================================================== */
 
       if (
         publishInstagramFlag
@@ -701,7 +965,9 @@ router.post(
         }
       }
 
-      /* ---------- FACEBOOK ---------- */
+      /* =====================================================
+         FACEBOOK
+      ===================================================== */
 
       if (
         publishFacebookFlag
@@ -740,7 +1006,9 @@ router.post(
         }
       }
 
-      /* ---------- TIKTOK ---------- */
+      /* =====================================================
+         TIKTOK
+      ===================================================== */
 
       if (
         publishTikTokFlag
@@ -757,7 +1025,7 @@ router.post(
 
               privacyLevel:
                 req.body
-                  .tiktokPrivacy
+                  ?.tiktokPrivacy
             })
 
           console.log(
@@ -783,6 +1051,10 @@ router.post(
         }
       }
 
+      /* =====================================================
+         RESULT SUMMARY
+      ===================================================== */
+
       const values =
         Object.values(
           results
@@ -791,16 +1063,42 @@ router.post(
       const successful =
         values.filter(
           (item) =>
-            item.success
+            item?.success
         )
+
+      const failed =
+        values.filter(
+          (item) =>
+            !item?.success
+        )
+
+      const complete =
+        values.length > 0 &&
+        successful.length ===
+          values.length
+
+      const anySuccessful =
+        successful.length > 0
+
+      console.log(
+        "🌐 SOCIAL PUBLISH COMPLETE:",
+        {
+          total:
+            values.length,
+
+          successful:
+            successful.length,
+
+          failed:
+            failed.length
+        }
+      )
 
       return res.json({
         success:
-          successful.length > 0,
+          anySuccessful,
 
-        complete:
-          successful.length ===
-          values.length,
+        complete,
 
         imageUrl,
 
@@ -822,16 +1120,35 @@ router.post(
             "Unable to publish social post."
         })
     } finally {
+      /* ---------- DELETE LOCAL TEMP FILE ---------- */
+
       if (
         req.file?.path &&
         fs.existsSync(
           req.file.path
         )
       ) {
-        fs.unlinkSync(
-          req.file.path
-        )
+        try {
+          fs.unlinkSync(
+            req.file.path
+          )
+        } catch (error) {
+          console.warn(
+            "⚠️ Unable to delete temporary upload:",
+            error.message
+          )
+        }
       }
+
+      /*
+       * IMPORTANT:
+       *
+       * Do NOT immediately delete the Cloudinary image here.
+       *
+       * Instagram and TikTok retrieve the media remotely
+       * after receiving the URL. Removing the Cloudinary
+       * image too early can cause media processing failures.
+       */
     }
   }
 )
