@@ -1,21 +1,26 @@
 import mongoose from "mongoose"
 
-const timelineSchema = new mongoose.Schema({
-  status: {
-    type: String,
-    default: ""
-  },
+const timelineSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      default: ""
+    },
 
-  note: {
-    type: String,
-    default: ""
-  },
+    note: {
+      type: String,
+      default: ""
+    },
 
-  date: {
-    type: Date,
-    default: Date.now
+    date: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  {
+    _id: false
   }
-})
+)
 
 const quoteItemSchema = new mongoose.Schema(
   {
@@ -26,12 +31,14 @@ const quoteItemSchema = new mongoose.Schema(
 
     quantity: {
       type: Number,
-      default: 1
+      default: 1,
+      min: 1
     },
 
     price: {
       type: Number,
-      default: 0
+      default: 0,
+      min: 0
     },
 
     serviceType: {
@@ -55,7 +62,8 @@ const quoteSchema = new mongoose.Schema(
 
     customerName: {
       type: String,
-      default: ""
+      default: "",
+      trim: true
     },
 
     email: {
@@ -67,34 +75,40 @@ const quoteSchema = new mongoose.Schema(
 
     phone: {
       type: String,
-      default: ""
+      default: "",
+      trim: true
     },
 
     /* ================= PROJECT ================= */
 
     projectType: {
       type: String,
-      default: ""
+      default: "",
+      trim: true
     },
 
     serviceType: {
       type: String,
-      default: ""
+      default: "",
+      trim: true
     },
 
     serviceLabel: {
       type: String,
-      default: ""
+      default: "",
+      trim: true
     },
 
     printType: {
       type: String,
-      default: ""
+      default: "",
+      trim: true
     },
 
     turnaround: {
       type: String,
-      default: "standard"
+      default: "standard",
+      trim: true
     },
 
     notes: {
@@ -104,7 +118,8 @@ const quoteSchema = new mongoose.Schema(
 
     quantity: {
       type: Number,
-      default: 1
+      default: 1,
+      min: 1
     },
 
     items: {
@@ -116,17 +131,20 @@ const quoteSchema = new mongoose.Schema(
 
     price: {
       type: Number,
-      default: 0
+      default: 0,
+      min: 0
     },
 
     finalPrice: {
       type: Number,
-      default: 0
+      default: 0,
+      min: 0
     },
 
     shippingCost: {
       type: Number,
-      default: 0
+      default: 0,
+      min: 0
     },
 
     /* ================= ARTWORK ================= */
@@ -190,7 +208,7 @@ const quoteSchema = new mongoose.Schema(
         /* STEP 3 */
         "approval_payment",
 
-        /* EXISTING PAYMENT STATES */
+        /* PAYMENT STATES */
         "pending",
         "payment_required",
         "paid",
@@ -229,7 +247,8 @@ const quoteSchema = new mongoose.Schema(
 
     source: {
       type: String,
-      default: "quote"
+      default: "quote",
+      trim: true
     },
 
     /* ================= HISTORY ================= */
@@ -244,7 +263,16 @@ const quoteSchema = new mongoose.Schema(
   }
 )
 
-export default mongoose.model(
-  "Quote",
-  quoteSchema
-)
+/* ================= INDEXES ================= */
+
+quoteSchema.index({ email: 1 })
+
+quoteSchema.index({ status: 1 })
+
+quoteSchema.index({ approvalStatus: 1 })
+
+quoteSchema.index({ createdAt: -1 })
+
+quoteSchema.index({ orderId: 1 })
+
+export default mongoose.model("Quote", quoteSchema)

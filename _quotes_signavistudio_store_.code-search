@@ -1,0 +1,19 @@
+# Query: "quotes@signavistudio.store"
+# ContextLines: 1
+
+3 results - 3 files
+
+controllers\adminEmailWebhookController.js:
+  18    process.env.QUOTES_EMAIL ||
+  19:   "quote@signavistudio.store"
+  20  
+
+routes\admin\adminEmailRoutes.js:
+  29    process.env.QUOTES_EMAIL ||
+  30:   "quote@signavistudio.store"
+  31  
+
+routes\admin\adminEmailThreadRoutes.js:
+  21    process.env.QUOTES_EMAIL ||
+  22:   "quote@signavistudio.store"
+  23  

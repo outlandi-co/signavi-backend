@@ -1,6 +1,9 @@
 import express from "express"
+import mongoose from "mongoose"
+
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
+
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 
 import upload from "../middleware/upload.js"
@@ -11,92 +14,199 @@ const router = express.Router()
 console.log("🔥 QUOTES ROUTE LOADED")
 
 /* =========================================================
-   CLOUDINARY BUFFER UPLOAD
+   CONSTANTS
 ========================================================= */
 
-const uploadBufferToCloudinary = (file) => {
-  return new Promise((resolve, reject) => {
-    const uploadStream =
-      cloudinary.uploader.upload_stream(
-        {
-          folder: "signavi/quote-artwork",
-          resource_type: "auto"
-        },
-        (error, result) => {
-          if (error) {
-            console.error(
-              "❌ QUOTE CLOUDINARY UPLOAD ERROR:",
-              error
-            )
+const TAX_RATE = 0.0825
 
-            return reject(error)
-          }
+const QUOTE_WORKFLOW_STATUSES = [
+  "quotes",
+  "review_mockup",
+  "approval_payment",
+  "pending",
+  "payment_required",
+  "paid",
+  "production",
+  "pickup_shipping",
+  "shipping",
+  "shipped",
+  "delivered",
+  "completed",
+  "denied",
+  "archive"
+]
 
-          resolve(result)
-        }
-      )
+const ACTIVE_QUOTE_STATUSES = [
+  "quotes",
+  "review_mockup",
+  "approval_payment"
+]
 
-    uploadStream.end(file.buffer)
-  })
+/* =========================================================
+   HELPERS
+========================================================= */
+
+const safeNumber = (value, fallback = 0) => {
+  const number = Number(value)
+
+  return Number.isFinite(number)
+    ? number
+    : fallback
 }
 
-/* ================= GET ALL ================= */
+const safePositiveNumber = (
+  value,
+  fallback = 0
+) => {
+  const number = Number(value)
 
-router.get("/", async (req, res) => {
-  try {
-    const includeProcessed =
-      req.query.includeProcessed === "true"
+  if (
+    !Number.isFinite(number) ||
+    number < 0
+  ) {
+    return fallback
+  }
 
-    const filter = includeProcessed
-      ? {}
-      : {
-          approvalStatus: {
-            $nin: ["approved", "denied"]
+  return number
+}
+
+const safeQuantity = (
+  value,
+  fallback = 1
+) => {
+  const number = Number(value)
+
+  if (
+    !Number.isFinite(number) ||
+    number < 1
+  ) {
+    return fallback
+  }
+
+  return Math.floor(number)
+}
+
+const normalizeEmail = (email = "") => {
+  return String(email)
+    .trim()
+    .toLowerCase()
+}
+
+const uploadBufferToCloudinary = (
+  file
+) => {
+  return new Promise(
+    (resolve, reject) => {
+      const uploadStream =
+        cloudinary.uploader.upload_stream(
+          {
+            folder:
+              "signavi/quote-artwork",
+
+            resource_type:
+              "auto"
           },
+
+          (error, result) => {
+            if (error) {
+              console.error(
+                "❌ QUOTE CLOUDINARY UPLOAD ERROR:",
+                error
+              )
+
+              return reject(error)
+            }
+
+            resolve(result)
+          }
+        )
+
+      uploadStream.end(
+        file.buffer
+      )
+    }
+  )
+}
+
+/* =========================================================
+   GET ALL QUOTES
+========================================================= */
+
+router.get(
+  "/",
+  async (req, res) => {
+    try {
+      const includeProcessed =
+        req.query.includeProcessed ===
+        "true"
+
+      let filter = {}
+
+      /*
+       * Default behavior:
+       * only return quotes that are still
+       * actively moving through quote review.
+       *
+       * Admin can request every quote using:
+       *
+       * ?includeProcessed=true
+       */
+
+      if (!includeProcessed) {
+        filter = {
+          approvalStatus: "pending",
+
           status: {
-            $nin: [
-              "approved",
-              "denied",
-              "payment_required",
-              "ready_for_production",
-              "production",
-              "shipping",
-              "shipped",
-              "closed",
-              "archive"
-            ]
+            $in:
+              ACTIVE_QUOTE_STATUSES
           }
         }
+      }
 
-    const quotes = await Quote.find(filter).sort({
-      createdAt: -1
-    })
+      const quotes =
+        await Quote.find(filter)
+          .sort({
+            createdAt: -1
+          })
+          .lean()
 
-    return res.json({
-      success: true,
-      data: quotes
-    })
-  } catch (err) {
-    console.error(
-      "❌ GET QUOTES ERROR:",
-      err
-    )
+      return res.json({
+        success: true,
+        count: quotes.length,
+        data: quotes
+      })
+    } catch (err) {
+      console.error(
+        "❌ GET QUOTES ERROR:",
+        err
+      )
 
-    return res.status(500).json({
-      success: false,
-      message: err.message
-    })
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            err.message ||
+            "Failed to load quotes"
+        })
+    }
   }
-})
+)
 
-/* ================= CREATE ================= */
+/* =========================================================
+   CREATE QUOTE
+========================================================= */
 
 router.post(
   "/",
+
   upload.single("artwork"),
+
   async (req, res) => {
     try {
-      const body = req.body || {}
+      const body =
+        req.body || {}
 
       console.log(
         "🔥 CREATE QUOTE BODY:",
@@ -105,37 +215,69 @@ router.post(
 
       console.log(
         "🖼️ CREATE QUOTE FILE:",
+
         req.file
           ? {
-              name: req.file.originalname,
-              type: req.file.mimetype,
-              size: req.file.size
+              name:
+                req.file
+                  .originalname,
+
+              type:
+                req.file
+                  .mimetype,
+
+              size:
+                req.file
+                  .size
             }
           : "No artwork uploaded"
       )
 
       /* ================= VALIDATE BODY ================= */
 
-      if (Object.keys(body).length === 0) {
+      if (
+        Object.keys(body)
+          .length === 0
+      ) {
         console.error(
           "❌ CREATE QUOTE: Request body is empty"
         )
 
-        return res.status(400).json({
-          success: false,
-          message:
-            "Quote request body is empty or could not be parsed"
-        })
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "Quote request body is empty or could not be parsed"
+          })
       }
 
+      /* ================= BASIC VALUES ================= */
+
       const quantity =
-        Number(body.quantity) || 1
+        safeQuantity(
+          body.quantity,
+          1
+        )
 
       const price =
-        Number(body.price) || 0
+        safePositiveNumber(
+          body.price,
+          0
+        )
 
       const finalPrice =
-        Number(body.finalPrice) || price
+        safePositiveNumber(
+          body.finalPrice,
+          price
+        )
+
+      const shippingCost =
+        safePositiveNumber(
+          body.shippingCost,
+          0
+        )
 
       /* ================= PARSE ITEMS ================= */
 
@@ -143,11 +285,58 @@ router.post(
 
       if (body.items) {
         try {
-          items =
-            typeof body.items === "string"
-              ? JSON.parse(body.items)
+          const parsedItems =
+            typeof body.items ===
+            "string"
+              ? JSON.parse(
+                  body.items
+                )
               : body.items
-        } catch (parseError) {
+
+          if (
+            Array.isArray(
+              parsedItems
+            )
+          ) {
+            items =
+              parsedItems.map(
+                (item) => ({
+                  name:
+                    String(
+                      item?.name ||
+                        ""
+                    ).trim(),
+
+                  quantity:
+                    safeQuantity(
+                      item?.quantity,
+                      1
+                    ),
+
+                  price:
+                    safePositiveNumber(
+                      item?.price,
+                      0
+                    ),
+
+                  serviceType:
+                    String(
+                      item
+                        ?.serviceType ||
+                        ""
+                    ).trim(),
+
+                  source:
+                    String(
+                      item?.source ||
+                        "quote"
+                    ).trim()
+                })
+              )
+          }
+        } catch (
+          parseError
+        ) {
           console.error(
             "❌ QUOTE ITEMS PARSE ERROR:",
             parseError
@@ -160,13 +349,22 @@ router.post(
       /* ================= ARTWORK ================= */
 
       let artworkUrl =
-        body.artworkUrl || ""
+        String(
+          body.artworkUrl ||
+            ""
+        ).trim()
 
       let artworkPublicId =
-        body.artworkPublicId || ""
+        String(
+          body.artworkPublicId ||
+            ""
+        ).trim()
 
       let artworkName =
-        body.artworkName || ""
+        String(
+          body.artworkName ||
+            ""
+        ).trim()
 
       if (req.file) {
         console.log(
@@ -179,13 +377,19 @@ router.post(
           )
 
         artworkUrl =
-          uploadedArtwork.secure_url || ""
+          uploadedArtwork
+            ?.secure_url ||
+          ""
 
         artworkPublicId =
-          uploadedArtwork.public_id || ""
+          uploadedArtwork
+            ?.public_id ||
+          ""
 
         artworkName =
-          req.file.originalname || ""
+          req.file
+            ?.originalname ||
+          ""
 
         console.log(
           "✅ QUOTE ARTWORK UPLOADED:",
@@ -193,52 +397,117 @@ router.post(
         )
       }
 
-      /* ================= CREATE QUOTE ================= */
+      /* ================= CREATE DATA ================= */
 
       const quoteData = {
-        ...body,
+        customerName:
+          String(
+            body.customerName ||
+              ""
+          ).trim(),
+
+        email:
+          normalizeEmail(
+            body.email
+          ),
+
+        phone:
+          String(
+            body.phone ||
+              ""
+          ).trim(),
+
+        projectType:
+          String(
+            body.projectType ||
+              ""
+          ).trim(),
+
+        serviceType:
+          String(
+            body.serviceType ||
+              ""
+          ).trim(),
+
+        serviceLabel:
+          String(
+            body.serviceLabel ||
+              ""
+          ).trim(),
+
+        printType:
+          String(
+            body.printType ||
+              ""
+          ).trim(),
+
+        turnaround:
+          String(
+            body.turnaround ||
+              "standard"
+          ).trim(),
+
+        notes:
+          String(
+            body.notes ||
+              ""
+          ),
 
         quantity,
-        price,
-        finalPrice,
 
         items,
 
-        status: "quotes",
-        approvalStatus: "pending",
+        price,
+
+        finalPrice,
+
+        shippingCost,
+
+        artwork:
+          artworkUrl,
+
+        artworkUrl,
+
+        artworkPublicId,
+
+        artworkName,
+
+        approvalStatus:
+          "pending",
+
+        denialReason:
+          "",
+
+        adminNotes:
+          String(
+            body.adminNotes ||
+              ""
+          ),
+
+        status:
+          "quotes",
+
+        source:
+          String(
+            body.source ||
+              "quote"
+          ).trim(),
 
         timeline: [
           {
-            status: "created",
-            note: "Quote created",
-            date: new Date()
+            status:
+              "quotes",
+
+            note:
+              "Quote created",
+
+            date:
+              new Date()
           }
         ]
       }
 
-      /*
-       * Store artwork information.
-       * These values are useful for the admin quote,
-       * production board, and future artwork retrieval.
-       */
-
-      if (artworkUrl) {
-        quoteData.artwork =
-          artworkUrl
-
-        quoteData.artworkUrl =
-          artworkUrl
-      }
-
-      if (artworkPublicId) {
-        quoteData.artworkPublicId =
-          artworkPublicId
-      }
-
-      if (artworkName) {
-        quoteData.artworkName =
-          artworkName
-      }
+      /* ================= SAVE ================= */
 
       const quote =
         await Quote.create(
@@ -250,241 +519,479 @@ router.post(
         quote._id
       )
 
-      return res.status(201).json({
-        success: true,
-        data: quote
-      })
+      return res
+        .status(201)
+        .json({
+          success: true,
+          data: quote
+        })
     } catch (err) {
       console.error(
         "❌ CREATE QUOTE ERROR:",
         err
       )
 
-      return res.status(500).json({
-        success: false,
-        message:
-          err.message ||
-          "Failed to create quote"
-      })
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            err.message ||
+            "Failed to create quote"
+        })
     }
   }
 )
 
-/* ================= GET ONE ================= */
+/* =========================================================
+   GET ONE QUOTE
+========================================================= */
 
-router.get("/:id", async (req, res) => {
-  try {
-    const quote =
-      await Quote.findById(
-        req.params.id
-      )
+router.get(
+  "/:id",
+  async (req, res) => {
+    try {
+      if (
+        !mongoose.Types.ObjectId
+          .isValid(
+            req.params.id
+          )
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Invalid quote ID"
+          })
+      }
 
-    if (!quote) {
-      return res.status(404).json({
-        success: false,
-        message: "Quote not found"
-      })
-    }
-
-    return res.json({
-      success: true,
-      data: quote
-    })
-  } catch (err) {
-    console.error(
-      "❌ GET ONE ERROR:",
-      err
-    )
-
-    return res.status(500).json({
-      success: false,
-      message: err.message
-    })
-  }
-})
-
-/* ================= PATCH ================= */
-
-router.patch("/:id", async (req, res) => {
-  try {
-    const body =
-      req.body || {}
-
-    console.log(
-      "🔥 PATCH BODY:",
-      body
-    )
-
-    if (
-      !req.body ||
-      Object.keys(body).length === 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Update request body is empty or could not be parsed"
-      })
-    }
-
-    const quote =
-      await Quote.findById(
-        req.params.id
-      )
-
-    if (!quote) {
-      return res.status(404).json({
-        success: false,
-        message: "Quote not found"
-      })
-    }
-
-    if (
-      !Array.isArray(
-        quote.timeline
-      )
-    ) {
-      quote.timeline = []
-    }
-
-    const approvalStatus =
-      body.approvalStatus
-
-    let createdOrder = null
-
-    /* ================= DUPLICATE GUARD ================= */
-
-    if (
-      approvalStatus &&
-      (
-        quote.approvalStatus ===
-          "approved" ||
-        quote.approvalStatus ===
-          "denied" ||
-        quote.orderId
-      )
-    ) {
-      console.log(
-        "⚠️ QUOTE ALREADY PROCESSED:",
-        quote._id
-      )
-
-      return res.json({
-        success: true,
-        message:
-          "Quote already processed",
-        data: quote
-      })
-    }
-
-    /* ================= WORKFLOW STATUS ================= */
-
-    const workflowStatuses = [
-      "quotes",
-      "review_mockup",
-      "approval_payment",
-      "production",
-      "pickup_shipping",
-      "completed"
-    ]
-
-    if (
-      body.status &&
-      workflowStatuses.includes(
-        body.status
-      ) &&
-      !approvalStatus
-    ) {
-      const previousStatus =
-        quote.status
-
-      quote.status =
-        body.status
-
-      quote.timeline.push({
-        status: body.status,
-        note:
-          `Workflow moved from ${previousStatus} to ${body.status}`,
-        date: new Date()
-      })
-
-      await quote.save()
-
-      console.log(
-        "✅ QUOTE WORKFLOW UPDATED:",
-        quote._id,
-        quote.status
-      )
-
-      return res.json({
-        success: true,
-        data: quote,
-        order: null
-      })
-    }
-
-    /* ================= APPROVE ================= */
-
-    if (
-      approvalStatus ===
-      "approved"
-    ) {
-      quote.approvalStatus =
-        "approved"
-
-      quote.status =
-        "payment_required"
-
-      const quantity =
-        Number(
-          quote.quantity
-        ) || 1
-
-      const itemPrice =
-        Number(
-          body.finalPrice ||
-          quote.finalPrice ||
-          quote.price ||
-          0
+      const quote =
+        await Quote.findById(
+          req.params.id
         )
 
-      quote.finalPrice =
-        itemPrice
+      if (!quote) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message:
+              "Quote not found"
+          })
+      }
 
-      quote.timeline.push({
-        status: "approved",
-        note:
-          "Quote approved and converted into order",
-        date: new Date()
+      return res.json({
+        success: true,
+        data: quote
       })
+    } catch (err) {
+      console.error(
+        "❌ GET ONE QUOTE ERROR:",
+        err
+      )
 
-      const subtotal =
-        itemPrice
+      return res
+        .status(500)
+        .json({
+          success: false,
 
-      const tax =
-        subtotal * 0.0825
+          message:
+            err.message ||
+            "Failed to load quote"
+        })
+    }
+  }
+)
 
-      const finalPrice =
-        subtotal + tax
+/* =========================================================
+   PATCH QUOTE
+========================================================= */
 
-      createdOrder =
-        await Order.create({
-          customerName:
-            quote.customerName ||
-            quote.name ||
-            "Customer",
+router.patch(
+  "/:id",
+  async (req, res) => {
+    try {
+      /* ================= VALIDATE ID ================= */
 
-          email:
+      if (
+        !mongoose.Types.ObjectId
+          .isValid(
+            req.params.id
+          )
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Invalid quote ID"
+          })
+      }
+
+      const body =
+        req.body || {}
+
+      console.log(
+        "🔥 PATCH QUOTE BODY:",
+        body
+      )
+
+      if (
+        Object.keys(body)
+          .length === 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "Update request body is empty or could not be parsed"
+          })
+      }
+
+      const quote =
+        await Quote.findById(
+          req.params.id
+        )
+
+      if (!quote) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message:
+              "Quote not found"
+          })
+      }
+
+      if (
+        !Array.isArray(
+          quote.timeline
+        )
+      ) {
+        quote.timeline = []
+      }
+
+      const approvalStatus =
+        body.approvalStatus
+
+      let createdOrder =
+        null
+
+      /* =====================================================
+         APPROVAL / DENIAL DUPLICATE GUARD
+      ===================================================== */
+
+      if (
+        approvalStatus &&
+        (
+          quote.approvalStatus ===
+            "approved" ||
+          quote.approvalStatus ===
+            "denied" ||
+          quote.orderId
+        )
+      ) {
+        console.log(
+          "⚠️ QUOTE ALREADY PROCESSED:",
+          quote._id
+        )
+
+        return res.json({
+          success: true,
+
+          message:
+            "Quote already processed",
+
+          data: quote,
+
+          order: null
+        })
+      }
+
+      /* =====================================================
+         WORKFLOW STATUS UPDATE
+      ===================================================== */
+
+      if (
+        body.status &&
+        !approvalStatus
+      ) {
+        const requestedStatus =
+          String(
+            body.status
+          ).trim()
+
+        if (
+          !QUOTE_WORKFLOW_STATUSES.includes(
+            requestedStatus
+          )
+        ) {
+          return res
+            .status(400)
+            .json({
+              success: false,
+
+              message:
+                `Invalid quote status: ${requestedStatus}`
+            })
+        }
+
+        const previousStatus =
+          quote.status
+
+        if (
+          previousStatus !==
+          requestedStatus
+        ) {
+          quote.status =
+            requestedStatus
+
+          quote.timeline.push({
+            status:
+              requestedStatus,
+
+            note:
+              `Workflow moved from ${previousStatus} to ${requestedStatus}`,
+
+            date:
+              new Date()
+          })
+        }
+
+        /* ================= OPTIONAL FIELDS ================= */
+
+        if (
+          body.adminNotes !==
+          undefined
+        ) {
+          quote.adminNotes =
             String(
-              quote.email || ""
+              body.adminNotes ||
+                ""
             )
-              .trim()
-              .toLowerCase(),
+        }
 
-          items: [
+        if (
+          body.denialReason !==
+          undefined
+        ) {
+          quote.denialReason =
+            String(
+              body.denialReason ||
+                ""
+            )
+        }
+
+        if (
+          body.finalPrice !==
+          undefined
+        ) {
+          quote.finalPrice =
+            safePositiveNumber(
+              body.finalPrice,
+              quote.finalPrice
+            )
+        }
+
+        if (
+          body.price !==
+          undefined
+        ) {
+          quote.price =
+            safePositiveNumber(
+              body.price,
+              quote.price
+            )
+        }
+
+        if (
+          body.shippingCost !==
+          undefined
+        ) {
+          quote.shippingCost =
+            safePositiveNumber(
+              body.shippingCost,
+              quote.shippingCost
+            )
+        }
+
+        await quote.save()
+
+        console.log(
+          "✅ QUOTE WORKFLOW UPDATED:",
+          quote._id,
+          quote.status
+        )
+
+        return res.json({
+          success: true,
+          data: quote,
+          order: null
+        })
+      }
+
+      /* =====================================================
+         APPROVE QUOTE
+      ===================================================== */
+
+      if (
+        approvalStatus ===
+        "approved"
+      ) {
+        /* ================= PRICE ================= */
+
+        const quantity =
+          safeQuantity(
+            quote.quantity,
+            1
+          )
+
+        const itemPrice =
+          safePositiveNumber(
+            body.finalPrice !==
+              undefined
+              ? body.finalPrice
+              : (
+                  quote.finalPrice ||
+                  quote.price ||
+                  0
+                ),
+            0
+          )
+
+        /*
+         * Quote.finalPrice is treated as the
+         * approved pre-tax quote price.
+         */
+
+        quote.finalPrice =
+          itemPrice
+
+        quote.approvalStatus =
+          "approved"
+
+        quote.status =
+          "payment_required"
+
+        if (
+          body.adminNotes !==
+          undefined
+        ) {
+          quote.adminNotes =
+            String(
+              body.adminNotes ||
+                ""
+            )
+        }
+
+        quote.timeline.push({
+          status:
+            "approved",
+
+          note:
+            "Quote approved",
+
+          date:
+            new Date()
+        })
+
+        quote.timeline.push({
+          status:
+            "payment_required",
+
+          note:
+            "Quote converted to order and payment is required",
+
+          date:
+            new Date()
+        })
+
+        /* ================= ORDER TOTALS ================= */
+
+        const subtotal =
+          itemPrice
+
+        const tax =
+          Number(
+            (
+              subtotal *
+              TAX_RATE
+            ).toFixed(2)
+          )
+
+        const shippingCost =
+          safePositiveNumber(
+            quote.shippingCost,
+            0
+          )
+
+        const orderFinalPrice =
+          Number(
+            (
+              subtotal +
+              tax +
+              shippingCost
+            ).toFixed(2)
+          )
+
+        /* ================= ORDER ITEMS ================= */
+
+        let orderItems = []
+
+        if (
+          Array.isArray(
+            quote.items
+          ) &&
+          quote.items.length >
+            0
+        ) {
+          orderItems =
+            quote.items.map(
+              (item) => ({
+                name:
+                  item.name ||
+                  quote
+                    .projectType ||
+                  quote
+                    .serviceType ||
+                  "Custom Quote Order",
+
+                quantity:
+                  safeQuantity(
+                    item.quantity,
+                    1
+                  ),
+
+                price:
+                  safePositiveNumber(
+                    item.price,
+                    0
+                  ),
+
+                serviceType:
+                  item.serviceType ||
+                  quote
+                    .serviceType ||
+                  "",
+
+                source:
+                  "quote"
+              })
+            )
+        } else {
+          orderItems = [
             {
               name:
-                quote.projectType ||
-                quote.serviceType ||
+                quote
+                  .projectType ||
+                quote
+                  .serviceLabel ||
+                quote
+                  .serviceType ||
                 "Custom Quote Order",
 
               quantity,
@@ -492,91 +999,379 @@ router.patch("/:id", async (req, res) => {
               price:
                 itemPrice,
 
+              serviceType:
+                quote
+                  .serviceType ||
+                "",
+
               source:
                 "quote"
             }
-          ],
-
-          subtotal,
-          tax,
-          finalPrice,
-
-          status:
-            "payment_required",
-
-          source:
-            "quote",
-
-          quoteId:
-            quote._id,
-
-          timeline: [
-            {
-              status:
-                "payment_required",
-
-              note:
-                "Order created from approved quote",
-
-              date:
-                new Date()
-            }
           ]
+        }
+
+        /* ================= CREATE ORDER ================= */
+
+        createdOrder =
+          await Order.create({
+            customerName:
+              quote.customerName ||
+              "Customer",
+
+            email:
+              normalizeEmail(
+                quote.email
+              ),
+
+            phone:
+              quote.phone ||
+              "",
+
+            items:
+              orderItems,
+
+            subtotal,
+
+            tax,
+
+            shippingCost,
+
+            finalPrice:
+              orderFinalPrice,
+
+            status:
+              "payment_required",
+
+            source:
+              "quote",
+
+            quoteId:
+              quote._id,
+
+            timeline: [
+              {
+                status:
+                  "payment_required",
+
+                note:
+                  "Order created from approved quote",
+
+                date:
+                  new Date()
+              }
+            ]
+          })
+
+        console.log(
+          "🔥 ORDER CREATED FROM QUOTE:",
+          createdOrder._id
+        )
+
+        /* ================= CONNECT ORDER ================= */
+
+        quote.orderId =
+          createdOrder._id
+
+        await quote.save()
+
+        /* ================= EMAIL ================= */
+
+        if (createdOrder.email) {
+          try {
+            await sendOrderStatusEmail(
+              createdOrder.email,
+
+              "payment_required",
+
+              createdOrder
+            )
+
+            console.log(
+              "📧 PAYMENT EMAIL SENT FOR ORDER:",
+              createdOrder._id
+            )
+          } catch (
+            emailError
+          ) {
+            console.error(
+              "❌ PAYMENT EMAIL ERROR:",
+              emailError
+            )
+          }
+        } else {
+          console.warn(
+            "⚠️ PAYMENT EMAIL NOT SENT: Quote has no email"
+          )
+        }
+
+        return res.json({
+          success: true,
+          data: quote,
+          order: createdOrder
+        })
+      }
+
+      /* =====================================================
+         DENY QUOTE
+      ===================================================== */
+
+      if (
+        approvalStatus ===
+        "denied"
+      ) {
+        quote.approvalStatus =
+          "denied"
+
+        quote.status =
+          "denied"
+
+        quote.denialReason =
+          String(
+            body.denialReason ||
+              quote.denialReason ||
+              ""
+          )
+
+        if (
+          body.adminNotes !==
+          undefined
+        ) {
+          quote.adminNotes =
+            String(
+              body.adminNotes ||
+                ""
+            )
+        }
+
+        quote.timeline.push({
+          status:
+            "denied",
+
+          note:
+            quote.denialReason
+              ? `Quote denied: ${quote.denialReason}`
+              : "Quote denied",
+
+          date:
+            new Date()
         })
 
-      console.log(
-        "🔥 ORDER CREATED FROM QUOTE:",
-        createdOrder._id
-      )
+        await quote.save()
 
-      quote.orderId =
-        createdOrder._id
+        if (quote.email) {
+          try {
+            await sendOrderStatusEmail(
+              quote.email,
+              "denied",
+              quote
+            )
+
+            console.log(
+              "📧 DENIAL EMAIL TRIGGERED"
+            )
+          } catch (
+            emailError
+          ) {
+            console.error(
+              "❌ DENIAL EMAIL ERROR:",
+              emailError
+            )
+          }
+        } else {
+          console.warn(
+            "⚠️ DENIAL EMAIL NOT SENT: Quote has no email"
+          )
+        }
+
+        return res.json({
+          success: true,
+          data: quote,
+          order: null
+        })
+      }
+
+      /* =====================================================
+         GENERAL PATCH FIELDS
+      ===================================================== */
+
+      const protectedFields = [
+        "_id",
+        "orderId",
+        "approvalStatus",
+        "status",
+        "timeline",
+        "createdAt",
+        "updatedAt",
+        "__v"
+      ]
+
+      Object.keys(body).forEach(
+        (key) => {
+          if (
+            protectedFields.includes(
+              key
+            )
+          ) {
+            return
+          }
+
+          switch (key) {
+            case "quantity":
+              quote.quantity =
+                safeQuantity(
+                  body.quantity,
+                  quote.quantity ||
+                    1
+                )
+              break
+
+            case "price":
+              quote.price =
+                safePositiveNumber(
+                  body.price,
+                  quote.price ||
+                    0
+                )
+              break
+
+            case "finalPrice":
+              quote.finalPrice =
+                safePositiveNumber(
+                  body.finalPrice,
+                  quote.finalPrice ||
+                    0
+                )
+              break
+
+            case "shippingCost":
+              quote.shippingCost =
+                safePositiveNumber(
+                  body.shippingCost,
+                  quote.shippingCost ||
+                    0
+                )
+              break
+
+            case "email":
+              quote.email =
+                normalizeEmail(
+                  body.email
+                )
+              break
+
+            case "items":
+              if (
+                Array.isArray(
+                  body.items
+                )
+              ) {
+                quote.items =
+                  body.items
+              }
+              break
+
+            default:
+              quote[key] =
+                body[key]
+              break
+          }
+        }
+      )
 
       await quote.save()
 
-      try {
-        await sendOrderStatusEmail(
-          createdOrder.email,
-          "payment_required",
-          createdOrder
-        )
-
-        console.log(
-          "📧 PAYMENT EMAIL SENT FOR ORDER:",
-          createdOrder._id
-        )
-      } catch (emailError) {
-        console.error(
-          "❌ PAYMENT EMAIL ERROR:",
-          emailError
-        )
-      }
+      console.log(
+        "✅ QUOTE UPDATED:",
+        quote._id
+      )
 
       return res.json({
         success: true,
         data: quote,
-        order: createdOrder
+        order: null
       })
+    } catch (err) {
+      console.error(
+        "❌ PATCH QUOTE ERROR:",
+        err
+      )
+
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            err.message ||
+            "Failed to update quote"
+        })
     }
+  }
+)
 
-    /* ================= DENY ================= */
+/* =========================================================
+   DELETE / ARCHIVE QUOTE
+========================================================= */
 
-    if (
-      approvalStatus ===
-      "denied"
-    ) {
-      quote.approvalStatus =
-        "denied"
+router.delete(
+  "/:id",
+  async (req, res) => {
+    try {
+      if (
+        !mongoose.Types.ObjectId
+          .isValid(
+            req.params.id
+          )
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Invalid quote ID"
+          })
+      }
+
+      const quote =
+        await Quote.findById(
+          req.params.id
+        )
+
+      if (!quote) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message:
+              "Quote not found"
+          })
+      }
+
+      /*
+       * We archive instead of permanently
+       * deleting so order history remains intact.
+       */
+
+      const previousStatus =
+        quote.status
 
       quote.status =
-        "denied"
+        "archive"
+
+      if (
+        !Array.isArray(
+          quote.timeline
+        )
+      ) {
+        quote.timeline = []
+      }
 
       quote.timeline.push({
         status:
-          "denied",
+          "archive",
 
         note:
-          "Quote denied",
+          `Quote archived from ${previousStatus}`,
 
         date:
           new Date()
@@ -584,65 +1379,36 @@ router.patch("/:id", async (req, res) => {
 
       await quote.save()
 
-      try {
-        await sendOrderStatusEmail(
-          quote.email,
-          "denied",
-          quote
-        )
-
-        console.log(
-          "📧 DENIAL EMAIL TRIGGERED"
-        )
-      } catch (emailError) {
-        console.error(
-          "❌ DENIAL EMAIL ERROR:",
-          emailError
-        )
-      }
+      console.log(
+        "🗄️ QUOTE ARCHIVED:",
+        quote._id
+      )
 
       return res.json({
         success: true,
-        data: quote,
-        order: null
+
+        message:
+          "Quote archived successfully",
+
+        data: quote
       })
+    } catch (err) {
+      console.error(
+        "❌ ARCHIVE QUOTE ERROR:",
+        err
+      )
+
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            err.message ||
+            "Failed to archive quote"
+        })
     }
-
-    /* ================= GENERAL PATCH FIELDS ================= */
-
-    Object.keys(body).forEach(
-      (key) => {
-        if (
-          key !== "_id" &&
-          key !==
-            "approvalStatus" &&
-          key !== "status" &&
-          key !== "orderId"
-        ) {
-          quote[key] =
-            body[key]
-        }
-      }
-    )
-
-    await quote.save()
-
-    return res.json({
-      success: true,
-      data: quote,
-      order: null
-    })
-  } catch (err) {
-    console.error(
-      "❌ PATCH ERROR:",
-      err
-    )
-
-    return res.status(500).json({
-      success: false,
-      message: err.message
-    })
   }
-})
+)
 
 export default router

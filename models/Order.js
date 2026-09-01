@@ -1,6 +1,14 @@
 import mongoose from "mongoose"
 
-/* ================= ITEM SCHEMA ================= */
+/* =========================================================
+   CONSTANTS
+========================================================= */
+
+const TAX_RATE = 0.0825
+
+/* =========================================================
+   ITEM SCHEMA
+========================================================= */
 
 const itemSchema = new mongoose.Schema(
   {
@@ -59,7 +67,20 @@ const itemSchema = new mongoose.Schema(
 
     productType: {
       type: String,
-      default: "physical"
+      default: "physical",
+      trim: true
+    },
+
+    serviceType: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    source: {
+      type: String,
+      default: "store",
+      trim: true
     },
 
     selectedVariant: {
@@ -83,19 +104,84 @@ const itemSchema = new mongoose.Schema(
       }
     }
   },
-  { _id: false }
+  {
+    _id: false
+  }
 )
 
-/* ================= ORDER SCHEMA ================= */
+/* =========================================================
+   ARTWORK SCHEMA
+========================================================= */
+
+const artworkSchema = new mongoose.Schema(
+  {
+    url: {
+      type: String,
+      required: true,
+      trim: true
+    },
+
+    public_id: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    filename: {
+      type: String,
+      default: "",
+      trim: true
+    }
+  },
+  {
+    _id: false
+  }
+)
+
+/* =========================================================
+   TIMELINE SCHEMA
+========================================================= */
+
+const timelineSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    date: {
+      type: Date,
+      default: Date.now
+    },
+
+    note: {
+      type: String,
+      default: "",
+      trim: true
+    }
+  },
+  {
+    _id: false
+  }
+)
+
+/* =========================================================
+   ORDER SCHEMA
+========================================================= */
 
 const orderSchema = new mongoose.Schema(
   {
+    /* ================= USER ================= */
+
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
       index: true
     },
+
+    /* ================= CUSTOMER ================= */
 
     customerName: {
       type: String,
@@ -116,6 +202,8 @@ const orderSchema = new mongoose.Schema(
       default: "",
       trim: true
     },
+
+    /* ================= ADDRESS ================= */
 
     address: {
       street: {
@@ -149,12 +237,16 @@ const orderSchema = new mongoose.Schema(
       }
     },
 
+    /* ================= QUOTE CONNECTION ================= */
+
     quoteId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Quote",
       default: null,
       index: true
     },
+
+    /* ================= ORDER DETAILS ================= */
 
     quantity: {
       type: Number,
@@ -164,32 +256,30 @@ const orderSchema = new mongoose.Schema(
 
     printType: {
       type: String,
-      default: "screenprint"
+      default: "screenprint",
+      trim: true
     },
 
-    artworks: [
-      {
-        url: {
-          type: String,
-          required: true
-        },
+    /* ================= ARTWORK ================= */
 
-        public_id: {
-          type: String,
-          default: ""
-        },
-
-        filename: {
-          type: String,
-          default: ""
-        }
-      }
-    ],
+    artworks: {
+      type: [artworkSchema],
+      default: []
+    },
 
     artwork: {
       type: String,
       default: ""
     },
+
+    /* ================= ITEMS ================= */
+
+    items: {
+      type: [itemSchema],
+      default: []
+    },
+
+    /* ================= PRICING ================= */
 
     subtotal: {
       type: Number,
@@ -227,6 +317,32 @@ const orderSchema = new mongoose.Schema(
       min: 0
     },
 
+    finalPrice: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    /* ================= PROFIT ================= */
+
+    cogs: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    profit: {
+      type: Number,
+      default: 0
+    },
+
+    margin: {
+      type: Number,
+      default: 0
+    },
+
+    /* ================= SHIPPING ================= */
+
     shippingRate: {
       type: mongoose.Schema.Types.Mixed,
       default: null
@@ -250,41 +366,44 @@ const orderSchema = new mongoose.Schema(
       trim: true
     },
 
-    finalPrice: {
-      type: Number,
-      default: 0,
-      min: 0
+    trackingNumber: {
+      type: String,
+      default: "",
+      trim: true
     },
 
-    cogs: {
-      type: Number,
-      default: 0
+    trackingLink: {
+      type: String,
+      default: "",
+      trim: true
     },
 
-    profit: {
-      type: Number,
-      default: 0
+    trackingLabelUrl: {
+      type: String,
+      default: "",
+      trim: true
     },
 
-    margin: {
-      type: Number,
-      default: 0
-    },
-
-    items: {
-      type: [itemSchema],
-      default: []
-    },
+    /* ================= ORDER TYPE ================= */
 
     orderType: {
       type: String,
-      enum: ["store", "custom"],
+
+      enum: [
+        "store",
+        "custom",
+        "quote"
+      ],
+
       default: "store",
       index: true
     },
 
+    /* ================= SOURCE ================= */
+
     source: {
       type: String,
+
       enum: [
         "store",
         "quote",
@@ -293,8 +412,12 @@ const orderSchema = new mongoose.Schema(
         "cart_drawer",
         "cart_page"
       ],
-      default: "store"
+
+      default: "store",
+      index: true
     },
+
+    /* ================= PAYMENT ================= */
 
     paymentMethod: {
       type: String,
@@ -304,10 +427,36 @@ const orderSchema = new mongoose.Schema(
 
     paymentStatus: {
       type: String,
-      enum: ["unpaid", "paid", "refunded"],
+
+      enum: [
+        "unpaid",
+        "paid",
+        "refunded"
+      ],
+
       default: "unpaid",
       index: true
     },
+
+    paymentUrl: {
+      type: String,
+      default: ""
+    },
+
+    squarePaymentId: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    currency: {
+      type: String,
+      default: "usd",
+      lowercase: true,
+      trim: true
+    },
+
+    /* ================= NOTES ================= */
 
     notes: {
       type: String,
@@ -315,58 +464,70 @@ const orderSchema = new mongoose.Schema(
       trim: true
     },
 
+    /* ================= WORKFLOW ================= */
+
     status: {
       type: String,
+
       enum: [
-        "quotes",
+        /*
+         * CURRENT ORDER WORKFLOW
+         */
+
+        "pending",
+
         "payment_required",
-        "ready_for_production",
+
         "paid",
+
         "production",
+
+        "pickup_shipping",
+
         "shipping",
+
         "shipped",
+
         "delivered",
+
+        "completed",
+
+        "denied",
+
         "archive",
-        "denied"
+
+        /*
+         * LEGACY STATUS SUPPORT
+         *
+         * Existing database records may still
+         * contain these statuses.
+         *
+         * New routes should NOT create them.
+         */
+
+        "quotes",
+
+        "ready_for_production"
       ],
+
       default: "payment_required",
       index: true
     },
 
     printStatus: {
       type: String,
-      default: ""
+      default: "",
+      trim: true
     },
 
-    trackingNumber: {
-      type: String,
-      default: ""
-    },
-
-    trackingLink: {
-      type: String,
-      default: ""
-    },
+    /* ================= TIMELINE ================= */
 
     timeline: {
-      type: [
-        {
-          status: {
-            type: String
-          },
-
-          date: {
-            type: Date,
-            default: Date.now
-          },
-
-          note: {
-            type: String
-          }
-        }
-      ],
+      type: [timelineSchema],
       default: []
     },
+
+    /* ================= DOCUMENT DATES ================= */
 
     invoiceCreatedAt: {
       type: Date,
@@ -388,6 +549,8 @@ const orderSchema = new mongoose.Schema(
       default: null
     },
 
+    /* ================= PAYMENT DATES ================= */
+
     paidAt: {
       type: Date,
       default: null
@@ -402,6 +565,20 @@ const orderSchema = new mongoose.Schema(
       type: Date,
       default: null
     },
+
+    /* ================= PRODUCTION DATES ================= */
+
+    productionStartedAt: {
+      type: Date,
+      default: null
+    },
+
+    pickupShippingStartedAt: {
+      type: Date,
+      default: null
+    },
+
+    /* ================= SHIPPING DATES ================= */
 
     shippingStartedAt: {
       type: Date,
@@ -418,125 +595,621 @@ const orderSchema = new mongoose.Schema(
       default: null
     },
 
-    archivedAt: {
+    /* ================= COMPLETION ================= */
+
+    completedAt: {
       type: Date,
       default: null
     },
 
-    paymentUrl: {
-      type: String,
-      default: ""
-    },
-
-    squarePaymentId: {
-      type: String,
-      default: ""
-    },
-
-    currency: {
-      type: String,
-      default: "usd"
+    archivedAt: {
+      type: Date,
+      default: null
     }
   },
-  { timestamps: true }
+  {
+    timestamps: true
+  }
 )
+
+/* =========================================================
+   HELPER FUNCTIONS
+========================================================= */
+
+const safeNumber = (
+  value,
+  fallback = 0
+) => {
+  const number = Number(value)
+
+  return Number.isFinite(number)
+    ? number
+    : fallback
+}
+
+const safePositiveNumber = (
+  value,
+  fallback = 0
+) => {
+  const number = Number(value)
+
+  if (
+    !Number.isFinite(number) ||
+    number < 0
+  ) {
+    return fallback
+  }
+
+  return number
+}
+
+const roundMoney = (
+  value
+) => {
+  return Number(
+    safeNumber(
+      value,
+      0
+    ).toFixed(2)
+  )
+}
 
 /* =========================================================
    AUTO ENGINE
 ========================================================= */
 
-orderSchema.pre("save", function () {
-  if (this.items?.length) {
-    this.subtotal = this.items.reduce((sum, item) => {
-      const price = Number(
-        item.finalPrice ||
-          item.salePrice ||
-          item.unitPrice ||
-          item.price ||
-          item.selectedVariant?.price ||
-          0
-      )
+orderSchema.pre(
+  "save",
+  function () {
+    /* =====================================================
+       NORMALIZE EMAIL
+    ===================================================== */
 
-      const qty = Number(item.quantity || 1)
+    if (this.email) {
+      this.email =
+        String(this.email)
+          .trim()
+          .toLowerCase()
+    }
 
-      return sum + price * qty
-    }, 0)
-  }
+    /* =====================================================
+       QUOTE ORDER DETECTION
+    ===================================================== */
 
-  const selectedShipping = Number(
-    this.shippingCost ||
-      this.shipping ||
-      this.shippingTotal ||
-      this.deliveryFee ||
-      this.shippingRate?.amount ||
+    if (
+      this.source === "quote" ||
+      this.quoteId
+    ) {
+      this.orderType =
+        "quote"
+    }
+
+    /* =====================================================
+       ITEM SUBTOTAL
+    ===================================================== */
+
+    let calculatedItemSubtotal =
       0
-  )
 
-  this.shipping = selectedShipping
-  this.shippingCost = selectedShipping
-  this.shippingTotal = selectedShipping
-  this.deliveryFee = selectedShipping
+    if (
+      Array.isArray(this.items) &&
+      this.items.length > 0
+    ) {
+      calculatedItemSubtotal =
+        this.items.reduce(
+          (
+            sum,
+            item
+          ) => {
+            const price =
+              safePositiveNumber(
+                item.finalPrice ||
+                item.salePrice ||
+                item.unitPrice ||
+                item.price ||
+                item.selectedVariant
+                  ?.price ||
+                0,
+                0
+              )
 
-  this.tax = Number(this.tax || this.subtotal * 0.0825)
+            const quantity =
+              Math.max(
+                1,
+                safeNumber(
+                  item.quantity,
+                  1
+                )
+              )
 
-  this.finalPrice =
-    Number(this.subtotal || 0) +
-    Number(this.tax || 0) +
-    selectedShipping
-
-  if (!this.timeline) {
-    this.timeline = []
-  }
-
-  if (this.timeline.length === 0) {
-    this.timeline.push({
-      status: this.status,
-      date: new Date(),
-      note: "Order created"
-    })
-  }
-
-  if (!this.cogs || this.cogs === 0) {
-    this.cogs = (this.items || []).reduce((sum, item) => {
-      if (item.cost && item.cost > 0) {
-        return sum + item.cost * item.quantity
-      }
-
-      const itemPrice = Number(
-        item.finalPrice ||
-          item.salePrice ||
-          item.unitPrice ||
-          item.price ||
+            return (
+              sum +
+              price *
+              quantity
+            )
+          },
           0
+        )
+    }
+
+    /*
+     * IMPORTANT:
+     *
+     * Store/cart orders normally calculate
+     * subtotal directly from item prices.
+     *
+     * Quote orders can contain descriptive
+     * items whose prices are $0 while the
+     * approved quote total is stored directly
+     * on subtotal.
+     *
+     * Do not overwrite an explicit quote
+     * subtotal with zero.
+     */
+
+    const existingSubtotal =
+      safePositiveNumber(
+        this.subtotal,
+        0
       )
 
-      const estimatedCost = itemPrice * 0.4
+    if (
+      calculatedItemSubtotal > 0
+    ) {
+      /*
+       * For normal store/custom orders,
+       * item totals are authoritative.
+       *
+       * For quote orders, preserve an
+       * explicitly supplied approved subtotal.
+       */
 
-      return sum + estimatedCost * (item.quantity || 1)
-    }, 0)
+      if (
+        this.source === "quote" ||
+        this.quoteId
+      ) {
+        if (
+          existingSubtotal <= 0
+        ) {
+          this.subtotal =
+            calculatedItemSubtotal
+        }
+      } else {
+        this.subtotal =
+          calculatedItemSubtotal
+      }
+    } else if (
+      existingSubtotal > 0
+    ) {
+      this.subtotal =
+        existingSubtotal
+    } else {
+      this.subtotal = 0
+    }
+
+    /* =====================================================
+       SHIPPING
+    ===================================================== */
+
+    const selectedShipping =
+      safePositiveNumber(
+        this.shippingCost ||
+        this.shipping ||
+        this.shippingTotal ||
+        this.deliveryFee ||
+        this.shippingRate
+          ?.amount ||
+        0,
+        0
+      )
+
+    this.shipping =
+      selectedShipping
+
+    this.shippingCost =
+      selectedShipping
+
+    this.shippingTotal =
+      selectedShipping
+
+    this.deliveryFee =
+      selectedShipping
+
+    /* =====================================================
+       TAX
+    ===================================================== */
+
+    const existingTax =
+      safePositiveNumber(
+        this.tax,
+        0
+      )
+
+    /*
+     * Preserve tax if the route explicitly
+     * calculated it.
+     *
+     * Otherwise calculate California sales tax.
+     */
+
+    if (
+      existingTax > 0
+    ) {
+      this.tax =
+        existingTax
+    } else {
+      this.tax =
+        safePositiveNumber(
+          this.subtotal,
+          0
+        ) *
+        TAX_RATE
+    }
+
+    /* =====================================================
+       FINAL PRICE
+    ===================================================== */
+
+    this.finalPrice =
+      safePositiveNumber(
+        this.subtotal,
+        0
+      ) +
+      safePositiveNumber(
+        this.tax,
+        0
+      ) +
+      selectedShipping
+
+    /* =====================================================
+       TIMELINE
+    ===================================================== */
+
+    if (
+      !Array.isArray(
+        this.timeline
+      )
+    ) {
+      this.timeline = []
+    }
+
+    if (
+      this.timeline.length === 0
+    ) {
+      this.timeline.push({
+        status:
+          this.status,
+
+        date:
+          new Date(),
+
+        note:
+          "Order created"
+      })
+    }
+
+    /* =====================================================
+       STATUS AUTOMATION
+    ===================================================== */
+
+    if (
+      this.isModified(
+        "status"
+      )
+    ) {
+      const now =
+        new Date()
+
+      switch (
+        this.status
+      ) {
+        case "payment_required":
+          if (
+            !this.paymentUrlCreatedAt &&
+            this.paymentUrl
+          ) {
+            this.paymentUrlCreatedAt =
+              now
+          }
+
+          break
+
+        case "paid":
+          if (!this.paidAt) {
+            this.paidAt =
+              now
+          }
+
+          this.paymentStatus =
+            "paid"
+
+          if (
+            (
+              this.source ===
+                "quote" ||
+              this.quoteId
+            ) &&
+            !this.customQuotePaidAt
+          ) {
+            this.customQuotePaidAt =
+              now
+          }
+
+          break
+
+        case "production":
+          if (
+            !this.productionStartedAt
+          ) {
+            this.productionStartedAt =
+              now
+          }
+
+          break
+
+        case "pickup_shipping":
+          if (
+            !this.pickupShippingStartedAt
+          ) {
+            this.pickupShippingStartedAt =
+              now
+          }
+
+          break
+
+        case "shipping":
+          if (
+            !this.shippingStartedAt
+          ) {
+            this.shippingStartedAt =
+              now
+          }
+
+          break
+
+        case "shipped":
+          if (!this.shippedAt) {
+            this.shippedAt =
+              now
+          }
+
+          break
+
+        case "delivered":
+          if (
+            !this.deliveredAt
+          ) {
+            this.deliveredAt =
+              now
+          }
+
+          break
+
+        case "completed":
+          if (
+            !this.completedAt
+          ) {
+            this.completedAt =
+              now
+          }
+
+          break
+
+        case "archive":
+          if (
+            !this.archivedAt
+          ) {
+            this.archivedAt =
+              now
+          }
+
+          break
+
+        default:
+          break
+      }
+    }
+
+    /* =====================================================
+       COGS
+    ===================================================== */
+
+    const existingCogs =
+      safePositiveNumber(
+        this.cogs,
+        0
+      )
+
+    if (
+      existingCogs <= 0
+    ) {
+      this.cogs =
+        (this.items || [])
+          .reduce(
+            (
+              sum,
+              item
+            ) => {
+              const quantity =
+                Math.max(
+                  1,
+                  safeNumber(
+                    item.quantity,
+                    1
+                  )
+                )
+
+              const explicitCost =
+                safePositiveNumber(
+                  item.cost,
+                  0
+                )
+
+              /*
+               * Use the real product cost when
+               * one exists.
+               */
+
+              if (
+                explicitCost > 0
+              ) {
+                return (
+                  sum +
+                  explicitCost *
+                  quantity
+                )
+              }
+
+              /*
+               * Existing fallback:
+               * estimate cost as 40% of sale price.
+               */
+
+              const itemPrice =
+                safePositiveNumber(
+                  item.finalPrice ||
+                  item.salePrice ||
+                  item.unitPrice ||
+                  item.price ||
+                  0,
+                  0
+                )
+
+              const estimatedCost =
+                itemPrice *
+                0.4
+
+              return (
+                sum +
+                estimatedCost *
+                quantity
+              )
+            },
+            0
+          )
+    }
+
+    /* =====================================================
+       PROFIT / MARGIN
+    ===================================================== */
+
+    this.profit =
+      safeNumber(
+        this.finalPrice,
+        0
+      ) -
+      safeNumber(
+        this.cogs,
+        0
+      )
+
+    this.margin =
+      this.finalPrice > 0
+        ? (
+            this.profit /
+            this.finalPrice
+          ) *
+          100
+        : 0
+
+    /* =====================================================
+       MONEY ROUNDING
+    ===================================================== */
+
+    this.subtotal =
+      roundMoney(
+        this.subtotal
+      )
+
+    this.tax =
+      roundMoney(
+        this.tax
+      )
+
+    this.shipping =
+      roundMoney(
+        this.shipping
+      )
+
+    this.shippingCost =
+      roundMoney(
+        this.shippingCost
+      )
+
+    this.shippingTotal =
+      roundMoney(
+        this.shippingTotal
+      )
+
+    this.deliveryFee =
+      roundMoney(
+        this.deliveryFee
+      )
+
+    this.finalPrice =
+      roundMoney(
+        this.finalPrice
+      )
+
+    this.cogs =
+      roundMoney(
+        this.cogs
+      )
+
+    this.profit =
+      roundMoney(
+        this.profit
+      )
+
+    this.margin =
+      roundMoney(
+        this.margin
+      )
   }
+)
 
-  this.profit = this.finalPrice - this.cogs
+/* =========================================================
+   INDEXES
+========================================================= */
 
-  this.margin =
-    this.finalPrice > 0
-      ? (this.profit / this.finalPrice) * 100
-      : 0
-
-  this.subtotal = Number(this.subtotal.toFixed(2))
-  this.tax = Number(this.tax.toFixed(2))
-  this.shipping = Number(this.shipping.toFixed(2))
-  this.shippingCost = Number(this.shippingCost.toFixed(2))
-  this.shippingTotal = Number(this.shippingTotal.toFixed(2))
-  this.deliveryFee = Number(this.deliveryFee.toFixed(2))
-  this.finalPrice = Number(this.finalPrice.toFixed(2))
-  this.cogs = Number(this.cogs.toFixed(2))
-  this.profit = Number(this.profit.toFixed(2))
-  this.margin = Number(this.margin.toFixed(2))
+orderSchema.index({
+  createdAt: -1
 })
+
+orderSchema.index({
+  status: 1,
+  createdAt: -1
+})
+
+orderSchema.index({
+  email: 1,
+  createdAt: -1
+})
+
+orderSchema.index({
+  source: 1,
+  status: 1
+})
+
+orderSchema.index({
+  quoteId: 1,
+  status: 1
+})
+
+orderSchema.index({
+  paymentStatus: 1,
+  createdAt: -1
+})
+
+/* =========================================================
+   MODEL
+========================================================= */
 
 const Order =
   mongoose.models.Order ||
-  mongoose.model("Order", orderSchema)
+  mongoose.model(
+    "Order",
+    orderSchema
+  )
 
 export default Order
