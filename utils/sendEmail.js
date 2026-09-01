@@ -44,6 +44,19 @@ const buildInvoiceUrl = (order) => {
   return `${CLIENT_URL}/invoice/${order._id}`
 }
 
+const buildQuoteUrl = (quote) => {
+  return `${CLIENT_URL}/quote/${quote._id}`
+}
+
+const escapeHtml = (value = "") => {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+}
+
 /* =========================================================
    SEND ORDER STATUS EMAIL
 ========================================================= */
@@ -75,7 +88,7 @@ export const sendOrderStatusEmail = async (
 
     if (!order?._id) {
       console.warn(
-        "EMAIL SKIPPED: Missing order"
+        "EMAIL SKIPPED: Missing order or quote"
       )
 
       return null
@@ -96,6 +109,9 @@ export const sendOrderStatusEmail = async (
 
     const invoiceUrl =
       buildInvoiceUrl(order)
+
+    const quoteUrl =
+      buildQuoteUrl(order)
 
     let subject =
       "SignaVi Studio Update"
@@ -147,7 +163,297 @@ export const sendOrderStatusEmail = async (
           <div style="padding:28px;">
     `
 
+    /* =====================================================
+       MOCKUP READY / CUSTOMER APPROVAL
+    ===================================================== */
+
     if (
+      status ===
+      "approval_payment"
+    ) {
+      subject =
+        "Your SignaVi Studio Mockup Is Ready"
+
+      const mockupUrl =
+        order.mockupUrl ||
+        order.mockup ||
+        ""
+
+      const mockupName =
+        order.mockupName ||
+        "Digital Mockup"
+
+      const mockupMessage =
+        order.mockupMessage ||
+        "Your digital mockup is ready for review."
+
+      const finalQuote =
+        order.finalPrice ||
+        order.price ||
+        0
+
+      const isPdf =
+        order.mockupMimeType ===
+          "application/pdf" ||
+        String(mockupUrl)
+          .toLowerCase()
+          .includes(".pdf")
+
+      html += `
+        <h2
+          style="
+            margin-top:0;
+            color:#020617;
+          "
+        >
+          Your digital mockup is ready
+        </h2>
+
+        <p>
+          Hello ${escapeHtml(
+            order.customerName ||
+              "Customer"
+          )},
+        </p>
+
+        <p>
+          We have prepared your digital mockup and final quote.
+          Please review the design and project details before approving.
+        </p>
+
+        <div
+          style="
+            background:#f1f5f9;
+            border-radius:12px;
+            padding:18px;
+            margin:20px 0;
+          "
+        >
+          <p
+            style="
+              margin:0 0 8px;
+              font-size:12px;
+              color:#64748b;
+              text-transform:uppercase;
+              letter-spacing:.06em;
+              font-weight:bold;
+            "
+          >
+            Message from SignaVi Studio
+          </p>
+
+          <p
+            style="
+              margin:0;
+              line-height:1.6;
+              color:#334155;
+            "
+          >
+            ${escapeHtml(
+              mockupMessage
+            ).replace(
+              /\n/g,
+              "<br/>"
+            )}
+          </p>
+        </div>
+
+        ${
+          mockupUrl
+            ? isPdf
+              ? `
+                <div
+                  style="
+                    margin:24px 0;
+                    text-align:center;
+                  "
+                >
+                  <p
+                    style="
+                      color:#475569;
+                      margin-bottom:12px;
+                    "
+                  >
+                    ${escapeHtml(
+                      mockupName
+                    )}
+                  </p>
+
+                  <a
+                    href="${mockupUrl}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style="
+                      display:inline-block;
+                      background:#0f172a;
+                      color:white;
+                      text-decoration:none;
+                      padding:13px 20px;
+                      border-radius:10px;
+                      font-weight:bold;
+                    "
+                  >
+                    View Digital Mockup
+                  </a>
+                </div>
+              `
+              : `
+                <div
+                  style="
+                    margin:24px 0;
+                    text-align:center;
+                  "
+                >
+                  <p
+                    style="
+                      margin:0 0 12px;
+                      color:#475569;
+                      font-weight:bold;
+                    "
+                  >
+                    Digital Mockup
+                  </p>
+
+                  <a
+                    href="${mockupUrl}"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style="
+                      text-decoration:none;
+                    "
+                  >
+                    <img
+                      src="${mockupUrl}"
+                      alt="Digital Mockup"
+                      style="
+                        display:block;
+                        width:100%;
+                        max-width:520px;
+                        max-height:500px;
+                        object-fit:contain;
+                        margin:0 auto;
+                        border:1px solid #e2e8f0;
+                        border-radius:12px;
+                        background:white;
+                      "
+                    />
+                  </a>
+
+                  <p
+                    style="
+                      margin:12px 0 0;
+                      font-size:12px;
+                      color:#64748b;
+                    "
+                  >
+                    Click the image to view the full-size mockup.
+                  </p>
+                </div>
+              `
+            : ""
+        }
+
+        <div
+          style="
+            background:#020617;
+            color:white;
+            border-radius:12px;
+            padding:20px;
+            margin:24px 0;
+          "
+        >
+          <p
+            style="
+              margin:0;
+              color:#94a3b8;
+              font-size:12px;
+              text-transform:uppercase;
+              letter-spacing:.08em;
+              font-weight:bold;
+            "
+          >
+            Final Quote
+          </p>
+
+          <p
+            style="
+              margin:8px 0 0;
+              font-size:28px;
+              font-weight:bold;
+              color:#22d3ee;
+            "
+          >
+            $${formatMoney(
+              finalQuote
+            )}
+          </p>
+        </div>
+
+        <div
+          style="
+            text-align:center;
+            margin:26px 0 14px;
+          "
+        >
+          <a
+            href="${quoteUrl}"
+            target="_blank"
+            rel="noopener noreferrer"
+            style="
+              display:inline-block;
+              background:#06b6d4;
+              color:#020617;
+              text-decoration:none;
+              padding:15px 24px;
+              border-radius:10px;
+              font-weight:bold;
+              font-size:16px;
+            "
+          >
+            Review Mockup & Quote
+          </a>
+        </div>
+
+        <p
+          style="
+            color:#475569;
+            line-height:1.6;
+          "
+        >
+          After reviewing the mockup, you will be able to approve the quote
+          and continue to payment.
+        </p>
+
+        <p
+          style="
+            font-size:13px;
+            color:#64748b;
+            margin-top:22px;
+          "
+        >
+          If the button does not open, copy and paste this link into your browser:
+          <br/>
+
+          <a
+            href="${quoteUrl}"
+            target="_blank"
+            rel="noopener noreferrer"
+            style="
+              color:#0284c7;
+              word-break:break-all;
+            "
+          >
+            ${quoteUrl}
+          </a>
+        </p>
+      `
+    }
+
+    /* =====================================================
+       PAYMENT REQUIRED
+    ===================================================== */
+
+    else if (
       status ===
       "payment_required"
     ) {
@@ -165,11 +471,14 @@ export const sendOrderStatusEmail = async (
         </h2>
 
         <p>
-          Hello ${order.customerName || "Customer"},
+          Hello ${escapeHtml(
+            order.customerName ||
+              "Customer"
+          )},
         </p>
 
         <p>
-          Your order has been reviewed and is ready for payment.
+          Your quote has been approved and your order is ready for payment.
         </p>
 
         <div
@@ -232,11 +541,17 @@ export const sendOrderStatusEmail = async (
           </a>
         </p>
       `
-    } else if (
+    }
+
+    /* =====================================================
+       DENIED / REVISION
+    ===================================================== */
+
+    else if (
       status === "denied"
     ) {
       subject =
-        "Order Update - SignaVi Studio"
+        "Quote Update - SignaVi Studio"
 
       html += `
         <h2
@@ -245,22 +560,50 @@ export const sendOrderStatusEmail = async (
             color:#020617;
           "
         >
-          Order update
+          Quote update
         </h2>
 
         <p>
-          Hello ${order.customerName || "Customer"},
+          Hello ${escapeHtml(
+            order.customerName ||
+              "Customer"
+          )},
         </p>
 
         <p>
           Your order or quote needs revision before moving forward.
         </p>
 
+        ${
+          order.denialReason
+            ? `
+              <div
+                style="
+                  background:#f1f5f9;
+                  border-radius:12px;
+                  padding:18px;
+                  margin:20px 0;
+                "
+              >
+                ${escapeHtml(
+                  order.denialReason
+                )}
+              </div>
+            `
+            : ""
+        }
+
         <p>
           Please contact SignaVi Studio if you have questions.
         </p>
       `
-    } else if (
+    }
+
+    /* =====================================================
+       INVOICE
+    ===================================================== */
+
+    else if (
       status === "invoice"
     ) {
       subject =
@@ -277,7 +620,10 @@ export const sendOrderStatusEmail = async (
         </h2>
 
         <p>
-          Hello ${order.customerName || "Customer"},
+          Hello ${escapeHtml(
+            order.customerName ||
+              "Customer"
+          )},
         </p>
 
         <p>
@@ -325,7 +671,13 @@ export const sendOrderStatusEmail = async (
           View Invoice
         </a>
       `
-    } else if (
+    }
+
+    /* =====================================================
+       SHIPPED
+    ===================================================== */
+
+    else if (
       status === "shipped"
     ) {
       subject =
@@ -342,14 +694,23 @@ export const sendOrderStatusEmail = async (
         </h2>
 
         <p>
-          Hello ${order.customerName || "Customer"},
+          Hello ${escapeHtml(
+            order.customerName ||
+              "Customer"
+          )},
         </p>
 
         <p>
           Your order has shipped. Thank you for choosing SignaVi Studio.
         </p>
       `
-    } else {
+    }
+
+    /* =====================================================
+       GENERAL STATUS
+    ===================================================== */
+
+    else {
       html += `
         <h2
           style="
@@ -361,7 +722,10 @@ export const sendOrderStatusEmail = async (
         </h2>
 
         <p>
-          Hello ${order.customerName || "Customer"},
+          Hello ${escapeHtml(
+            order.customerName ||
+              "Customer"
+          )},
         </p>
 
         <p>
@@ -377,11 +741,15 @@ export const sendOrderStatusEmail = async (
           "
         >
           <strong>
-            ${status}
+            ${escapeHtml(status)}
           </strong>
         </div>
       `
     }
+
+    /* =====================================================
+       EMAIL FOOTER
+    ===================================================== */
 
     html += `
           </div>
@@ -405,6 +773,10 @@ export const sendOrderStatusEmail = async (
         </div>
       </div>
     `
+
+    /* =====================================================
+       ATTACHMENTS
+    ===================================================== */
 
     const attachments = []
 
@@ -434,6 +806,10 @@ export const sendOrderStatusEmail = async (
       })
     }
 
+    /* =====================================================
+       SEND EMAIL
+    ===================================================== */
+
     const [response] =
       await sgMail.send({
         from: {
@@ -457,7 +833,7 @@ export const sendOrderStatusEmail = async (
       })
 
     console.log(
-      "EMAIL SENT SUCCESSFULLY:",
+      "✅ EMAIL SENT SUCCESSFULLY:",
       {
         to,
         subject,
@@ -477,6 +853,14 @@ export const sendOrderStatusEmail = async (
       err
     )
 
-    return null
+    /*
+     * IMPORTANT:
+     * Throw the error back to the calling route.
+     *
+     * This prevents the route from logging
+     * "email triggered" when SendGrid actually
+     * rejected the message.
+     */
+    throw err
   }
 }
