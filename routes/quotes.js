@@ -93,15 +93,15 @@ const normalizeEmail = (email = "") => {
 }
 
 const uploadBufferToCloudinary = (
-  file
+  file,
+  folder = "signavi/quote-artwork"
 ) => {
   return new Promise(
     (resolve, reject) => {
       const uploadStream =
         cloudinary.uploader.upload_stream(
           {
-            folder:
-              "signavi/quote-artwork",
+            folder,
 
             resource_type:
               "auto"
@@ -600,6 +600,291 @@ router.get(
           message:
             err.message ||
             "Failed to load quote"
+        })
+    }
+  }
+)
+
+/* =========================================================
+   UPLOAD / SEND DIGITAL MOCKUP
+========================================================= */
+
+router.patch(
+  "/:id/mockup",
+
+  upload.single("mockup"),
+
+  async (req, res) => {
+    try {
+      /* ================= VALIDATE ID ================= */
+
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          req.params.id
+        )
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Invalid quote ID"
+          })
+      }
+
+      /* ================= FIND QUOTE ================= */
+
+      const quote =
+        await Quote.findById(
+          req.params.id
+        )
+
+      if (!quote) {
+        return res
+          .status(404)
+          .json({
+            success: false,
+            message:
+              "Quote not found"
+          })
+      }
+
+      const body =
+        req.body || {}
+
+      /* ================= FINAL PRICE ================= */
+
+      const finalPrice =
+        safePositiveNumber(
+          body.finalPrice !==
+            undefined
+            ? body.finalPrice
+            : body.price,
+
+          quote.finalPrice ||
+            quote.price ||
+            0
+        )
+
+      if (
+        !Number.isFinite(finalPrice) ||
+        finalPrice <= 0
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "A valid final quote price is required before sending the mockup"
+          })
+      }
+
+      /* ================= CUSTOMER MESSAGE ================= */
+
+      const mockupMessage =
+        String(
+          body.mockupMessage ||
+            quote.mockupMessage ||
+            ""
+        ).trim()
+
+      if (!mockupMessage) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "A customer message is required before sending the mockup"
+          })
+      }
+
+      /* ================= REQUIRE MOCKUP ================= */
+
+      if (
+        !req.file &&
+        !quote.mockupUrl &&
+        !quote.mockup
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+
+            message:
+              "Choose a digital mockup or proof before sending"
+          })
+      }
+
+      /* ================= TIMELINE ================= */
+
+      if (
+        !Array.isArray(
+          quote.timeline
+        )
+      ) {
+        quote.timeline = []
+      }
+
+      /* ================= UPLOAD MOCKUP ================= */
+
+      if (req.file) {
+        const allowedTypes = [
+          "image/png",
+          "image/jpeg",
+          "image/webp",
+          "application/pdf"
+        ]
+
+        if (
+          !allowedTypes.includes(
+            req.file.mimetype
+          )
+        ) {
+          return res
+            .status(400)
+            .json({
+              success: false,
+
+              message:
+                "Mockup must be a PNG, JPG, WEBP, or PDF file"
+            })
+        }
+
+        console.log(
+          "📤 UPLOADING DIGITAL MOCKUP TO CLOUDINARY..."
+        )
+
+        const uploadedMockup =
+          await uploadBufferToCloudinary(
+            req.file,
+            "signavi/quote-mockups"
+          )
+
+        quote.mockup =
+          uploadedMockup?.secure_url ||
+          ""
+
+        quote.mockupUrl =
+          uploadedMockup?.secure_url ||
+          ""
+
+        quote.mockupPublicId =
+          uploadedMockup?.public_id ||
+          ""
+
+        quote.mockupName =
+          req.file?.originalname ||
+          ""
+
+        quote.mockupMimeType =
+          req.file?.mimetype ||
+          ""
+
+        console.log(
+          "✅ DIGITAL MOCKUP UPLOADED:",
+          quote.mockupUrl
+        )
+      }
+
+      /* ================= SAVE PRICE ================= */
+
+      quote.price =
+        finalPrice
+
+      quote.finalPrice =
+        finalPrice
+
+      /* ================= SAVE MESSAGE ================= */
+
+      quote.mockupMessage =
+        mockupMessage
+
+      quote.mockupSentAt =
+        new Date()
+
+      /* ================= MOVE WORKFLOW ================= */
+
+      const previousStatus =
+        quote.status
+
+      quote.status =
+        "approval_payment"
+
+      quote.timeline.push({
+        status:
+          "approval_payment",
+
+        note:
+          previousStatus ===
+          "approval_payment"
+            ? "Digital mockup and quote resent to customer"
+            : `Digital mockup sent to customer; workflow moved from ${previousStatus} to approval_payment`,
+
+        date:
+          new Date()
+      })
+
+      /* ================= SAVE ================= */
+
+      await quote.save()
+
+      console.log(
+        "✅ MOCKUP SAVED TO QUOTE:",
+        quote._id
+      )
+
+      /* ================= EMAIL ================= */
+
+      if (quote.email) {
+        try {
+          await sendOrderStatusEmail(
+            quote.email,
+            "approval_payment",
+            quote
+          )
+
+          console.log(
+            "📧 MOCKUP / APPROVAL EMAIL TRIGGERED:",
+            quote._id
+          )
+        } catch (emailError) {
+          console.error(
+            "❌ MOCKUP EMAIL ERROR:",
+            emailError
+          )
+        }
+      } else {
+        console.warn(
+          "⚠️ MOCKUP EMAIL NOT SENT: Quote has no email"
+        )
+      }
+
+      /* ================= RESPONSE ================= */
+
+      return res.json({
+        success: true,
+
+        message:
+          "Digital mockup and quote saved successfully",
+
+        data: quote
+      })
+    } catch (err) {
+      console.error(
+        "❌ SEND MOCKUP ERROR:",
+        err
+      )
+
+      return res
+        .status(500)
+        .json({
+          success: false,
+
+          message:
+            err.message ||
+            "Failed to upload or send digital mockup"
         })
     }
   }

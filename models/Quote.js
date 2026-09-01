@@ -147,7 +147,7 @@ const quoteSchema = new mongoose.Schema(
       min: 0
     },
 
-    /* ================= ARTWORK ================= */
+    /* ================= CUSTOMER ARTWORK ================= */
 
     artwork: {
       type: String,
@@ -167,6 +167,43 @@ const quoteSchema = new mongoose.Schema(
     artworkName: {
       type: String,
       default: ""
+    },
+
+    /* ================= ADMIN MOCKUP / PROOF ================= */
+
+    mockup: {
+      type: String,
+      default: ""
+    },
+
+    mockupUrl: {
+      type: String,
+      default: ""
+    },
+
+    mockupPublicId: {
+      type: String,
+      default: ""
+    },
+
+    mockupName: {
+      type: String,
+      default: ""
+    },
+
+    mockupMimeType: {
+      type: String,
+      default: ""
+    },
+
+    mockupMessage: {
+      type: String,
+      default: ""
+    },
+
+    mockupSentAt: {
+      type: Date,
+      default: null
     },
 
     /* ================= APPROVAL ================= */
