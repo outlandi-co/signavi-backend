@@ -30,18 +30,36 @@ const quoteSchema = new mongoose.Schema(
     denialReason: String,
     adminNotes: String,
 
-    /* ================= STATUS ================= */
+    /* ================= WORKFLOW STATUS ================= */
     status: {
       type: String,
       enum: [
         "quotes",
+
+        /* STEP 2 */
+        "review_mockup",
+
+        /* STEP 3 */
+        "approval_payment",
+
+        /* EXISTING PAYMENT STATES */
         "pending",
         "payment_required",
         "paid",
+
+        /* STEP 4 */
         "production",
+
+        /* STEP 5 */
+        "pickup_shipping",
+
+        /* EXISTING DELIVERY STATES */
         "shipping",
         "shipped",
         "delivered",
+
+        /* OTHER */
+        "completed",
         "denied",
         "archive"
       ],
