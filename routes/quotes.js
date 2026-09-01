@@ -376,6 +376,52 @@ router.patch("/:id", async (req, res) => {
       })
     }
 
+    /* ================= WORKFLOW STATUS ================= */
+
+    const workflowStatuses = [
+      "quotes",
+      "review_mockup",
+      "approval_payment",
+      "production",
+      "pickup_shipping",
+      "completed"
+    ]
+
+    if (
+      body.status &&
+      workflowStatuses.includes(
+        body.status
+      ) &&
+      !approvalStatus
+    ) {
+      const previousStatus =
+        quote.status
+
+      quote.status =
+        body.status
+
+      quote.timeline.push({
+        status: body.status,
+        note:
+          `Workflow moved from ${previousStatus} to ${body.status}`,
+        date: new Date()
+      })
+
+      await quote.save()
+
+      console.log(
+        "✅ QUOTE WORKFLOW UPDATED:",
+        quote._id,
+        quote.status
+      )
+
+      return res.json({
+        success: true,
+        data: quote,
+        order: null
+      })
+    }
+
     /* ================= APPROVE ================= */
 
     if (
