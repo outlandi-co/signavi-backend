@@ -55,7 +55,9 @@ const buildHtml = (message = "") => {
   `
 }
 
-const getFromEmail = (channel = "info") => {
+const getFromEmail = (
+  channel = "info"
+) => {
   switch (channel) {
     case "support":
       return SUPPORT_EMAIL
@@ -69,7 +71,9 @@ const getFromEmail = (channel = "info") => {
   }
 }
 
-const isValidChannel = (channel = "") => {
+const isValidChannel = (
+  channel = ""
+) => {
   return [
     "info",
     "quotes",
@@ -149,6 +153,7 @@ router.get(
 
       res.json({
         success: true,
+
         data:
           threads
       })
@@ -353,6 +358,151 @@ router.get(
   }
 )
 
+/* ================= DELETE MESSAGE ================= */
+
+router.delete(
+  "/:threadId/messages/:messageId",
+  requireAuth,
+  async (req, res) => {
+    try {
+      const {
+        threadId,
+        messageId
+      } = req.params
+
+      const thread =
+        await AdminEmailThread
+          .findById(
+            threadId
+          )
+
+      if (!thread) {
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Thread not found"
+          })
+      }
+
+      const message =
+        await AdminEmailMessage
+          .findOne({
+            _id:
+              messageId,
+
+            threadId:
+              threadId
+          })
+
+      if (!message) {
+        return res
+          .status(404)
+          .json({
+            success:
+              false,
+
+            message:
+              "Message not found"
+          })
+      }
+
+      await AdminEmailMessage
+        .deleteOne({
+          _id:
+            messageId,
+
+          threadId:
+            threadId
+        })
+
+      const remainingMessages =
+        await AdminEmailMessage
+          .find({
+            threadId:
+              threadId
+          })
+          .sort({
+            createdAt: -1
+          })
+
+      if (
+        remainingMessages.length > 0
+      ) {
+        const latestMessage =
+          remainingMessages[0]
+
+        thread.lastMessage =
+          latestMessage.message ||
+          ""
+
+        thread.updatedAt =
+          latestMessage.createdAt ||
+          new Date()
+      } else {
+        thread.lastMessage =
+          ""
+
+        thread.updatedAt =
+          new Date()
+      }
+
+      thread.unread =
+        false
+
+      await thread.save()
+
+      req.app
+        .get("io")
+        ?.emit(
+          "adminEmailMessageDeleted",
+          {
+            threadId,
+            messageId
+          }
+        )
+
+      res.json({
+        success:
+          true,
+
+        message:
+          "Message deleted successfully",
+
+        data: {
+          threadId,
+          messageId,
+
+          remainingMessages:
+            remainingMessages.length
+        }
+      })
+    } catch (error) {
+      console.error(
+        "❌ DELETE MESSAGE ERROR:",
+        error
+      )
+
+      res
+        .status(500)
+        .json({
+          success:
+            false,
+
+          message:
+            "Failed to delete message",
+
+          error:
+            error?.message ||
+            "Unknown error"
+        })
+    }
+  }
+)
+
 /* ================= REPLY TO THREAD ================= */
 
 router.post(
@@ -515,7 +665,7 @@ router.post(
       console.error(
         "❌ REPLY THREAD ERROR:",
         error?.response?.body ||
-          error
+        error
       )
 
       res
