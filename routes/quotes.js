@@ -57,14 +57,28 @@ router.get("/", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const quantity = Number(req.body.quantity) || 1
-    const price = Number(req.body.price) || 0
+    const body = req.body || {}
+
+    console.log("🔥 CREATE QUOTE BODY:", body)
+
+    // Do not create an empty quote if the request body was not parsed
+    if (!req.body || Object.keys(body).length === 0) {
+      console.error("❌ CREATE QUOTE: Request body is empty")
+
+      return res.status(400).json({
+        success: false,
+        message: "Quote request body is empty or could not be parsed"
+      })
+    }
+
+    const quantity = Number(body.quantity) || 1
+    const price = Number(body.price) || 0
 
     const quote = await Quote.create({
-      ...req.body,
+      ...body,
       quantity,
       price,
-      finalPrice: Number(req.body.finalPrice) || price,
+      finalPrice: Number(body.finalPrice) || price,
       status: "quotes",
       approvalStatus: "pending",
       timeline: [
@@ -76,14 +90,16 @@ router.post("/", async (req, res) => {
       ]
     })
 
-    res.status(201).json({
+    console.log("✅ QUOTE CREATED:", quote._id)
+
+    return res.status(201).json({
       success: true,
       data: quote
     })
   } catch (err) {
     console.error("❌ CREATE QUOTE ERROR:", err)
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: err.message
     })
@@ -103,14 +119,14 @@ router.get("/:id", async (req, res) => {
       })
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: quote
     })
   } catch (err) {
     console.error("❌ GET ONE ERROR:", err)
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: err.message
     })
@@ -121,7 +137,16 @@ router.get("/:id", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
-    console.log("🔥 PATCH BODY:", req.body)
+    const body = req.body || {}
+
+    console.log("🔥 PATCH BODY:", body)
+
+    if (!req.body || Object.keys(body).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Update request body is empty or could not be parsed"
+      })
+    }
 
     const quote = await Quote.findById(req.params.id)
 
@@ -136,7 +161,7 @@ router.patch("/:id", async (req, res) => {
       quote.timeline = []
     }
 
-    const approvalStatus = req.body.approvalStatus
+    const approvalStatus = body.approvalStatus
 
     let createdOrder = null
 
@@ -168,7 +193,7 @@ router.patch("/:id", async (req, res) => {
       const quantity = Number(quote.quantity) || 1
 
       const itemPrice = Number(
-        req.body.finalPrice ||
+        body.finalPrice ||
         quote.finalPrice ||
         quote.price ||
         0
@@ -284,20 +309,20 @@ router.patch("/:id", async (req, res) => {
 
     /* ================= GENERAL PATCH FIELDS ================= */
 
-    Object.keys(req.body).forEach(key => {
+    Object.keys(body).forEach(key => {
       if (
         key !== "_id" &&
         key !== "approvalStatus" &&
         key !== "status" &&
         key !== "orderId"
       ) {
-        quote[key] = req.body[key]
+        quote[key] = body[key]
       }
     })
 
     await quote.save()
 
-    res.json({
+    return res.json({
       success: true,
       data: quote,
       order: null
@@ -305,7 +330,7 @@ router.patch("/:id", async (req, res) => {
   } catch (err) {
     console.error("❌ PATCH ERROR:", err)
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: err.message
     })
