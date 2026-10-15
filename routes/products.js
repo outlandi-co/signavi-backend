@@ -56,7 +56,7 @@ const upload = multer({
 })
 
 const productUpload = (req, res, next) => {
-  upload.array("images", 20)(req, res, (err) => {
+  upload.array("images", 80)(req, res, (err) => {
 
     if (!err) {
       console.log("✅ PRODUCT UPLOAD SUCCESS", {
