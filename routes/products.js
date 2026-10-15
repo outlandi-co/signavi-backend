@@ -254,6 +254,76 @@ const normalizeColors = (colors = []) => {
     .filter((color) => color.name)
 }
 
+// Keep every uploaded image, including images that have no color selected.
+// Multer produces an array when the same multipart field is repeated, but
+// some admin forms send a JSON-encoded array or the imageColors[] field.
+const parseImageColors = (body = {}) => {
+  const input = body.imageColors ?? body["imageColors[]"] ?? []
+  const parsed = safeParse(input, input)
+
+  if (Array.isArray(parsed)) return parsed.map(normalizeColorName)
+  if (typeof parsed === "string" && parsed.trim()) {
+    return [normalizeColorName(parsed)]
+  }
+  return []
+}
+
+const uniqueImages = (images = []) =>
+  [...new Set(images.filter((image) => typeof image === "string" && image.trim()))]
+
+const getExistingImages = (item = {}) =>
+  Array.isArray(item.images) ? uniqueImages(item.images) : []
+
+const variantKey = (color, size) =>
+  `${normalizeColorName(color).toLowerCase()}::${normalizeSize(size) || ""}`
+
+const collectProductUploads = (files = [], body = {}, variantList = []) => {
+  const inputs = parseImageColors(body)
+  const byColor = new Map()
+  const unassigned = []
+  const distinctColors = [
+    ...new Set(
+      variantList
+        .map((variant) => normalizeColorName(variant.color).toLowerCase())
+        .filter(Boolean)
+    )
+  ]
+
+  files.forEach((file, index) => {
+    const url = `/uploads/${file.filename}`
+    let color = normalizeColorName(
+      inputs[index] ?? (inputs.length === 1 ? inputs[0] : "")
+    ).toLowerCase()
+
+    // If the form omits imageColors, a one-color product is unambiguous.
+    // Never silently assign an unlabeled image to an arbitrary color on
+    // a multi-color product.
+    if (!color && distinctColors.length === 1) color = distinctColors[0]
+
+    if (color) {
+      byColor.set(color, uniqueImages([...(byColor.get(color) || []), url]))
+    } else {
+      unassigned.push(url)
+    }
+  })
+
+  if (files.length > 0) {
+    console.log("PRODUCT IMAGE ASSIGNMENTS:", {
+      uploadedFiles: files.length,
+      colorLabels: inputs,
+      matchedColors: [...byColor.keys()],
+      unassignedFiles: unassigned.length
+    })
+  }
+
+  return {
+    byColor,
+    unassigned,
+    all: files.map((file) => `/uploads/${file.filename}`),
+    forColor: (color) => byColor.get(normalizeColorName(color).toLowerCase()) || []
+  }
+}
+
 const normalizeProductType = (type) => {
   const value = String(type || "physical").trim().toLowerCase()
 
@@ -411,15 +481,16 @@ router.post("/", productUpload, async (req, res) => {
     )
 
     const price = toNumber(
-      req.body.price || req.body.basePrice || req.body.listPrice,
+      req.body.price ?? req.body.basePrice ?? req.body.listPrice,
       0
     )
 
-    const basePrice = toNumber(req.body.basePrice || price, price)
-    const listPrice = toNumber(req.body.listPrice || price, price)
+    const basePrice = toNumber(req.body.basePrice ?? price, price)
+    const listPrice = toNumber(req.body.listPrice ?? price, price)
 
-    const stock = toNumber(req.body.stock || req.body.quantity, 0)
-    const quantity = toNumber(req.body.quantity || stock, stock)
+    // Nullish coalescing preserves explicit zero inventory.
+    const stock = toNumber(req.body.stock ?? req.body.quantity, 0)
+    const quantity = toNumber(req.body.quantity ?? stock, stock)
 
     const rawVariants = safeParse(req.body.variants, [])
     const rawSizes = safeParse(req.body.sizes, [])
@@ -432,7 +503,6 @@ router.post("/", productUpload, async (req, res) => {
     const colors = normalizeColors(rawColors)
 
     const files = req.files || []
-    const colorInputs = req.body.imageColors || []
 
     console.log("📦 PRODUCT BODY:", {
       name,
@@ -453,26 +523,11 @@ router.post("/", productUpload, async (req, res) => {
 
     console.log("📸 FILES RECEIVED:", files.length)
 
-    const colorMap = {}
-
-    files.forEach((file, index) => {
-      const color = Array.isArray(colorInputs)
-        ? colorInputs[index]
-        : colorInputs
-
-      const normalizedColor = normalizeColorName(color)
-
-      if (!normalizedColor) return
-
-      if (!colorMap[normalizedColor]) {
-        colorMap[normalizedColor] = []
-      }
-
-      colorMap[normalizedColor].push(`/uploads/${file.filename}`)
-    })
+    const uploads = collectProductUploads(files, req.body, rawVariants)
 
     const digitalPreviewImage =
-      colorMap.__digital_preview__?.[0] ||
+      uploads.forColor("__digital_preview__")[0] ||
+      uploads.unassigned[0] ||
       digitalProduct.previewImage ||
       ""
 
@@ -491,12 +546,12 @@ router.post("/", productUpload, async (req, res) => {
             const size = normalizeSize(variant.size)
 
             const variantPrice = toNumber(
-              variant.price || variant.basePrice || variant.listPrice || price,
+              variant.price ?? variant.basePrice ?? variant.listPrice ?? price,
               price
             )
 
             const variantStock = toNumber(
-              variant.stock || variant.quantity || stock,
+              variant.stock ?? variant.quantity ?? stock,
               stock
             )
 
@@ -505,19 +560,23 @@ router.post("/", productUpload, async (req, res) => {
               size,
               stock: variantStock,
               quantity: toNumber(
-                variant.quantity || variantStock,
+                variant.quantity ?? variantStock,
                 variantStock
               ),
               price: variantPrice,
               basePrice: toNumber(
-                variant.basePrice || variantPrice,
+                variant.basePrice ?? variantPrice,
                 variantPrice
               ),
               listPrice: toNumber(
-                variant.listPrice || variantPrice,
+                variant.listPrice ?? variantPrice,
                 variantPrice
               ),
-              images: colorMap[color] || []
+              // One uploaded image for a color can be reused by its sizes.
+              images: uniqueImages([
+                ...uploads.forColor(color),
+                ...getExistingImages(variant)
+              ])
             }
           })
           .filter((variant) => variant.color && variant.size)
@@ -531,6 +590,13 @@ router.post("/", productUpload, async (req, res) => {
     }
 
     const sku = String(req.body.sku || "").trim() || generateSku(name)
+
+    // Save a top-level gallery for physical products too. This covers
+    // items with no color/size variants and provides a general fallback.
+    const physicalImages = uniqueImages([
+      ...uploads.all.filter((url) => !uploads.forColor("__digital_preview__").includes(url)),
+      ...variants.flatMap((variant) => variant.images)
+    ])
 
     const discountUpdates = getDiscountUpdates(req.body)
 
@@ -559,11 +625,14 @@ router.post("/", productUpload, async (req, res) => {
       colors,
       variants,
 
-      image: productType === "digital" ? finalDigitalProduct.previewImage : "",
+      image:
+        productType === "digital"
+          ? finalDigitalProduct.previewImage
+          : physicalImages[0] || "",
       images:
-        productType === "digital" && finalDigitalProduct.previewImage
-          ? [finalDigitalProduct.previewImage]
-          : [],
+        productType === "digital"
+          ? (finalDigitalProduct.previewImage ? [finalDigitalProduct.previewImage] : [])
+          : physicalImages,
 
       active: true,
 
@@ -708,7 +777,7 @@ router.get("/:id", async (req, res) => {
 
 /* ================= UPDATE PRODUCT ================= */
 
-router.patch("/:id", upload.array("images", 20), async (req, res) => {
+router.patch("/:id", productUpload, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
 
@@ -722,24 +791,21 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
     const updates = {}
 
     const files = req.files || []
-    const colorInputs = req.body.imageColors || []
-    const colorMap = {}
+    const receivedVariants =
+      req.body.variants !== undefined
+        ? safeParse(req.body.variants, null)
+        : (product.variants || []).map((variant) =>
+            typeof variant.toObject === "function" ? variant.toObject() : variant
+          )
 
-    files.forEach((file, index) => {
-      const color = Array.isArray(colorInputs)
-        ? colorInputs[index]
-        : colorInputs
+    if (!Array.isArray(receivedVariants)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid variants data"
+      })
+    }
 
-      const normalizedColor = normalizeColorName(color)
-
-      if (!normalizedColor) return
-
-      if (!colorMap[normalizedColor]) {
-        colorMap[normalizedColor] = []
-      }
-
-      colorMap[normalizedColor].push(`/uploads/${file.filename}`)
-    })
+    const uploads = collectProductUploads(files, req.body, receivedVariants)
 
     if (req.body.storefront !== undefined) {
       const storefront = normalizeStorefront(req.body.storefront)
@@ -787,13 +853,16 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
       updates.productType = normalizeProductType(req.body.productType)
     }
 
-    if (req.body.digitalProduct !== undefined) {
+    if (
+      req.body.digitalProduct !== undefined ||
+      uploads.forColor("__digital_preview__").length > 0
+    ) {
       const parsedDigitalProduct = normalizeDigitalProduct(
-        safeParse(req.body.digitalProduct, {})
+        safeParse(req.body.digitalProduct, product.digitalProduct || {})
       )
 
       const digitalPreviewImage =
-        colorMap.__digital_preview__?.[0] ||
+        uploads.forColor("__digital_preview__")[0] ||
         parsedDigitalProduct.previewImage ||
         product.digitalProduct?.previewImage ||
         ""
@@ -813,23 +882,23 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
       req.body.listPrice !== undefined
     ) {
       const price = toNumber(
-        req.body.price || req.body.basePrice || req.body.listPrice,
-        product.price || 0
+        req.body.price ?? req.body.basePrice ?? req.body.listPrice,
+        product.price ?? 0
       )
 
       updates.price = price
-      updates.basePrice = toNumber(req.body.basePrice || price, price)
-      updates.listPrice = toNumber(req.body.listPrice || price, price)
+      updates.basePrice = toNumber(req.body.basePrice ?? price, price)
+      updates.listPrice = toNumber(req.body.listPrice ?? price, price)
     }
 
     if (req.body.stock !== undefined || req.body.quantity !== undefined) {
       const stock = toNumber(
-        req.body.stock || req.body.quantity,
-        product.stock || 0
+        req.body.stock ?? req.body.quantity,
+        product.stock ?? 0
       )
 
       updates.stock = stock
-      updates.quantity = toNumber(req.body.quantity || stock, stock)
+      updates.quantity = toNumber(req.body.quantity ?? stock, stock)
     }
 
     if (req.body.sizes !== undefined) {
@@ -845,50 +914,82 @@ router.patch("/:id", upload.array("images", 20), async (req, res) => {
       updates.colors = normalizeColors(rawColors)
     }
 
-    if (req.body.variants !== undefined) {
-      const rawVariants = safeParse(req.body.variants, [])
+    // Process image-only edits too; they do not need to resend "variants".
+    if (req.body.variants !== undefined || files.length > 0) {
+      const originalByKey = new Map(
+        (product.variants || []).map((variant) => [
+          variantKey(variant.color, variant.size),
+          variant
+        ])
+      )
 
-      updates.variants = Array.isArray(rawVariants)
-        ? rawVariants
-            .map((variant) => {
-              const color = normalizeColorName(variant.color)
-              const size = normalizeSize(variant.size)
+      updates.variants = receivedVariants
+        .map((variant) => {
+          const color = normalizeColorName(variant.color)
+          const size = normalizeSize(variant.size)
+          const previous = originalByKey.get(variantKey(color, size)) || {}
 
-              const variantPrice = toNumber(
-                variant.price ||
-                  variant.basePrice ||
-                  variant.listPrice ||
-                  product.price,
-                product.price || 0
-              )
+          const variantPrice = toNumber(
+            variant.price ?? variant.basePrice ?? variant.listPrice ??
+              previous.price ?? product.price,
+            product.price ?? 0
+          )
 
-              const variantStock = toNumber(
-                variant.stock || variant.quantity || product.stock,
-                product.stock || 0
-              )
+          // Never replace zero stock with a parent-product value.
+          const variantStock = toNumber(
+            variant.stock ?? variant.quantity ?? previous.stock ?? product.stock,
+            product.stock ?? 0
+          )
 
-              return {
-                color,
-                size,
-                stock: variantStock,
-                quantity: toNumber(
-                  variant.quantity || variantStock,
-                  variantStock
-                ),
-                price: variantPrice,
-                basePrice: toNumber(
-                  variant.basePrice || variantPrice,
-                  variantPrice
-                ),
-                listPrice: toNumber(
-                  variant.listPrice || variantPrice,
-                  variantPrice
-                ),
-                images: Array.isArray(variant.images) ? variant.images : []
-              }
-            })
-            .filter((variant) => variant.color && variant.size)
-        : []
+          const baseImages = Array.isArray(variant.images)
+            ? variant.images
+            : getExistingImages(previous)
+
+          return {
+            color,
+            size,
+            stock: variantStock,
+            quantity: toNumber(
+              variant.quantity ?? variantStock,
+              variantStock
+            ),
+            price: variantPrice,
+            basePrice: toNumber(
+              variant.basePrice ?? variantPrice,
+              variantPrice
+            ),
+            listPrice: toNumber(
+              variant.listPrice ?? variantPrice,
+              variantPrice
+            ),
+            // New images first, then the saved gallery. Each size under
+            // a color receives the matching uploaded color images.
+            images: uniqueImages([
+              ...uploads.forColor(color),
+              ...baseImages
+            ])
+          }
+        })
+        .filter((variant) => variant.color && variant.size)
+    }
+
+    // Keep a general product gallery synchronized with new uploads.
+    // The selected variant gallery remains the source for each color/size.
+    if (files.length > 0 || req.body.variants !== undefined) {
+      const currentImages = getExistingImages(product)
+      const latestVariantImages = (updates.variants || product.variants || [])
+        .flatMap((variant) => getExistingImages(variant))
+      const savedImages = uniqueImages([
+        ...uploads.all.filter((url) => !uploads.forColor("__digital_preview__").includes(url)),
+        ...latestVariantImages,
+        ...currentImages
+      ])
+
+      const resolvedType = updates.productType || product.productType || "physical"
+      if (resolvedType !== "digital") {
+        updates.images = savedImages
+        updates.image = savedImages[0] || product.image || ""
+      }
     }
 
     const discountUpdates = getDiscountUpdates(req.body)
