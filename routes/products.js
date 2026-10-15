@@ -55,35 +55,110 @@ const upload = multer({
   }
 })
 
-const productUpload = (req, res, next) => {
-  upload.array("images", 80)(req, res, (err) => {
+/* ================= PERMANENT CLOUDINARY IMAGE STORAGE ================= */
 
-    if (!err) {
-      console.log("✅ PRODUCT UPLOAD SUCCESS", {
-        fields: Object.keys(req.body || {}),
-        files: req.files?.length || 0
-      });
+// Uses the Cloudinary Upload API directly with Node.js 18+ built-ins.
+// No additional npm package is required. The API secret stays on the server.
+const uploadToCloudinary = async (file) => {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim()
+  const apiKey = process.env.CLOUDINARY_API_KEY?.trim()
+  const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim()
 
-      return next();
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new Error("Cloudinary image storage is not configured on the backend")
+  }
+
+  if (typeof fetch !== "function" || typeof Blob !== "function" ||
+      typeof FormData !== "function") {
+    throw new Error("Node.js 18 or later is required for Cloudinary uploads")
+  }
+
+  const body = new FormData()
+  const imageBytes = await fs.promises.readFile(file.path)
+  body.append(
+    "file",
+    new Blob([imageBytes], { type: file.mimetype }),
+    path.basename(file.originalname || file.filename)
+  )
+  body.append("folder", "signavi/products")
+
+  const credentials = Buffer.from(`${apiKey}:${apiSecret}`).toString("base64")
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 60000)
+
+  try {
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`,
+      {
+        method: "POST",
+        headers: { Authorization: `Basic ${credentials}` },
+        body,
+        signal: controller.signal
+      }
+    )
+
+    const result = await response.json().catch(() => ({}))
+    if (!response.ok || !result.secure_url?.startsWith("https://")) {
+      throw new Error(
+        `Cloudinary upload failed (${response.status}): ${result.error?.message || "No secure URL returned"}`
+      )
     }
 
-    console.error("❌ PRODUCT UPLOAD ERROR:", {
-      code: err.code,
-      field: err.field,
-      message: err.message
-    });
+    return result.secure_url
+  } finally {
+    clearTimeout(timeout)
+  }
+}
 
-    return res.status(
-      err.code === "LIMIT_FILE_SIZE" ? 413 : 400
-    ).json({
-      success: false,
-      stage: "upload",
-      code: err.code || "UPLOAD_ERROR",
-      message: err.message
-    });
+const productUpload = (req, res, next) => {
+  upload.array("images", 80)(req, res, async (err) => {
+    if (err) {
+      console.error("❌ PRODUCT UPLOAD ERROR:", {
+        code: err.code,
+        field: err.field,
+        message: err.message
+      })
 
-  });
-};
+      return res.status(err.code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
+        success: false,
+        stage: "upload",
+        code: err.code || "UPLOAD_ERROR",
+        message: err.message
+      })
+    }
+
+    const files = req.files || []
+
+    try {
+      // Upload before changing MongoDB, so a failed image upload never
+      // creates or updates a product with a broken local /uploads/ URL.
+      for (const file of files) {
+        file.secure_url = await uploadToCloudinary(file)
+      }
+
+      console.log("✅ PRODUCT UPLOAD SUCCESS", {
+        fields: Object.keys(req.body || {}),
+        cloudinaryImages: files.length
+      })
+
+      return next()
+    } catch (uploadError) {
+      console.error("❌ CLOUDINARY PRODUCT IMAGE ERROR:", uploadError.message)
+      return res.status(502).json({
+        success: false,
+        stage: "cloudinary",
+        message: "Product images could not be stored. The product was not changed.",
+        error: uploadError.message
+      })
+    } finally {
+      // Multer uses a short-lived disk buffer only. The originals now live
+      // on Cloudinary, so remove all temporary files (also on failures).
+      await Promise.allSettled(
+        files.filter((file) => file.path).map((file) => fs.promises.unlink(file.path))
+      )
+    }
+  })
+}
 
 /* ================= HELPERS ================= */
 
@@ -290,7 +365,7 @@ const collectProductUploads = (files = [], body = {}, variantList = []) => {
   ]
 
   files.forEach((file, index) => {
-    const url = `/uploads/${file.filename}`
+    const url = file.secure_url
     let color = normalizeColorName(
       inputs[index] ?? (inputs.length === 1 ? inputs[0] : "")
     ).toLowerCase()
@@ -319,7 +394,7 @@ const collectProductUploads = (files = [], body = {}, variantList = []) => {
   return {
     byColor,
     unassigned,
-    all: files.map((file) => `/uploads/${file.filename}`),
+    all: files.map((file) => file.secure_url),
     forColor: (color) => byColor.get(normalizeColorName(color).toLowerCase()) || []
   }
 }
