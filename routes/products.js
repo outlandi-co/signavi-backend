@@ -55,6 +55,36 @@ const upload = multer({
   }
 })
 
+const productUpload = (req, res, next) => {
+  upload.array("images", 20)(req, res, (err) => {
+
+    if (!err) {
+      console.log("✅ PRODUCT UPLOAD SUCCESS", {
+        fields: Object.keys(req.body || {}),
+        files: req.files?.length || 0
+      });
+
+      return next();
+    }
+
+    console.error("❌ PRODUCT UPLOAD ERROR:", {
+      code: err.code,
+      field: err.field,
+      message: err.message
+    });
+
+    return res.status(
+      err.code === "LIMIT_FILE_SIZE" ? 413 : 400
+    ).json({
+      success: false,
+      stage: "upload",
+      code: err.code || "UPLOAD_ERROR",
+      message: err.message
+    });
+
+  });
+};
+
 /* ================= HELPERS ================= */
 
 const safeParse = (data, fallback = []) => {
@@ -353,7 +383,7 @@ router.get("/debug/all", async (req, res) => {
 
 /* ================= CREATE PRODUCT ================= */
 
-router.post("/", upload.array("images", 20), async (req, res) => {
+router.post("/", productUpload, async (req, res) => {
   try {
     const { name, description, category } = req.body
 
