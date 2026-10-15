@@ -23,6 +23,7 @@ import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js"
 import estimateRoutes from "./routes/estimateRoutes.js"
 
 import productRoutes from "./routes/products.js"
+import { requireAuth } from "./middleware/auth.js"
 import orderRoutes from "./routes/orders.js"
 import invoiceRoutes from "./routes/invoiceRoutes.js"
 
@@ -599,6 +600,23 @@ console.log(
 
 app.use(
   "/api/products",
+  (req, res, next) => {
+    const publicRead =
+      req.method === "GET" &&
+      !req.path.startsWith("/debug")
+
+    if (publicRead) return next()
+
+    return requireAuth(req, res, () => {
+      if (req.user?.role !== "admin") {
+        return res.status(403).json({
+          message: "Administrator access required"
+        })
+      }
+
+      return next()
+    })
+  },
   productRoutes
 )
 

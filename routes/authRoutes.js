@@ -99,9 +99,7 @@ router.post(
           password:
             hashedPassword,
 
-          role:
-            role ||
-            "customer"
+          role: "customer"
         })
 
       const token =
