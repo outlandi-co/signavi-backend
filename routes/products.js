@@ -4,6 +4,7 @@ import multer from "multer"
 import path from "path"
 import fs from "fs"
 import Product from "../models/Product.js"
+import Material from "../models/Material.js"
 import { requireAuth } from "../middleware/auth.js"
 
 const router = express.Router()
@@ -484,6 +485,109 @@ const getDiscountUpdates = (body = {}) => {
   return updates
 }
 
+// Product and variant material links use MongoDB Material _id values.
+// Business-facing Material.id and colorSku remain separate identifiers.
+class MaterialUsageInputError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = "MaterialUsageInputError"
+    this.statusCode = 400
+  }
+}
+
+const parseMaterialUsage = (raw, label = "materialUsage") => {
+  let entries = raw
+
+  if (typeof entries === "string") {
+    try {
+      entries = JSON.parse(entries)
+    } catch {
+      throw new MaterialUsageInputError(`${label} must be a valid JSON array.`)
+    }
+  }
+
+  if (!Array.isArray(entries)) {
+    throw new MaterialUsageInputError(`${label} must be an array.`)
+  }
+
+  const seen = new Set()
+
+  return entries.map((entry, index) => {
+    const itemLabel = `${label}[${index}]`
+
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new MaterialUsageInputError(`${itemLabel} must be an object.`)
+    }
+
+    const material = String(entry.material ?? "").trim()
+    if (!/^[a-f0-9]{24}$/i.test(material)) {
+      throw new MaterialUsageInputError(`${itemLabel}.material must be a Material MongoDB _id.`)
+    }
+
+    if (
+      entry.colorSku !== undefined &&
+      entry.colorSku !== null &&
+      typeof entry.colorSku !== "string"
+    ) {
+      throw new MaterialUsageInputError(`${itemLabel}.colorSku must be a string.`)
+    }
+
+    const colorSku = (entry.colorSku || "").trim()
+    const rawQuantity = entry.quantityPerUnit
+
+    if (
+      (typeof rawQuantity !== "string" && typeof rawQuantity !== "number") ||
+      (typeof rawQuantity === "string" && !rawQuantity.trim())
+    ) {
+      throw new MaterialUsageInputError(`${itemLabel}.quantityPerUnit must be a positive number.`)
+    }
+
+    const quantityPerUnit = Number(rawQuantity)
+    if (!Number.isFinite(quantityPerUnit) || quantityPerUnit < 0.000001) {
+      throw new MaterialUsageInputError(`${itemLabel}.quantityPerUnit must be at least 0.000001.`)
+    }
+
+    const key = `${material.toLowerCase()}::${colorSku.toLowerCase()}`
+    if (seen.has(key)) {
+      throw new MaterialUsageInputError(`${label} has a duplicate material/colorSku pair.`)
+    }
+    seen.add(key)
+
+    return { material, colorSku, quantityPerUnit }
+  })
+}
+
+const validateMaterialReferences = async (usageLists) => {
+  const links = usageLists.flat()
+  if (links.length === 0) return
+
+  const materialIds = [...new Set(links.map((link) => link.material.toLowerCase()))]
+  const materials = await Material.find({ _id: { $in: materialIds } })
+    .select("_id colors")
+    .lean()
+  const byId = new Map(materials.map((material) => [String(material._id).toLowerCase(), material]))
+
+  for (const link of links) {
+    const material = byId.get(link.material.toLowerCase())
+    if (!material) {
+      throw new MaterialUsageInputError(`Material ${link.material} was not found.`)
+    }
+
+    // A specific color SKU must actually belong to the selected material.
+    if (link.colorSku) {
+      const found = Array.isArray(material.colors) && material.colors.some(
+        (color) => String(color?.sku ?? "").trim().toLowerCase() === link.colorSku.toLowerCase()
+      )
+
+      if (!found) {
+        throw new MaterialUsageInputError(
+          `Color SKU ${link.colorSku} does not belong to material ${link.material}.`
+        )
+      }
+    }
+  }
+}
+
 /* ================= PRODUCT SHIPPING HELPERS ================= */
 
 const parseProductShipping = (raw) => {
@@ -677,6 +781,9 @@ router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
     const quantity = toNumber(req.body.quantity ?? stock, stock)
 
     const rawVariants = safeParse(req.body.variants, [])
+    const materialUsage = parseMaterialUsage(
+      req.body.materialUsage === undefined ? [] : req.body.materialUsage
+    )
     const rawSizes = safeParse(req.body.sizes, [])
     const rawColors = safeParse(req.body.colors, [])
 
@@ -756,6 +863,10 @@ router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
                 variant.listPrice ?? variantPrice,
                 variantPrice
               ),
+              materialUsage: parseMaterialUsage(
+                variant.materialUsage === undefined ? [] : variant.materialUsage,
+                `Variant ${color} / ${size} materialUsage`
+              ),
               // One uploaded image for a color can be reused by its sizes.
               images: uniqueImages([
                 ...uploads.forColor(color),
@@ -765,6 +876,11 @@ router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
           })
           .filter((variant) => variant.color && variant.size)
       : []
+
+    await validateMaterialReferences([
+      materialUsage,
+      ...variants.map((variant) => variant.materialUsage)
+    ])
 
     if (productType === "digital" && !finalDigitalProduct.previewImage) {
       return res.status(400).json({
@@ -808,6 +924,7 @@ router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
 
       sizes,
       colors,
+      materialUsage,
       variants,
 
       image:
@@ -842,10 +959,10 @@ router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
   } catch (err) {
     console.error("❌ CREATE PRODUCT ERROR:", err)
 
-    return res.status(500).json({
+    return res.status(err.statusCode === 400 ? 400 : 500).json({
       success: false,
-      message: "Create failed",
-      error: err.message
+      message: err.statusCode === 400 ? err.message : "Create failed",
+      ...(err.statusCode === 400 ? {} : { error: err.message })
     })
   }
 })
@@ -974,6 +1091,12 @@ router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) 
     }
 
     const updates = {}
+
+    // Omitted field means preserve the product's existing material links.
+    // Sending [] intentionally clears them.
+    if (req.body.materialUsage !== undefined) {
+      updates.materialUsage = parseMaterialUsage(req.body.materialUsage)
+    }
 
     const files = req.files || []
     const receivedVariants =
@@ -1169,6 +1292,14 @@ router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) 
               variant.listPrice ?? variantPrice,
               variantPrice
             ),
+            // A variant edit may omit materialUsage: preserve the links
+            // already saved for that exact color and size.
+            materialUsage: parseMaterialUsage(
+              variant.materialUsage === undefined
+                ? (previous.materialUsage || [])
+                : variant.materialUsage,
+              `Variant ${color} / ${size} materialUsage`
+            ),
             // New images first, then the saved gallery. Each size under
             // a color receives the matching uploaded color images.
             images: uniqueImages([
@@ -1199,6 +1330,15 @@ router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) 
       }
     }
 
+    // Validate every material reference that would be written by this edit.
+    // Unrelated field edits do not revalidate untouched material arrays.
+    if (updates.materialUsage !== undefined || updates.variants !== undefined) {
+      await validateMaterialReferences([
+        updates.materialUsage || [],
+        ...(updates.variants || []).map((variant) => variant.materialUsage)
+      ])
+    }
+
     const discountUpdates = getDiscountUpdates(req.body)
 
     Object.assign(updates, discountUpdates)
@@ -1222,10 +1362,10 @@ router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) 
   } catch (err) {
     console.error("❌ UPDATE PRODUCT ERROR:", err)
 
-    return res.status(500).json({
+    return res.status(err.statusCode === 400 ? 400 : 500).json({
       success: false,
-      message: "Update failed",
-      error: err.message
+      message: err.statusCode === 400 ? err.message : "Update failed",
+      ...(err.statusCode === 400 ? {} : { error: err.message })
     })
   }
 })
