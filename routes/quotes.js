@@ -1,25 +1,20 @@
+
 import express from "express"
 import mongoose from "mongoose"
-
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
-
+import { requireAuth } from "../middleware/auth.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
-
 import upload from "../middleware/upload.js"
 import cloudinary from "../utils/cloudinary.js"
 
 const router = express.Router()
 
-console.log("🔥 QUOTES ROUTE LOADED")
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
 const TAX_RATE = 0.0825
 
-const QUOTE_WORKFLOW_STATUSES = [
+// Existing tax rate; verify applicable tax rules before production.
+
+const WORKFLOW_STATUSES = [
   "quotes",
   "review_mockup",
   "approval_payment",
@@ -36,435 +31,331 @@ const QUOTE_WORKFLOW_STATUSES = [
   "archive"
 ]
 
-const ACTIVE_QUOTE_STATUSES = [
+const ACTIVE_STATUSES = [
   "quotes",
   "review_mockup",
   "approval_payment"
 ]
 
-/* =========================================================
-   HELPERS
-========================================================= */
+/* ==============================================
+   ADMIN AUTHORIZATION
+============================================== */
 
-const safeNumber = (value, fallback = 0) => {
+const requireAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required"
+    })
+  }
+
+  next()
+}
+
+/* ==============================================
+   HELPERS
+============================================== */
+
+const safePositive = (value, fallback = 0) => {
   const number = Number(value)
 
-  return Number.isFinite(number)
+  return Number.isFinite(number) && number >= 0
     ? number
     : fallback
 }
 
-const safePositiveNumber = (
-  value,
-  fallback = 0
-) => {
+const safeQuantity = (value, fallback = 1) => {
   const number = Number(value)
 
-  if (
-    !Number.isFinite(number) ||
-    number < 0
-  ) {
-    return fallback
-  }
-
-  return number
+  return Number.isFinite(number) && number >= 1
+    ? Math.floor(number)
+    : fallback
 }
 
-const safeQuantity = (
-  value,
-  fallback = 1
+const normalizeEmail = (value = "") =>
+  String(value || "").trim().toLowerCase()
+
+const asString = (value, fallback = "") =>
+  String(value ?? fallback).trim()
+
+const validId = (id) =>
+  mongoose.Types.ObjectId.isValid(id)
+
+const addTimeline = (document, status, note) => {
+  if (!Array.isArray(document.timeline)) {
+    document.timeline = []
+  }
+
+  document.timeline.push({
+    status,
+    note,
+    date: new Date()
+  })
+}
+
+const sendStatusEmail = async (
+  email,
+  status,
+  document
 ) => {
-  const number = Number(value)
+  if (!email) return
 
-  if (
-    !Number.isFinite(number) ||
-    number < 1
-  ) {
-    return fallback
+  try {
+    await sendOrderStatusEmail(
+      email,
+      status,
+      document
+    )
+  } catch (error) {
+    console.error("Quote email failed:", error)
   }
-
-  return Math.floor(number)
 }
 
-const normalizeEmail = (email = "") => {
-  return String(email)
-    .trim()
-    .toLowerCase()
-}
+/* ==============================================
+   CLOUDINARY UPLOAD
+============================================== */
 
-const uploadBufferToCloudinary = (
+const uploadToCloudinary = (
   file,
   folder = "signavi/quote-artwork"
-) => {
-  return new Promise(
-    (resolve, reject) => {
-      const uploadStream =
-        cloudinary.uploader.upload_stream(
-          {
-            folder,
+) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        resource_type: "auto"
+      },
+      (error, result) =>
+        error ? reject(error) : resolve(result)
+    )
 
-            resource_type:
-              "auto"
-          },
+    stream.end(file.buffer)
+  })
 
-          (error, result) => {
-            if (error) {
-              console.error(
-                "❌ QUOTE CLOUDINARY UPLOAD ERROR:",
-                error
-              )
+/* ==============================================
+   FIND QUOTE
+============================================== */
 
-              return reject(error)
-            }
+const findQuote = async (req, res) => {
+  if (!validId(req.params.id)) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid quote ID"
+    })
 
-            resolve(result)
-          }
-        )
+    return null
+  }
 
-      uploadStream.end(
-        file.buffer
-      )
-    }
+  const quote = await Quote.findById(
+    req.params.id
   )
+
+  if (!quote) {
+    res.status(404).json({
+      success: false,
+      message: "Quote not found"
+    })
+
+    return null
+  }
+
+  return quote
 }
 
-/* =========================================================
-   GET ALL QUOTES
-========================================================= */
+/* ==============================================
+   GET ALL QUOTES — ADMIN ONLY
+============================================== */
 
 router.get(
   "/",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const includeProcessed =
-        req.query.includeProcessed ===
-        "true"
+      const filter =
+        req.query.includeProcessed === "true"
+          ? {}
+          : {
+              approvalStatus: "pending",
+              status: {
+                $in: ACTIVE_STATUSES
+              }
+            }
 
-      let filter = {}
-
-      /*
-       * Default behavior:
-       * only return quotes that are still
-       * actively moving through quote review.
-       *
-       * Admin can request every quote using:
-       *
-       * ?includeProcessed=true
-       */
-
-      if (!includeProcessed) {
-        filter = {
-          approvalStatus: "pending",
-
-          status: {
-            $in:
-              ACTIVE_QUOTE_STATUSES
-          }
-        }
-      }
-
-      const quotes =
-        await Quote.find(filter)
-          .sort({
-            createdAt: -1
-          })
-          .lean()
+      const quotes = await Quote.find(filter)
+        .sort({ createdAt: -1 })
+        .lean()
 
       return res.json({
         success: true,
         count: quotes.length,
         data: quotes
       })
-    } catch (err) {
+    } catch (error) {
       console.error(
-        "❌ GET QUOTES ERROR:",
-        err
+        "Get quotes failed:",
+        error
       )
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            err.message ||
-            "Failed to load quotes"
-        })
+      return res.status(500).json({
+        success: false,
+        message: "Failed to load quotes"
+      })
     }
   }
 )
 
-/* =========================================================
-   CREATE QUOTE
-========================================================= */
+/* ==============================================
+   CREATE QUOTE — PUBLIC
+============================================== */
 
 router.post(
   "/",
-
   upload.single("artwork"),
-
   async (req, res) => {
     try {
-      const body =
-        req.body || {}
-
-      console.log(
-        "🔥 CREATE QUOTE BODY:",
-        body
-      )
-
-      console.log(
-        "🖼️ CREATE QUOTE FILE:",
-
-        req.file
-          ? {
-              name:
-                req.file
-                  .originalname,
-
-              type:
-                req.file
-                  .mimetype,
-
-              size:
-                req.file
-                  .size
-            }
-          : "No artwork uploaded"
-      )
-
-      /* ================= VALIDATE BODY ================= */
+      const body = req.body || {}
 
       if (
-        Object.keys(body)
-          .length === 0
+        !Object.keys(body).length &&
+        !req.file
       ) {
-        console.error(
-          "❌ CREATE QUOTE: Request body is empty"
-        )
-
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Quote request body is empty or could not be parsed"
-          })
+        return res.status(400).json({
+          success: false,
+          message:
+            "Quote request body is empty or could not be parsed"
+        })
       }
 
-      /* ================= BASIC VALUES ================= */
-
-      const quantity =
-        safeQuantity(
-          body.quantity,
-          1
-        )
-
-      const price =
-        safePositiveNumber(
-          body.price,
-          0
-        )
-
-      const finalPrice =
-        safePositiveNumber(
-          body.finalPrice,
-          price
-        )
-
-      const shippingCost =
-        safePositiveNumber(
-          body.shippingCost,
-          0
-        )
-
-      /* ================= PARSE ITEMS ================= */
+      /* ================= ITEMS ================= */
 
       let items = []
 
       if (body.items) {
         try {
-          const parsedItems =
-            typeof body.items ===
-            "string"
-              ? JSON.parse(
-                  body.items
-                )
+          const incoming =
+            typeof body.items === "string"
+              ? JSON.parse(body.items)
               : body.items
 
-          if (
-            Array.isArray(
-              parsedItems
-            )
-          ) {
-            items =
-              parsedItems.map(
-                (item) => ({
-                  name:
-                    String(
-                      item?.name ||
-                        ""
-                    ).trim(),
+          if (Array.isArray(incoming)) {
+            items = incoming.map((item) => ({
+              name: asString(item?.name),
 
-                  quantity:
-                    safeQuantity(
-                      item?.quantity,
-                      1
-                    ),
+              quantity: safeQuantity(
+                item?.quantity
+              ),
 
-                  price:
-                    safePositiveNumber(
-                      item?.price,
-                      0
-                    ),
+              price: safePositive(
+                item?.price
+              ),
 
-                  serviceType:
-                    String(
-                      item
-                        ?.serviceType ||
-                        ""
-                    ).trim(),
+              serviceType: asString(
+                item?.serviceType
+              ),
 
-                  source:
-                    String(
-                      item?.source ||
-                        "quote"
-                    ).trim()
-                })
+              source: asString(
+                item?.source || "quote"
               )
+            }))
           }
-        } catch (
-          parseError
-        ) {
+        } catch (error) {
           console.error(
-            "❌ QUOTE ITEMS PARSE ERROR:",
-            parseError
+            "Quote items parsing failed:",
+            error
           )
-
-          items = []
         }
       }
 
       /* ================= ARTWORK ================= */
 
-      let artworkUrl =
-        String(
-          body.artworkUrl ||
-            ""
-        ).trim()
+      let artworkUrl = asString(
+        body.artworkUrl
+      )
 
-      let artworkPublicId =
-        String(
-          body.artworkPublicId ||
-            ""
-        ).trim()
+      let artworkPublicId = asString(
+        body.artworkPublicId
+      )
 
-      let artworkName =
-        String(
-          body.artworkName ||
-            ""
-        ).trim()
+      let artworkName = asString(
+        body.artworkName
+      )
 
       if (req.file) {
-        console.log(
-          "📤 UPLOADING QUOTE ARTWORK TO CLOUDINARY..."
-        )
-
-        const uploadedArtwork =
-          await uploadBufferToCloudinary(
-            req.file
-          )
+        const uploaded =
+          await uploadToCloudinary(req.file)
 
         artworkUrl =
-          uploadedArtwork
-            ?.secure_url ||
-          ""
+          uploaded?.secure_url || ""
 
         artworkPublicId =
-          uploadedArtwork
-            ?.public_id ||
-          ""
+          uploaded?.public_id || ""
 
         artworkName =
-          req.file
-            ?.originalname ||
-          ""
-
-        console.log(
-          "✅ QUOTE ARTWORK UPLOADED:",
-          artworkUrl
-        )
+          req.file.originalname || ""
       }
 
-      /* ================= CREATE DATA ================= */
+      /* ================= CREATE ================= */
 
-      const quoteData = {
-        customerName:
-          String(
-            body.customerName ||
-              ""
-          ).trim(),
+      const price = safePositive(
+        body.price
+      )
 
-        email:
-          normalizeEmail(
-            body.email
-          ),
+      const quote = await Quote.create({
+        customerName: asString(
+          body.customerName
+        ),
 
-        phone:
-          String(
-            body.phone ||
-              ""
-          ).trim(),
+        email: normalizeEmail(
+          body.email
+        ),
 
-        projectType:
-          String(
-            body.projectType ||
-              ""
-          ).trim(),
+        phone: asString(
+          body.phone
+        ),
 
-        serviceType:
-          String(
-            body.serviceType ||
-              ""
-          ).trim(),
+        projectType: asString(
+          body.projectType
+        ),
 
-        serviceLabel:
-          String(
-            body.serviceLabel ||
-              ""
-          ).trim(),
+        serviceType: asString(
+          body.serviceType
+        ),
 
-        printType:
-          String(
-            body.printType ||
-              ""
-          ).trim(),
+        serviceLabel: asString(
+          body.serviceLabel
+        ),
 
-        turnaround:
-          String(
-            body.turnaround ||
-              "standard"
-          ).trim(),
+        printType: asString(
+          body.printType
+        ),
 
-        notes:
-          String(
-            body.notes ||
-              ""
-          ),
+        turnaround: asString(
+          body.turnaround || "standard"
+        ),
 
-        quantity,
+        notes: String(
+          body.notes || ""
+        ),
+
+        quantity: safeQuantity(
+          body.quantity
+        ),
 
         items,
 
         price,
 
-        finalPrice,
+        finalPrice: safePositive(
+          body.finalPrice,
+          price
+        ),
 
-        shippingCost,
+        shippingCost: safePositive(
+          body.shippingCost
+        ),
 
-        artwork:
-          artworkUrl,
+        artwork: artworkUrl,
 
         artworkUrl,
 
@@ -472,265 +363,149 @@ router.post(
 
         artworkName,
 
-        approvalStatus:
-          "pending",
+        approvalStatus: "pending",
 
-        denialReason:
-          "",
+        denialReason: "",
 
-        adminNotes:
-          String(
-            body.adminNotes ||
-              ""
-          ),
+        adminNotes: asString(
+          body.adminNotes
+        ),
 
-        status:
-          "quotes",
+        status: "quotes",
 
-        source:
-          String(
-            body.source ||
-              "quote"
-          ).trim(),
+        source: asString(
+          body.source || "quote"
+        ),
 
         timeline: [
           {
-            status:
-              "quotes",
-
-            note:
-              "Quote created",
-
-            date:
-              new Date()
+            status: "quotes",
+            note: "Quote created",
+            date: new Date()
           }
         ]
-      }
+      })
 
-      /* ================= SAVE ================= */
-
-      const quote =
-        await Quote.create(
-          quoteData
-        )
-
-      console.log(
-        "✅ QUOTE CREATED:",
-        quote._id
-      )
-
-      return res
-        .status(201)
-        .json({
-          success: true,
-          data: quote
-        })
-    } catch (err) {
+      return res.status(201).json({
+        success: true,
+        data: quote
+      })
+    } catch (error) {
       console.error(
-        "❌ CREATE QUOTE ERROR:",
-        err
+        "Create quote failed:",
+        error
       )
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            err.message ||
-            "Failed to create quote"
-        })
+      return res.status(500).json({
+        success: false,
+        message: "Failed to create quote"
+      })
     }
   }
 )
 
-/* =========================================================
-   GET ONE QUOTE
-========================================================= */
+/* ==============================================
+   GET ONE QUOTE — ADMIN ONLY
+============================================== */
 
 router.get(
   "/:id",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(
-            req.params.id
-          )
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid quote ID"
-          })
-      }
+      const quote = await findQuote(
+        req,
+        res
+      )
 
-      const quote =
-        await Quote.findById(
-          req.params.id
-        )
-
-      if (!quote) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Quote not found"
-          })
-      }
+      if (!quote) return
 
       return res.json({
         success: true,
         data: quote
       })
-    } catch (err) {
+    } catch (error) {
       console.error(
-        "❌ GET ONE QUOTE ERROR:",
-        err
+        "Get quote failed:",
+        error
       )
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            err.message ||
-            "Failed to load quote"
-        })
+      return res.status(500).json({
+        success: false,
+        message: "Failed to load quote"
+      })
     }
   }
 )
 
-/* =========================================================
-   UPLOAD / SEND DIGITAL MOCKUP
-========================================================= */
+/* ==============================================
+   UPLOAD / SEND MOCKUP — ADMIN ONLY
+============================================== */
 
 router.patch(
   "/:id/mockup",
-
+  requireAuth,
+  requireAdmin,
   upload.single("mockup"),
-
   async (req, res) => {
     try {
-      /* ================= VALIDATE ID ================= */
+      const quote = await findQuote(
+        req,
+        res
+      )
 
-      if (
-        !mongoose.Types.ObjectId.isValid(
-          req.params.id
-        )
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid quote ID"
-          })
+      if (!quote) return
+
+      const body = req.body || {}
+
+      const finalPrice = safePositive(
+        body.finalPrice !== undefined
+          ? body.finalPrice
+          : body.price,
+
+        quote.finalPrice ||
+          quote.price ||
+          0
+      )
+
+      if (finalPrice <= 0) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "A valid final quote price is required before sending the mockup"
+        })
       }
 
-      /* ================= FIND QUOTE ================= */
-
-      const quote =
-        await Quote.findById(
-          req.params.id
-        )
-
-      if (!quote) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Quote not found"
-          })
-      }
-
-      const body =
-        req.body || {}
-
-      /* ================= FINAL PRICE ================= */
-
-      const finalPrice =
-        safePositiveNumber(
-          body.finalPrice !==
-            undefined
-            ? body.finalPrice
-            : body.price,
-
-          quote.finalPrice ||
-            quote.price ||
-            0
-        )
-
-      if (
-        !Number.isFinite(finalPrice) ||
-        finalPrice <= 0
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "A valid final quote price is required before sending the mockup"
-          })
-      }
-
-      /* ================= CUSTOMER MESSAGE ================= */
-
-      const mockupMessage =
-        String(
-          body.mockupMessage ||
-            quote.mockupMessage ||
-            ""
-        ).trim()
+      const mockupMessage = asString(
+        body.mockupMessage ||
+          quote.mockupMessage
+      )
 
       if (!mockupMessage) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "A customer message is required before sending the mockup"
-          })
+        return res.status(400).json({
+          success: false,
+          message:
+            "A customer message is required before sending the mockup"
+        })
       }
-
-      /* ================= REQUIRE MOCKUP ================= */
 
       if (
         !req.file &&
         !quote.mockupUrl &&
         !quote.mockup
       ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Choose a digital mockup or proof before sending"
-          })
+        return res.status(400).json({
+          success: false,
+          message:
+            "Choose a digital mockup or proof before sending"
+        })
       }
 
-      /* ================= TIMELINE ================= */
-
-      if (
-        !Array.isArray(
-          quote.timeline
-        )
-      ) {
-        quote.timeline = []
-      }
-
-      /* ================= UPLOAD MOCKUP ================= */
+      /* ================= UPLOAD ================= */
 
       if (req.file) {
-        const allowedTypes = [
+        const allowed = [
           "image/png",
           "image/jpeg",
           "image/webp",
@@ -738,65 +513,46 @@ router.patch(
         ]
 
         if (
-          !allowedTypes.includes(
+          !allowed.includes(
             req.file.mimetype
           )
         ) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-
-              message:
-                "Mockup must be a PNG, JPG, WEBP, or PDF file"
-            })
+          return res.status(400).json({
+            success: false,
+            message:
+              "Mockup must be a PNG, JPG, WEBP, or PDF file"
+          })
         }
 
-        console.log(
-          "📤 UPLOADING DIGITAL MOCKUP TO CLOUDINARY..."
-        )
-
-        const uploadedMockup =
-          await uploadBufferToCloudinary(
+        const uploaded =
+          await uploadToCloudinary(
             req.file,
             "signavi/quote-mockups"
           )
 
         quote.mockup =
-          uploadedMockup?.secure_url ||
-          ""
+          uploaded?.secure_url || ""
 
         quote.mockupUrl =
-          uploadedMockup?.secure_url ||
-          ""
+          uploaded?.secure_url || ""
 
         quote.mockupPublicId =
-          uploadedMockup?.public_id ||
-          ""
+          uploaded?.public_id || ""
 
         quote.mockupName =
-          req.file?.originalname ||
-          ""
+          req.file.originalname || ""
 
         quote.mockupMimeType =
-          req.file?.mimetype ||
-          ""
-
-        console.log(
-          "✅ DIGITAL MOCKUP UPLOADED:",
-          quote.mockupUrl
-        )
+          req.file.mimetype || ""
       }
 
-      /* ================= SAVE PRICE ================= */
+      /* ================= SAVE ================= */
 
-      quote.price =
-        finalPrice
+      const oldStatus = quote.status
 
-      quote.finalPrice =
-        finalPrice
+      quote.price = finalPrice
 
-      /* ================= SAVE MESSAGE ================= */
+      quote.finalPrice = finalPrice
 
       quote.mockupMessage =
         mockupMessage
@@ -804,301 +560,176 @@ router.patch(
       quote.mockupSentAt =
         new Date()
 
-      /* ================= MOVE WORKFLOW ================= */
-
-      const previousStatus =
-        quote.status
-
       quote.status =
         "approval_payment"
 
-      quote.timeline.push({
-        status:
-          "approval_payment",
+      addTimeline(
+        quote,
+        "approval_payment",
 
-        note:
-          previousStatus ===
-          "approval_payment"
-            ? "Digital mockup and quote resent to customer"
-            : `Digital mockup sent to customer; workflow moved from ${previousStatus} to approval_payment`,
-
-        date:
-          new Date()
-      })
-
-      /* ================= SAVE ================= */
+        oldStatus === "approval_payment"
+          ? "Digital mockup and quote resent to customer"
+          : `Digital mockup sent to customer; workflow moved from ${oldStatus} to approval_payment`
+      )
 
       await quote.save()
 
-      console.log(
-        "✅ MOCKUP SAVED TO QUOTE:",
-        quote._id
+      await sendStatusEmail(
+        quote.email,
+        "approval_payment",
+        quote
       )
-
-      /* ================= EMAIL ================= */
-
-      if (quote.email) {
-        try {
-          await sendOrderStatusEmail(
-            quote.email,
-            "approval_payment",
-            quote
-          )
-
-          console.log(
-            "📧 MOCKUP / APPROVAL EMAIL TRIGGERED:",
-            quote._id
-          )
-        } catch (emailError) {
-          console.error(
-            "❌ MOCKUP EMAIL ERROR:",
-            emailError
-          )
-        }
-      } else {
-        console.warn(
-          "⚠️ MOCKUP EMAIL NOT SENT: Quote has no email"
-        )
-      }
-
-      /* ================= RESPONSE ================= */
 
       return res.json({
         success: true,
-
         message:
           "Digital mockup and quote saved successfully",
-
         data: quote
       })
-    } catch (err) {
+    } catch (error) {
       console.error(
-        "❌ SEND MOCKUP ERROR:",
-        err
+        "Send mockup failed:",
+        error
       )
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            err.message ||
-            "Failed to upload or send digital mockup"
-        })
+      return res.status(500).json({
+        success: false,
+        message:
+          "Failed to upload or send digital mockup"
+      })
     }
   }
 )
 
-/* =========================================================
-   PATCH QUOTE
-========================================================= */
+/* ==============================================
+   PATCH QUOTE — ADMIN ONLY
+============================================== */
 
 router.patch(
   "/:id",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      /* ================= VALIDATE ID ================= */
+      const body = req.body || {}
 
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(
-            req.params.id
-          )
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid quote ID"
-          })
+      if (!Object.keys(body).length) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Update request body is empty or could not be parsed"
+        })
       }
 
-      const body =
-        req.body || {}
-
-      console.log(
-        "🔥 PATCH QUOTE BODY:",
-        body
+      const quote = await findQuote(
+        req,
+        res
       )
 
-      if (
-        Object.keys(body)
-          .length === 0
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-
-            message:
-              "Update request body is empty or could not be parsed"
-          })
-      }
-
-      const quote =
-        await Quote.findById(
-          req.params.id
-        )
-
-      if (!quote) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Quote not found"
-          })
-      }
-
-      if (
-        !Array.isArray(
-          quote.timeline
-        )
-      ) {
-        quote.timeline = []
-      }
+      if (!quote) return
 
       const approvalStatus =
         body.approvalStatus
 
-      let createdOrder =
-        null
-
-      /* =====================================================
-         APPROVAL / DENIAL DUPLICATE GUARD
-      ===================================================== */
+      /* ================= DUPLICATE GUARD ================= */
 
       if (
         approvalStatus &&
         (
           quote.approvalStatus ===
             "approved" ||
+
           quote.approvalStatus ===
             "denied" ||
+
           quote.orderId
         )
       ) {
-        console.log(
-          "⚠️ QUOTE ALREADY PROCESSED:",
-          quote._id
-        )
-
         return res.json({
           success: true,
-
-          message:
-            "Quote already processed",
-
+          message: "Quote already processed",
           data: quote,
-
           order: null
         })
       }
 
-      /* =====================================================
-         WORKFLOW STATUS UPDATE
-      ===================================================== */
+      /* ================= WORKFLOW UPDATE ================= */
 
       if (
         body.status &&
         !approvalStatus
       ) {
         const requestedStatus =
-          String(
-            body.status
-          ).trim()
+          asString(body.status)
 
         if (
-          !QUOTE_WORKFLOW_STATUSES.includes(
+          !WORKFLOW_STATUSES.includes(
             requestedStatus
           )
         ) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-
-              message:
-                `Invalid quote status: ${requestedStatus}`
-            })
-        }
-
-        const previousStatus =
-          quote.status
-
-        if (
-          previousStatus !==
-          requestedStatus
-        ) {
-          quote.status =
-            requestedStatus
-
-          quote.timeline.push({
-            status:
-              requestedStatus,
-
-            note:
-              `Workflow moved from ${previousStatus} to ${requestedStatus}`,
-
-            date:
-              new Date()
+          return res.status(400).json({
+            success: false,
+            message:
+              `Invalid quote status: ${requestedStatus}`
           })
         }
 
-        /* ================= OPTIONAL FIELDS ================= */
+        if (
+          quote.status !==
+          requestedStatus
+        ) {
+          const oldStatus =
+            quote.status
+
+          quote.status =
+            requestedStatus
+
+          addTimeline(
+            quote,
+            requestedStatus,
+            `Workflow moved from ${oldStatus} to ${requestedStatus}`
+          )
+        }
 
         if (
-          body.adminNotes !==
-          undefined
+          body.adminNotes !== undefined
         ) {
           quote.adminNotes =
-            String(
-              body.adminNotes ||
-                ""
-            )
+            asString(body.adminNotes)
         }
 
         if (
-          body.denialReason !==
-          undefined
+          body.denialReason !== undefined
         ) {
           quote.denialReason =
-            String(
-              body.denialReason ||
-                ""
-            )
+            asString(body.denialReason)
         }
 
         if (
-          body.finalPrice !==
-          undefined
+          body.finalPrice !== undefined
         ) {
           quote.finalPrice =
-            safePositiveNumber(
+            safePositive(
               body.finalPrice,
               quote.finalPrice
             )
         }
 
         if (
-          body.price !==
-          undefined
+          body.price !== undefined
         ) {
           quote.price =
-            safePositiveNumber(
+            safePositive(
               body.price,
               quote.price
             )
         }
 
         if (
-          body.shippingCost !==
-          undefined
+          body.shippingCost !== undefined
         ) {
           quote.shippingCost =
-            safePositiveNumber(
+            safePositive(
               body.shippingCost,
               quote.shippingCost
             )
@@ -1106,12 +737,6 @@ router.patch(
 
         await quote.save()
 
-        console.log(
-          "✅ QUOTE WORKFLOW UPDATED:",
-          quote._id,
-          quote.status
-        )
-
         return res.json({
           success: true,
           data: quote,
@@ -1119,42 +744,26 @@ router.patch(
         })
       }
 
-      /* =====================================================
-         APPROVE QUOTE
-      ===================================================== */
+      /* ================= APPROVE QUOTE ================= */
 
       if (
-        approvalStatus ===
-        "approved"
+        approvalStatus === "approved"
       ) {
-        /* ================= PRICE ================= */
+        const quantity = safeQuantity(
+          quote.quantity
+        )
 
-        const quantity =
-          safeQuantity(
-            quote.quantity,
-            1
-          )
+        const itemPrice = safePositive(
+          body.finalPrice !== undefined
+            ? body.finalPrice
+            : (
+                quote.finalPrice ||
+                quote.price ||
+                0
+              )
+        )
 
-        const itemPrice =
-          safePositiveNumber(
-            body.finalPrice !==
-              undefined
-              ? body.finalPrice
-              : (
-                  quote.finalPrice ||
-                  quote.price ||
-                  0
-                ),
-            0
-          )
-
-        /*
-         * Quote.finalPrice is treated as the
-         * approved pre-tax quote price.
-         */
-
-        quote.finalPrice =
-          itemPrice
+        quote.finalPrice = itemPrice
 
         quote.approvalStatus =
           "approved"
@@ -1163,246 +772,169 @@ router.patch(
           "payment_required"
 
         if (
-          body.adminNotes !==
-          undefined
+          body.adminNotes !== undefined
         ) {
           quote.adminNotes =
-            String(
-              body.adminNotes ||
-                ""
-            )
+            asString(body.adminNotes)
         }
 
-        quote.timeline.push({
-          status:
-            "approved",
+        addTimeline(
+          quote,
+          "approved",
+          "Quote approved"
+        )
 
-          note:
-            "Quote approved",
+        addTimeline(
+          quote,
+          "payment_required",
+          "Quote converted to order and payment is required"
+        )
 
-          date:
-            new Date()
-        })
+        /* ================= TOTALS ================= */
 
-        quote.timeline.push({
-          status:
-            "payment_required",
+        const subtotal = itemPrice
 
-          note:
-            "Quote converted to order and payment is required",
-
-          date:
-            new Date()
-        })
-
-        /* ================= ORDER TOTALS ================= */
-
-        const subtotal =
-          itemPrice
-
-        const tax =
-          Number(
-            (
-              subtotal *
-              TAX_RATE
-            ).toFixed(2)
-          )
+        const tax = Number(
+          (
+            subtotal *
+            TAX_RATE
+          ).toFixed(2)
+        )
 
         const shippingCost =
-          safePositiveNumber(
-            quote.shippingCost,
-            0
+          safePositive(
+            quote.shippingCost
           )
 
-        const orderFinalPrice =
-          Number(
-            (
-              subtotal +
-              tax +
-              shippingCost
-            ).toFixed(2)
-          )
+        const finalPrice = Number(
+          (
+            subtotal +
+            tax +
+            shippingCost
+          ).toFixed(2)
+        )
 
         /* ================= ORDER ITEMS ================= */
 
-        let orderItems = []
+        const orderItems =
+          Array.isArray(quote.items) &&
+          quote.items.length
 
-        if (
-          Array.isArray(
-            quote.items
-          ) &&
-          quote.items.length >
-            0
-        ) {
-          orderItems =
-            quote.items.map(
-              (item) => ({
-                name:
-                  item.name ||
-                  quote
-                    .projectType ||
-                  quote
-                    .serviceType ||
-                  "Custom Quote Order",
+            ? quote.items.map(
+                (item) => ({
+                  name:
+                    item.name ||
+                    quote.projectType ||
+                    quote.serviceType ||
+                    "Custom Quote Order",
 
-                quantity:
-                  safeQuantity(
-                    item.quantity,
-                    1
-                  ),
+                  quantity:
+                    safeQuantity(
+                      item.quantity
+                    ),
 
-                price:
-                  safePositiveNumber(
-                    item.price,
-                    0
-                  ),
+                  price:
+                    safePositive(
+                      item.price
+                    ),
 
-                serviceType:
-                  item.serviceType ||
-                  quote
-                    .serviceType ||
-                  "",
+                  serviceType:
+                    item.serviceType ||
+                    quote.serviceType ||
+                    "",
 
-                source:
-                  "quote"
-              })
-            )
-        } else {
-          orderItems = [
-            {
-              name:
-                quote
-                  .projectType ||
-                quote
-                  .serviceLabel ||
-                quote
-                  .serviceType ||
-                "Custom Quote Order",
+                  source: "quote"
+                })
+              )
 
-              quantity,
+            : [
+                {
+                  name:
+                    quote.projectType ||
+                    quote.serviceLabel ||
+                    quote.serviceType ||
+                    "Custom Quote Order",
 
-              price:
-                itemPrice,
+                  quantity,
 
-              serviceType:
-                quote
-                  .serviceType ||
-                "",
+                  price: itemPrice,
 
-              source:
-                "quote"
-            }
-          ]
-        }
+                  serviceType:
+                    quote.serviceType || "",
+
+                  source: "quote"
+                }
+              ]
 
         /* ================= CREATE ORDER ================= */
 
-        createdOrder =
-          await Order.create({
-            customerName:
-              quote.customerName ||
-              "Customer",
+        const order = await Order.create({
+          customerName:
+            quote.customerName ||
+            "Customer",
 
-            email:
-              normalizeEmail(
-                quote.email
-              ),
+          email:
+            normalizeEmail(
+              quote.email
+            ),
 
-            phone:
-              quote.phone ||
-              "",
+          phone:
+            quote.phone || "",
 
-            items:
-              orderItems,
+          items: orderItems,
 
-            subtotal,
+          subtotal,
 
-            tax,
+          tax,
 
-            shippingCost,
+          shippingCost,
 
-            finalPrice:
-              orderFinalPrice,
+          finalPrice,
 
-            status:
-              "payment_required",
+          status:
+            "payment_required",
 
-            source:
-              "quote",
+          source: "quote",
 
-            quoteId:
-              quote._id,
+          quoteId:
+            quote._id,
 
-            timeline: [
-              {
-                status:
-                  "payment_required",
+          timeline: [
+            {
+              status:
+                "payment_required",
 
-                note:
-                  "Order created from approved quote",
+              note:
+                "Order created from approved quote",
 
-                date:
-                  new Date()
-              }
-            ]
-          })
-
-        console.log(
-          "🔥 ORDER CREATED FROM QUOTE:",
-          createdOrder._id
-        )
-
-        /* ================= CONNECT ORDER ================= */
+              date:
+                new Date()
+            }
+          ]
+        })
 
         quote.orderId =
-          createdOrder._id
+          order._id
 
         await quote.save()
 
-        /* ================= EMAIL ================= */
-
-        if (createdOrder.email) {
-          try {
-            await sendOrderStatusEmail(
-              createdOrder.email,
-
-              "payment_required",
-
-              createdOrder
-            )
-
-            console.log(
-              "📧 PAYMENT EMAIL SENT FOR ORDER:",
-              createdOrder._id
-            )
-          } catch (
-            emailError
-          ) {
-            console.error(
-              "❌ PAYMENT EMAIL ERROR:",
-              emailError
-            )
-          }
-        } else {
-          console.warn(
-            "⚠️ PAYMENT EMAIL NOT SENT: Quote has no email"
-          )
-        }
+        await sendStatusEmail(
+          order.email,
+          "payment_required",
+          order
+        )
 
         return res.json({
           success: true,
           data: quote,
-          order: createdOrder
+          order
         })
       }
 
-      /* =====================================================
-         DENY QUOTE
-      ===================================================== */
+      /* ================= DENY QUOTE ================= */
 
       if (
-        approvalStatus ===
-        "denied"
+        approvalStatus === "denied"
       ) {
         quote.approvalStatus =
           "denied"
@@ -1411,62 +943,34 @@ router.patch(
           "denied"
 
         quote.denialReason =
-          String(
+          asString(
             body.denialReason ||
-              quote.denialReason ||
-              ""
+            quote.denialReason
           )
 
         if (
-          body.adminNotes !==
-          undefined
+          body.adminNotes !== undefined
         ) {
           quote.adminNotes =
-            String(
-              body.adminNotes ||
-                ""
-            )
+            asString(body.adminNotes)
         }
 
-        quote.timeline.push({
-          status:
-            "denied",
+        addTimeline(
+          quote,
+          "denied",
 
-          note:
-            quote.denialReason
-              ? `Quote denied: ${quote.denialReason}`
-              : "Quote denied",
-
-          date:
-            new Date()
-        })
+          quote.denialReason
+            ? `Quote denied: ${quote.denialReason}`
+            : "Quote denied"
+        )
 
         await quote.save()
 
-        if (quote.email) {
-          try {
-            await sendOrderStatusEmail(
-              quote.email,
-              "denied",
-              quote
-            )
-
-            console.log(
-              "📧 DENIAL EMAIL TRIGGERED"
-            )
-          } catch (
-            emailError
-          ) {
-            console.error(
-              "❌ DENIAL EMAIL ERROR:",
-              emailError
-            )
-          }
-        } else {
-          console.warn(
-            "⚠️ DENIAL EMAIL NOT SENT: Quote has no email"
-          )
-        }
+        await sendStatusEmail(
+          quote.email,
+          "denied",
+          quote
+        )
 
         return res.json({
           success: true,
@@ -1475,11 +979,9 @@ router.patch(
         })
       }
 
-      /* =====================================================
-         GENERAL PATCH FIELDS
-      ===================================================== */
+      /* ================= GENERAL PATCH ================= */
 
-      const protectedFields = [
+      const protectedFields = new Set([
         "_id",
         "orderId",
         "approvalStatus",
@@ -1488,210 +990,121 @@ router.patch(
         "createdAt",
         "updatedAt",
         "__v"
-      ]
+      ])
 
-      Object.keys(body).forEach(
-        (key) => {
-          if (
-            protectedFields.includes(
-              key
-            )
-          ) {
-            return
-          }
-
-          switch (key) {
-            case "quantity":
-              quote.quantity =
-                safeQuantity(
-                  body.quantity,
-                  quote.quantity ||
-                    1
-                )
-              break
-
-            case "price":
-              quote.price =
-                safePositiveNumber(
-                  body.price,
-                  quote.price ||
-                    0
-                )
-              break
-
-            case "finalPrice":
-              quote.finalPrice =
-                safePositiveNumber(
-                  body.finalPrice,
-                  quote.finalPrice ||
-                    0
-                )
-              break
-
-            case "shippingCost":
-              quote.shippingCost =
-                safePositiveNumber(
-                  body.shippingCost,
-                  quote.shippingCost ||
-                    0
-                )
-              break
-
-            case "email":
-              quote.email =
-                normalizeEmail(
-                  body.email
-                )
-              break
-
-            case "items":
-              if (
-                Array.isArray(
-                  body.items
-                )
-              ) {
-                quote.items =
-                  body.items
-              }
-              break
-
-            default:
-              quote[key] =
-                body[key]
-              break
-          }
+      for (
+        const [key, value]
+        of Object.entries(body)
+      ) {
+        if (
+          protectedFields.has(key)
+        ) {
+          continue
         }
-      )
+
+        switch (key) {
+          case "quantity":
+            quote.quantity =
+              safeQuantity(
+                value,
+                quote.quantity || 1
+              )
+            break
+
+          case "price":
+          case "finalPrice":
+          case "shippingCost":
+            quote[key] =
+              safePositive(
+                value,
+                quote[key] || 0
+              )
+            break
+
+          case "email":
+            quote.email =
+              normalizeEmail(value)
+            break
+
+          case "items":
+            if (Array.isArray(value)) {
+              quote.items = value
+            }
+            break
+
+          default:
+            quote[key] = value
+        }
+      }
 
       await quote.save()
-
-      console.log(
-        "✅ QUOTE UPDATED:",
-        quote._id
-      )
 
       return res.json({
         success: true,
         data: quote,
         order: null
       })
-    } catch (err) {
+    } catch (error) {
       console.error(
-        "❌ PATCH QUOTE ERROR:",
-        err
+        "Patch quote failed:",
+        error
       )
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            err.message ||
-            "Failed to update quote"
-        })
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update quote"
+      })
     }
   }
 )
 
-/* =========================================================
-   DELETE / ARCHIVE QUOTE
-========================================================= */
+/* ==============================================
+   DELETE / ARCHIVE — ADMIN ONLY
+============================================== */
 
 router.delete(
   "/:id",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(
-            req.params.id
-          )
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid quote ID"
-          })
-      }
+      const quote = await findQuote(
+        req,
+        res
+      )
 
-      const quote =
-        await Quote.findById(
-          req.params.id
-        )
+      if (!quote) return
 
-      if (!quote) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Quote not found"
-          })
-      }
-
-      /*
-       * We archive instead of permanently
-       * deleting so order history remains intact.
-       */
-
-      const previousStatus =
+      const oldStatus =
         quote.status
 
       quote.status =
         "archive"
 
-      if (
-        !Array.isArray(
-          quote.timeline
-        )
-      ) {
-        quote.timeline = []
-      }
-
-      quote.timeline.push({
-        status:
-          "archive",
-
-        note:
-          `Quote archived from ${previousStatus}`,
-
-        date:
-          new Date()
-      })
+      addTimeline(
+        quote,
+        "archive",
+        `Quote archived from ${oldStatus}`
+      )
 
       await quote.save()
 
-      console.log(
-        "🗄️ QUOTE ARCHIVED:",
-        quote._id
-      )
-
       return res.json({
         success: true,
-
         message:
           "Quote archived successfully",
-
         data: quote
       })
-    } catch (err) {
+    } catch (error) {
       console.error(
-        "❌ ARCHIVE QUOTE ERROR:",
-        err
+        "Archive quote failed:",
+        error
       )
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-
-          message:
-            err.message ||
-            "Failed to archive quote"
-        })
+      return res.status(500).json({
+        success: false,
+        message: "Failed to archive quote"
+      })
     }
   }
 )

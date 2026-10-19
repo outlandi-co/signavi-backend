@@ -2,6 +2,7 @@ import express from "express"
 import { SquareClient, SquareEnvironment } from "square"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
+import { verifySquareAuthorization } from "../utils/squarePaymentAuth.js"
 
 const router = express.Router()
 
@@ -99,6 +100,41 @@ router.post("/create-payment/:id", async (req, res) => {
       })
     }
 
+    // Storefront orders must be authorized by backend checkout.
+    // Preserve the separate custom quote payment workflow.
+    const isStorefrontOrder =
+      type === "order" &&
+      (
+        ["store", "cart_drawer"].includes(
+          String(record.source || "").toLowerCase()
+        ) ||
+        (
+          Array.isArray(record.items) &&
+          record.items.some((item) =>
+            Boolean(item.productId)
+          )
+        )
+      )
+
+    if (isStorefrontOrder) {
+      const authorization = req.get(
+        "x-signavi-payment-authorization"
+      )
+
+      if (
+        !verifySquareAuthorization(
+          record,
+          authorization
+        )
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Complete secure checkout before creating a payment."
+        })
+      }
+    }
+
     const subtotal = getSubtotal(record)
 
     const shipping = getShipping(record)
@@ -107,10 +143,17 @@ router.post("/create-payment/:id", async (req, res) => {
       toNumber(record.tax) ||
       subtotal * TAX_RATE
 
-    const total =
-      toNumber(record.finalPrice) && shipping
-        ? toNumber(record.finalPrice)
-        : subtotal + shipping + tax
+    // Storefront orders must charge the exact total
+    // calculated and saved by the backend checkout.
+    // Preserve existing custom quote calculations.
+    const total = isStorefrontOrder
+      ? toNumber(record.finalPrice)
+      : (
+          toNumber(record.finalPrice) && shipping
+            ? toNumber(record.finalPrice)
+            : subtotal + shipping + tax
+        )
+
 
     console.log("💰 FINAL SQUARE CALC:", {
       type,

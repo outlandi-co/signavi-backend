@@ -1,4 +1,6 @@
-// 🔥 LOAD ENV FIRST
+
+/* ================= LOAD ENV FIRST ================= */
+
 import "dotenv/config"
 
 import express from "express"
@@ -52,7 +54,6 @@ import notificationRoutes from "./routes/notifications.js"
 import instagramRoutes from "./routes/instagramRoutes.js"
 import socialRoutes from "./routes/socialRoutes.js"
 import tiktokRoutes from "./routes/tiktokRoutes.js"
-
 
 /* ================= PATH SETUP ================= */
 
@@ -215,8 +216,7 @@ app.use(
 app.get("/api/ping", (req, res) => {
   res.json({
     success: true,
-    message:
-      "SignaVi backend is running"
+    message: "SignaVi backend is running"
   })
 })
 
@@ -408,10 +408,8 @@ app.get(
 
       res.status(500).json({
         success: false,
-        message:
-          "Failed to export orders CSV",
-        error:
-          err.message
+        message: "Failed to export orders CSV",
+        error: err.message
       })
     }
   }
@@ -539,18 +537,14 @@ app.get(
 
       res.status(500).json({
         success: false,
-        message:
-          "Failed to export tax CSV",
-        error:
-          err.message
+        message: "Failed to export tax CSV",
+        error: err.message
       })
     }
   }
 )
 
 /* ================= ROUTES ================= */
-
-
 
 /* ================= MATERIAL CATALOG ================= */
 
@@ -622,6 +616,7 @@ app.use(
 
 /* ================= ORDERS ================= */
 
+// Corrected: removed an accidental PowerShell command.
 app.use(
   "/api/orders",
   orderRoutes
@@ -796,11 +791,11 @@ console.log(
 app.use(
   "/api/instagram",
   instagramRoutes
-);
+)
 
 console.log(
   "📸 INSTAGRAM ROUTE MOUNTED"
-);
+)
 
 /* ================= SOCIAL PUBLISHER ================= */
 
@@ -830,8 +825,7 @@ const io = new Server(
   server,
   {
     cors: {
-      origin:
-        allowedOrigins,
+      origin: allowedOrigins,
 
       methods: [
         "GET",
@@ -889,7 +883,6 @@ app.use(
       .status(404)
       .json({
         success: false,
-
         message:
           `Route not found: ${req.method} ${req.originalUrl}`
       })
@@ -909,8 +902,7 @@ app.use(
       .status(500)
       .json({
         success: false,
-        message:
-          "Server error"
+        message: "Server error"
       })
   }
 )

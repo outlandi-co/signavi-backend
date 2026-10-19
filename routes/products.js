@@ -1,10 +1,23 @@
+
 import express from "express"
 import multer from "multer"
 import path from "path"
 import fs from "fs"
 import Product from "../models/Product.js"
+import { requireAuth } from "../middleware/auth.js"
 
 const router = express.Router()
+
+const requireAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required"
+    })
+  }
+
+  next()
+}
 
 /* ================= ENSURE UPLOADS DIR ================= */
 
@@ -471,9 +484,89 @@ const getDiscountUpdates = (body = {}) => {
   return updates
 }
 
+/* ================= PRODUCT SHIPPING HELPERS ================= */
+
+const parseProductShipping = (raw) => {
+  if (raw === undefined) {
+    return { provided: false }
+  }
+
+  let data
+
+  try {
+    data = typeof raw === "string"
+      ? JSON.parse(raw)
+      : raw
+  } catch {
+    return { error: "Invalid shipping JSON." }
+  }
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return { error: "Shipping must be an object." }
+  }
+
+  const shipping = {}
+
+  for (const field of [
+    "weightOz",
+    "lengthIn",
+    "widthIn",
+    "heightIn"
+  ]) {
+    const value = data[field]
+
+    if (
+      value === undefined ||
+      value === null ||
+      typeof value === "boolean" ||
+      typeof value === "object" ||
+      String(value).trim() === ""
+    ) {
+      return { error: `${field} must be a positive number.` }
+    }
+
+    const number = Number(value)
+
+    if (!Number.isFinite(number) || number <= 0) {
+      return { error: `${field} must be a positive number.` }
+    }
+
+    shipping[field] = number
+  }
+
+  const allowedPackaging = [
+    "mailer",
+    "box",
+    "fragile",
+    "oversized",
+    "custom"
+  ]
+
+  if (!allowedPackaging.includes(data.packagingType)) {
+    return { error: "Invalid shipping packaging type." }
+  }
+
+  if (
+    data.shipSeparately !== undefined &&
+    ![true, false, "true", "false"].includes(data.shipSeparately)
+  ) {
+    return { error: "Invalid separate-shipping setting." }
+  }
+
+  shipping.packagingType = data.packagingType
+  shipping.shipSeparately =
+    data.shipSeparately === true ||
+    data.shipSeparately === "true"
+
+  return {
+    provided: true,
+    value: shipping
+  }
+}
+
 /* ================= DEBUG ROUTES ================= */
 
-router.get("/debug/counts", async (req, res) => {
+router.get("/debug/counts", requireAuth, requireAdmin, async (req, res) => {
   try {
     const all = await Product.countDocuments()
 
@@ -506,7 +599,7 @@ router.get("/debug/counts", async (req, res) => {
   }
 })
 
-router.get("/debug/all", async (req, res) => {
+router.get("/debug/all", requireAuth, requireAdmin, async (req, res) => {
   try {
     const products = await Product.find({})
       .select("name storefront salesChannel storefrontVisible active createdAt")
@@ -528,7 +621,7 @@ router.get("/debug/all", async (req, res) => {
 
 /* ================= CREATE PRODUCT ================= */
 
-router.post("/", productUpload, async (req, res) => {
+router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
   try {
     const { name, description, category } = req.body
 
@@ -550,6 +643,22 @@ router.post("/", productUpload, async (req, res) => {
     const salesChannel = getSalesChannelFromStorefront(storefront)
 
     const productType = normalizeProductType(req.body.productType)
+
+    const shippingResult = parseProductShipping(req.body.shipping)
+
+    if (shippingResult.error) {
+      return res.status(400).json({
+        success: false,
+        message: shippingResult.error
+      })
+    }
+
+    if (shippingResult.provided && productType !== "physical") {
+      return res.status(400).json({
+        success: false,
+        message: "Shipping measurements are only for physical products."
+      })
+    }
 
     const digitalProduct = normalizeDigitalProduct(
       safeParse(req.body.digitalProduct, {})
@@ -688,6 +797,7 @@ router.post("/", productUpload, async (req, res) => {
 
       productType,
       digitalProduct: finalDigitalProduct,
+      ...(shippingResult.provided ? { shipping: shippingResult.value } : {}),
 
       price,
       basePrice,
@@ -852,7 +962,7 @@ router.get("/:id", async (req, res) => {
 
 /* ================= UPDATE PRODUCT ================= */
 
-router.patch("/:id", productUpload, async (req, res) => {
+router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
 
@@ -926,6 +1036,28 @@ router.patch("/:id", productUpload, async (req, res) => {
 
     if (req.body.productType !== undefined) {
       updates.productType = normalizeProductType(req.body.productType)
+    }
+
+    if (req.body.shipping !== undefined) {
+      const shippingResult = parseProductShipping(req.body.shipping)
+
+      if (shippingResult.error) {
+        return res.status(400).json({
+          success: false,
+          message: shippingResult.error
+        })
+      }
+
+      const resultingType = updates.productType || product.productType || "physical"
+
+      if (resultingType !== "physical") {
+        return res.status(400).json({
+          success: false,
+          message: "Shipping measurements are only for physical products."
+        })
+      }
+
+      updates.shipping = shippingResult.value
     }
 
     if (
@@ -1100,7 +1232,7 @@ router.patch("/:id", productUpload, async (req, res) => {
 
 /* ================= DELETE PRODUCT ================= */
 
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const deleted = await Product.findByIdAndDelete(req.params.id)
 

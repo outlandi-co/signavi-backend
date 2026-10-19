@@ -448,6 +448,26 @@ const orderSchema = new mongoose.Schema(
       default: "",
       trim: true
     },
+    /* ================= SQUARE ORDER TRACKING ================= */
+
+squareOrderId: {
+  type: String,
+  default: "",
+  trim: true,
+  index: true
+},
+
+squarePaymentLinkId: {
+  type: String,
+  default: "",
+  trim: true
+},
+
+squareExpectedAmountCents: {
+  type: Number,
+  default: null,
+  min: 0
+},
 
     currency: {
       type: String,

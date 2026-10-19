@@ -1,30 +1,28 @@
+
 import express from "express"
 import mongoose from "mongoose"
-import Order from "../models/Order.js"
 import fetch from "node-fetch"
-
+import Order from "../models/Order.js"
+import { applyCheckoutShipping } from "../utils/applyCheckoutShipping.js"
+import { createSquareAuthorization } from "../utils/squarePaymentAuth.js"
 import {
-  sendOrderStatusEmail
-} from "../utils/sendEmail.js"
+  createGuestCheckoutToken,
+  verifyGuestCheckoutToken
+} from "../utils/guestCheckoutToken.js"
 
-import {
-  generateInvoice
-} from "../utils/generateInvoice.js"
-
+import Product from "../models/Product.js"
+import { calculateCatalogCart } from "../utils/catalogPricing.js"
+import { requireAuth } from "../middleware/auth.js"
+import { sendOrderStatusEmail } from "../utils/sendEmail.js"
+import { generateInvoice } from "../utils/generateInvoice.js"
 const router = express.Router()
-
-console.log("🔥 ORDERS ROUTES ACTIVE")
-
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
 const TAX_RATE = 0.0825
 
-const VALID_ORDER_STATUSES = [
+const VALID_STATUSES = new Set([
   "pending",
   "payment_required",
   "paid",
+  "ready_for_production",
   "production",
   "pickup_shipping",
   "shipping",
@@ -33,2284 +31,1186 @@ const VALID_ORDER_STATUSES = [
   "completed",
   "denied",
   "archive"
-]
+])
 
-/* =========================================================
-   HELPERS
-========================================================= */
+const requireAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required"
+    })
+  }
+  next()
+}
 
-const safeNumber = (
-  value,
-  fallback = 0
-) => {
-  const number = Number(value)
+/* ================= HELPERS ================= */
 
-  if (!Number.isFinite(number)) {
-    return fallback
+const num = (value, fallback = 0) => {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+const positive = (value, fallback = 0) => {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? n : fallback
+}
+
+const quantity = (value, fallback = 1) => {
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 1
+    ? Math.floor(n)
+    : fallback
+}
+
+const money = value =>
+  Math.round((num(value) + Number.EPSILON) * 100) / 100
+
+const emailOf = value =>
+  String(value || "").trim().toLowerCase()
+
+const escapeRegExp = value =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const escapeHtml = value =>
+  String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[ch]))
+
+const validId = id =>
+  mongoose.Types.ObjectId.isValid(id)
+
+const shippingServiceOf = (rate, fallback = "") =>
+  typeof rate?.servicelevel === "string"
+    ? rate.servicelevel
+    : rate?.servicelevel?.name ||
+      rate?.servicelevel?.token ||
+      fallback
+
+const emit = (req, name, order) => {
+  req.app.get("io")?.emit(name, order)
+}
+
+const fail = (res, err, fallback) => {
+  console.error(fallback, err)
+  return res.status(500).json({
+    success: false,
+    message: fallback
+  })
+}
+const getOrder = async (req, res) => {
+  if (!validId(req.params.id)) {
+    res.status(400).json({
+      success: false,
+      message: "Invalid order ID"
+    })
+    return null
   }
 
-  return number
-}
+  const order = await Order.findById(req.params.id)
 
-const safePositiveNumber = (
-  value,
-  fallback = 0
-) => {
-  const number = Number(value)
-
-  if (
-    !Number.isFinite(number) ||
-    number < 0
-  ) {
-    return fallback
+  if (!order) {
+    res.status(404).json({
+      success: false,
+      message: "Order not found"
+    })
+    return null
   }
 
-  return number
+  return order
 }
 
-const safeQuantity = (
-  value,
-  fallback = 1
-) => {
-  const number = Number(value)
+const addr = address => ({
+  street: String(address?.street || ""),
+  city: String(address?.city || ""),
+  state: String(address?.state || ""),
+  zip: String(address?.zip || ""),
+  country: String(address?.country || "US")
+})
 
-  if (
-    !Number.isFinite(number) ||
-    number < 1
-  ) {
-    return fallback
-  }
-
-  return Math.floor(number)
+const setShipping = (order, amount) => {
+  order.shipping = amount
+  order.shippingCost = amount
+  order.shippingTotal = amount
+  order.deliveryFee = amount
 }
-
-const normalizeEmail = (
-  email = ""
-) => {
-  return String(email)
-    .trim()
-    .toLowerCase()
-}
-
-const roundMoney = (
-  value
-) => {
-  return Number(
-    safeNumber(
-      value,
-      0
-    ).toFixed(2)
+const getShippingAmount = body =>
+  positive(
+    body?.shippingCost ??
+    body?.shipping ??
+    body?.shippingTotal ??
+    body?.deliveryFee ??
+    body?.shippingRate?.amount,
+    0
   )
-}
+const getRateId = rate =>
+  rate?.id ||
+  rate?.object_id ||
+  rate?.raw?.object_id ||
+  ""
 
-const getShippingService = (
-  shippingRate,
-  fallback = ""
-) => {
-  if (
-    typeof shippingRate?.servicelevel ===
-    "string"
-  ) {
-    return shippingRate.servicelevel
+const addTimeline = (order, status, note) => {
+  if (!Array.isArray(order.timeline)) {
+    order.timeline = []
   }
 
-  return (
-    shippingRate?.servicelevel?.name ||
-    shippingRate?.servicelevel?.token ||
-    fallback ||
-    ""
-  )
+  order.timeline.push({
+    status,
+    note,
+    date: new Date()
+  })
 }
 
-/* =========================================================
-   SOCKET
-========================================================= */
-
-const emitOrderUpdate = (
-  req,
-  order
+const sendStatus = async (
+  order,
+  status,
+  invoicePath
 ) => {
-  const io =
-    req.app.get("io")
+  if (!order.email) return
 
-  if (io) {
-    io.emit(
-      "jobUpdated",
-      order
+  try {
+    await sendOrderStatusEmail(
+      order.email,
+      status,
+      order,
+      invoicePath
+    )
+  } catch (err) {
+    console.warn(
+      "Order email failed:",
+      err.message
     )
   }
 }
 
-const emitOrderCreated = (
-  req,
-  order
-) => {
-  const io =
-    req.app.get("io")
-
-  if (io) {
-    io.emit(
-      "jobCreated",
-      order
-    )
-  }
-}
-
-/* =========================================================
-   GET ALL ORDERS
-========================================================= */
+/* ================= GET ALL ORDERS ================= */
 
 router.get(
   "/",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const orders =
-        await Order.find()
-          .sort({
-            createdAt: -1
-          })
+      const orders = await Order.find().sort({
+        createdAt: -1
+      })
 
-      return res.json({
+      res.json({
         success: true,
         count: orders.length,
         data: orders
       })
     } catch (err) {
-      console.error(
-        "❌ GET ORDERS ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            err.message ||
-            "Failed to load orders"
-        })
+      fail(res, err, "Failed to load orders")
     }
   }
 )
 
-/* =========================================================
-   GET CUSTOMER ORDERS
-========================================================= */
+
+/* ================= GET CUSTOMER ORDERS ================= */
 
 router.get(
   "/my-orders",
+  requireAuth,
   async (req, res) => {
     try {
-      const email =
-        normalizeEmail(
-          req.query.email
-        )
+      const ownEmail = emailOf(req.user?.email)
+      const requestedEmail = emailOf(req.query.email)
+      const isAdmin = req.user?.role === "admin"
 
-      if (!email) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Email is required"
-          })
+      // Customers must have an authenticated email.
+      if (!isAdmin && !ownEmail) {
+        return res.status(403).json({
+          success: false,
+          message: "Authenticated customer email is required"
+        })
       }
 
-      const orders =
-        await Order.find({
-          email: {
-            $regex:
-              `^${email}$`,
-            $options: "i"
-          }
-        }).sort({
-          createdAt: -1
+      // Customers cannot request another customer's orders.
+      if (
+        !isAdmin &&
+        requestedEmail &&
+        requestedEmail !== ownEmail
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You may only view your own orders."
         })
+      }
 
-      console.log(
-        "📧 MY ORDERS EMAIL:",
-        email
-      )
+      // Administrators may search by email.
+      // Customers always use their authenticated email.
+      const email = isAdmin
+        ? requestedEmail
+        : ownEmail
 
-      console.log(
-        "📦 MY ORDERS FOUND:",
-        orders.length
-      )
+      if (!email) {
+        return res.status(400).json({
+          success: false,
+          message: "Email is required"
+        })
+      }
+
+      const orders = await Order.find({
+        email: {
+          $regex: `^${escapeRegExp(email)}$`,
+          $options: "i"
+        }
+      }).sort({
+        createdAt: -1
+      })
 
       return res.json({
         success: true,
         count: orders.length,
         data: orders
       })
-    } catch (err) {
-      console.error(
-        "❌ MY ORDERS ERROR:",
-        err
-      )
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            err.message ||
-            "Failed to load customer orders"
-        })
+    } catch (err) {
+      return fail(
+        res,
+        err,
+        "Failed to load customer orders"
+      )
     }
   }
 )
 
-/* =========================================================
-   PACKING SLIP
-========================================================= */
+
+/* ================= PACKING SLIP ================= */
 
 router.get(
   "/:id/packing-slip",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const { id } =
-        req.params
+      const order = await getOrder(req, res)
+      if (!order) return
 
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .send(
-            "Invalid order ID"
-          )
-      }
+      const a = order.address || {}
 
-      const order =
-        await Order.findById(
-          id
-        )
+      const lines = (order.items || [])
+        .map(item => `
+          <tr>
+            <td>${escapeHtml(item.name || "Item")}</td>
+            <td>
+              ${escapeHtml(
+                item.variant?.color ||
+                item.selectedVariant?.color ||
+                "-"
+              )}
+              /
+              ${escapeHtml(
+                item.variant?.size ||
+                item.selectedVariant?.size ||
+                "-"
+              )}
+            </td>
+            <td>${quantity(item.quantity)}</td>
+          </tr>
+        `)
+        .join("")
 
-      if (!order) {
-        return res
-          .status(404)
-          .send(
-            "Order not found"
-          )
-      }
-
-      const address =
-        order.address || {}
-
-      const html = `
-        <!DOCTYPE html>
-
+      res.type("html").send(`
+        <!doctype html>
         <html>
           <head>
-            <title>
-              Packing Slip
-            </title>
-
+            <meta charset="utf-8">
+            <title>Packing Slip</title>
             <style>
               body {
-                font-family: Arial, sans-serif;
-                padding: 40px;
+                font: 16px Arial, sans-serif;
                 color: #111;
+                padding: 40px;
               }
-
-              h1 {
-                margin-bottom: 5px;
-              }
-
-              .section {
-                margin-top: 25px;
-              }
-
               table {
                 width: 100%;
                 border-collapse: collapse;
-                margin-top: 15px;
               }
-
-              th,
-              td {
+              td, th {
                 border: 1px solid #ccc;
                 padding: 10px;
                 text-align: left;
               }
-
               th {
                 background: #f2f2f2;
               }
-
-              .print-btn {
-                margin-bottom: 20px;
-                padding: 10px 14px;
-                cursor: pointer;
-              }
-
               @media print {
-                .print-btn {
-                  display: none;
-                }
+                button { display: none; }
               }
             </style>
           </head>
-
           <body>
-            <button
-              class="print-btn"
-              onclick="window.print()"
-            >
+            <button onclick="window.print()">
               Print Packing Slip
             </button>
 
-            <h1>
-              SignaVi Studio
-            </h1>
-
-            <p>
-              <strong>
-                Packing Slip
-              </strong>
-            </p>
+            <h1>SignaVi Studio</h1>
+            <h2>Packing Slip</h2>
 
             <p>
               Order #
-              ${order._id
-                .toString()
-                .slice(-6)}
+              ${escapeHtml(String(order._id).slice(-6))}
             </p>
 
-            <div class="section">
-              <h2>
-                Customer
-              </h2>
+            <h3>Customer</h3>
+            <p>${escapeHtml(order.customerName || "Customer")}</p>
+            <p>${escapeHtml(order.email)}</p>
+            <p>${escapeHtml(order.phone)}</p>
 
-              <p>
-                ${
-                  order.customerName ||
-                  "Customer"
-                }
-              </p>
+            <h3>Ship To</h3>
+            <p>
+              ${escapeHtml(a.street)}<br>
+              ${escapeHtml(a.city)},
+              ${escapeHtml(a.state)}
+              ${escapeHtml(a.zip)}<br>
+              ${escapeHtml(a.country || "US")}
+            </p>
 
-              <p>
-                ${
-                  order.email ||
-                  ""
-                }
-              </p>
-
-              <p>
-                ${
-                  order.phone ||
-                  ""
-                }
-              </p>
-            </div>
-
-            <div class="section">
-              <h2>
-                Ship To
-              </h2>
-
-              <p>
-                ${
-                  address.street ||
-                  ""
-                }
-              </p>
-
-              <p>
-                ${
-                  address.city ||
-                  ""
-                },
-                ${
-                  address.state ||
-                  ""
-                }
-                ${
-                  address.zip ||
-                  ""
-                }
-              </p>
-
-              <p>
-                ${
-                  address.country ||
-                  "US"
-                }
-              </p>
-            </div>
-
-            <div class="section">
-              <h2>
-                Items
-              </h2>
-
-              <table>
-                <thead>
-                  <tr>
-                    <th>
-                      Item
-                    </th>
-
-                    <th>
-                      Variant
-                    </th>
-
-                    <th>
-                      Qty
-                    </th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  ${(order.items || [])
-                    .map(
-                      (item) => `
-                        <tr>
-                          <td>
-                            ${
-                              item.name ||
-                              "Item"
-                            }
-                          </td>
-
-                          <td>
-                            ${
-                              item.variant
-                                ?.color ||
-                              "-"
-                            }
-                            /
-                            ${
-                              item.variant
-                                ?.size ||
-                              "-"
-                            }
-                          </td>
-
-                          <td>
-                            ${
-                              item.quantity ||
-                              1
-                            }
-                          </td>
-                        </tr>
-                      `
-                    )
-                    .join("")}
-                </tbody>
-              </table>
-            </div>
+            <h3>Items</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Variant</th>
+                  <th>Qty</th>
+                </tr>
+              </thead>
+              <tbody>${lines}</tbody>
+            </table>
           </body>
         </html>
-      `
-
-      res.setHeader(
-        "Content-Type",
-        "text/html"
-      )
-
-      return res.send(
-        html
-      )
+      `)
     } catch (err) {
-      console.error(
-        "❌ PACKING SLIP ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .send(
-          "Packing slip failed"
-        )
+      fail(res, err, "Packing slip failed")
     }
   }
 )
 
-/* =========================================================
-   PRINT ALL
-========================================================= */
+/* ================= PRINT ALL ================= */
 
 router.get(
   "/:id/print-all",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const { id } =
-        req.params
+      const order = await getOrder(req, res)
+      if (!order) return
 
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
-      }
-
-      const order =
-        await Order.findById(
-          id
-        )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
-      }
-
-      const baseUrl =
+      const base =
         process.env.SERVER_URL ||
         "https://signavi-backend.onrender.com"
 
-      return res.json({
+      res.json({
         success: true,
-
-        label:
-          order.trackingLabelUrl ||
-          "",
-
+        label: order.trackingLabelUrl || "",
         packingSlip:
-          `${baseUrl}/api/orders/${order._id}/packing-slip`,
-
+          `${base}/api/orders/${order._id}/packing-slip`,
         invoice:
-          `${baseUrl}/api/orders/${order._id}/invoice`
+          `${base}/api/orders/${order._id}/invoice`
       })
     } catch (err) {
-      console.error(
-        "❌ PRINT ALL ERROR:",
-        err
+      fail(
+        res,
+        err,
+        "Failed to load print documents"
       )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            err.message
-        })
     }
   }
 )
 
-/* =========================================================
-   DOWNLOAD INVOICE
-========================================================= */
+/* ================= DOWNLOAD INVOICE ================= */
 
 router.get(
   "/:id/invoice",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const { id } =
-        req.params
+      const order = await getOrder(req, res)
+      if (!order) return
 
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
-      }
+      const path = await generateInvoice(order)
 
-      const order =
-        await Order.findById(
-          id
-        )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
-      }
-
-      const invoicePath =
-        await generateInvoice(
-          order
-        )
-
-      const fileName =
-        `signavi-invoice-${order._id
-          .toString()
-          .slice(-6)}.pdf`
-
-      return res.download(
-        invoicePath,
-        fileName
+      res.download(
+        path,
+        `signavi-invoice-${String(order._id).slice(-6)}.pdf`
       )
     } catch (err) {
-      console.error(
-        "❌ INVOICE DOWNLOAD ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            "Failed to download invoice",
-          error:
-            err.message
-        })
+      fail(res, err, "Failed to download invoice")
     }
   }
 )
 
-/* =========================================================
-   EMAIL INVOICE
-========================================================= */
+/* ================= EMAIL INVOICE ================= */
 
 router.post(
   "/:id/send-invoice",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const { id } =
-        req.params
-
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
-      }
-
-      const order =
-        await Order.findById(
-          id
-        )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
-      }
+      const order = await getOrder(req, res)
+      if (!order) return
 
       if (!order.email) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Order does not have a customer email"
-          })
+        return res.status(400).json({
+          success: false,
+          message:
+            "Order does not have a customer email"
+        })
       }
 
-      const invoicePath =
-        await generateInvoice(
-          order
-        )
+      const path = await generateInvoice(order)
 
       await sendOrderStatusEmail(
         order.email,
         "invoice",
         order,
-        invoicePath
+        path
       )
 
-      return res.json({
+      res.json({
         success: true,
-        message:
-          "Invoice sent successfully"
+        message: "Invoice sent successfully"
       })
     } catch (err) {
-      console.error(
-        "❌ SEND INVOICE ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            "Failed to send invoice",
-          error:
-            err.message
-        })
+      fail(res, err, "Failed to send invoice")
     }
   }
 )
 
-/* =========================================================
-   CREATE CUSTOM ORDER
-========================================================= */
+/* ================= CREATE CUSTOM ORDER ================= */
 
 router.post(
   "/custom",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const {
-        customerName,
-        email,
-        phone,
-        address,
-        items,
-        shipping,
-        shippingCost,
-        paymentMethod,
-        notes,
-        status
-      } = req.body || {}
-
-      if (!customerName) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Customer name is required"
-          })
-      }
-
-      if (!email) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Customer email is required"
-          })
-      }
+      const b = req.body || {}
 
       if (
-        !Array.isArray(items) ||
-        !items.length
+        !b.customerName ||
+        !b.email ||
+        !Array.isArray(b.items) ||
+        !b.items.length
       ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "At least one item is required"
-          })
+        return res.status(400).json({
+          success: false,
+          message:
+            "Customer name, email, and at least one item are required"
+        })
       }
 
-      const requestedStatus =
-        status ||
-        "payment_required"
+      const status = b.status || "payment_required"
 
-      if (
-        !VALID_ORDER_STATUSES.includes(
-          requestedStatus
-        )
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              `Invalid order status: ${requestedStatus}`
-          })
+      if (!VALID_STATUSES.has(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order status"
+        })
       }
 
-      const safeItems =
-        items.map(
-          (item) => ({
-            name:
-              String(
-                item?.name ||
-                "Custom Service"
-              ).trim(),
+      const items = b.items.map(item => {
+        const price = positive(item?.price, 0)
 
-            quantity:
-              safeQuantity(
-                item?.quantity,
-                1
-              ),
+        return {
+          name:
+            String(item?.name || "Custom Service").trim(),
+          quantity: quantity(item?.quantity),
+          price,
+          unitPrice:
+            positive(item?.unitPrice, price),
+          finalPrice:
+            positive(item?.finalPrice, price),
+          cost:
+            positive(item?.cost),
+          serviceType:
+            String(item?.serviceType || ""),
+          source:
+            item?.source || "admin",
+          variant:
+            item?.variant || {}
+        }
+      })
 
-            price:
-              safePositiveNumber(
-                item?.price,
-                0
-              ),
-
-            unitPrice:
-              safePositiveNumber(
-                item?.unitPrice,
-                item?.price || 0
-              ),
-
-            finalPrice:
-              safePositiveNumber(
-                item?.finalPrice,
-                item?.price || 0
-              ),
-
-            cost:
-              safePositiveNumber(
-                item?.cost,
-                0
-              ),
-
-            serviceType:
-              String(
-                item?.serviceType ||
-                ""
-              ).trim(),
-
-            source:
-              item?.source ||
-              "admin",
-
-            variant:
-              item?.variant ||
-              {}
-          })
-        )
-
-      const subtotal =
-        roundMoney(
-          safeItems.reduce(
-            (
-              sum,
-              item
-            ) =>
-              sum +
-              item.price *
-              item.quantity,
-            0
-          )
-        )
-
-      const tax =
-        roundMoney(
-          subtotal *
-          TAX_RATE
-        )
-
-      const selectedShipping =
-        safePositiveNumber(
-          shippingCost ??
-          shipping,
+      const subtotal = money(
+        items.reduce(
+          (sum, item) =>
+            sum + item.price * item.quantity,
           0
         )
-
-      const finalPrice =
-        roundMoney(
-          subtotal +
-          tax +
-          selectedShipping
-        )
-
-      const order =
-        await Order.create({
-          customerName:
-            String(
-              customerName
-            ).trim(),
-
-          email:
-            normalizeEmail(
-              email
-            ),
-
-          phone:
-            String(
-              phone ||
-              ""
-            ).trim(),
-
-          address: {
-            street:
-              address?.street ||
-              "",
-
-            city:
-              address?.city ||
-              "",
-
-            state:
-              address?.state ||
-              "",
-
-            zip:
-              address?.zip ||
-              "",
-
-            country:
-              address?.country ||
-              "US"
-          },
-
-          items:
-            safeItems,
-
-          subtotal,
-          tax,
-
-          shipping:
-            selectedShipping,
-
-          shippingCost:
-            selectedShipping,
-
-          shippingTotal:
-            selectedShipping,
-
-          deliveryFee:
-            selectedShipping,
-
-          finalPrice,
-
-          paymentMethod:
-            paymentMethod ||
-            "",
-
-          notes:
-            notes ||
-            "",
-
-          orderType:
-            "custom",
-
-          source:
-            "admin",
-
-          status:
-            requestedStatus,
-
-          timeline: [
-            {
-              status:
-                requestedStatus,
-
-              note:
-                "Custom order created",
-
-              date:
-                new Date()
-            }
-          ]
-        })
-
-      emitOrderCreated(
-        req,
-        order
       )
 
-      console.log(
-        "✅ CUSTOM ORDER CREATED:",
-        order._id
-      )
+      const tax = money(subtotal * TAX_RATE)
+      const ship = getShippingAmount(b)
 
-      return res
-        .status(201)
-        .json({
-          success: true,
-          data: order
-        })
-    } catch (err) {
-      console.error(
-        "❌ CREATE CUSTOM ORDER ERROR:",
-        err
-      )
+      const order = await Order.create({
+        customerName:
+          String(b.customerName).trim(),
+        email:
+          emailOf(b.email),
+        phone:
+          String(b.phone || ""),
+        address:
+          addr(b.address),
+        items,
+        subtotal,
+        tax,
+        shipping: ship,
+        shippingCost: ship,
+        shippingTotal: ship,
+        deliveryFee: ship,
+        finalPrice:
+          money(subtotal + tax + ship),
+        paymentMethod:
+          b.paymentMethod || "",
+        notes:
+          b.notes || "",
+        orderType:
+          "custom",
+        source:
+          "admin",
+        status,
+        paymentStatus:
+          "unpaid",
+        timeline: [{
+          status,
+          note: "Custom order created",
+          date: new Date()
+        }]
+      })
 
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            err.message
-        })
-    }
-  }
-)
+      emit(req, "jobCreated", order)
 
-/* =========================================================
-   DOWNLOAD RECEIPT
-========================================================= */
-
-router.get(
-  "/:id/receipt",
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params
-
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
-      }
-
-      const order =
-        await Order.findById(
-          id
-        )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
-      }
-
-      order.receiptCreatedAt =
-        order.receiptCreatedAt ||
-        new Date()
-
-      await order.save()
-
-      const html = `
-        <!DOCTYPE html>
-
-        <html>
-          <head>
-            <title>
-              Receipt
-            </title>
-
-            <style>
-              body {
-                font-family: Arial, sans-serif;
-                padding: 40px;
-                color: #111;
-              }
-
-              h1 {
-                margin-bottom: 4px;
-              }
-
-              table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 20px;
-              }
-
-              th,
-              td {
-                border: 1px solid #ccc;
-                padding: 10px;
-                text-align: left;
-              }
-
-              th {
-                background: #f2f2f2;
-              }
-
-              .total {
-                margin-top: 20px;
-                font-size: 18px;
-                font-weight: bold;
-              }
-
-              .print-btn {
-                margin-bottom: 20px;
-                padding: 10px 14px;
-                cursor: pointer;
-              }
-
-              @media print {
-                .print-btn {
-                  display: none;
-                }
-              }
-            </style>
-          </head>
-
-          <body>
-            <button
-              class="print-btn"
-              onclick="window.print()"
-            >
-              Print / Save Receipt
-            </button>
-
-            <h1>
-              SignaVi Studio
-            </h1>
-
-            <p>
-              <strong>
-                Receipt
-              </strong>
-            </p>
-
-            <p>
-              Order #
-              ${order._id
-                .toString()
-                .slice(-6)}
-            </p>
-
-            <p>
-              Date Created:
-              ${
-                order.createdAt
-                  ? new Date(
-                      order.createdAt
-                    ).toLocaleString()
-                  : ""
-              }
-            </p>
-
-            <p>
-              Receipt Created:
-              ${
-                order.receiptCreatedAt
-                  ? new Date(
-                      order.receiptCreatedAt
-                    ).toLocaleString()
-                  : ""
-              }
-            </p>
-
-            <h2>
-              Customer
-            </h2>
-
-            <p>
-              ${
-                order.customerName ||
-                "Customer"
-              }
-            </p>
-
-            <p>
-              ${
-                order.email ||
-                ""
-              }
-            </p>
-
-            <p>
-              ${
-                order.phone ||
-                ""
-              }
-            </p>
-
-            <h2>
-              Items
-            </h2>
-
-            <table>
-              <thead>
-                <tr>
-                  <th>
-                    Item
-                  </th>
-
-                  <th>
-                    Qty
-                  </th>
-
-                  <th>
-                    Price
-                  </th>
-
-                  <th>
-                    Total
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                ${(order.items || [])
-                  .map(
-                    (item) => `
-                      <tr>
-                        <td>
-                          ${
-                            item.name ||
-                            "Item"
-                          }
-                        </td>
-
-                        <td>
-                          ${
-                            item.quantity ||
-                            1
-                          }
-                        </td>
-
-                        <td>
-                          $${Number(
-                            item.price ||
-                            0
-                          ).toFixed(2)}
-                        </td>
-
-                        <td>
-                          $${Number(
-                            (
-                              item.price ||
-                              0
-                            ) *
-                            (
-                              item.quantity ||
-                              1
-                            )
-                          ).toFixed(2)}
-                        </td>
-                      </tr>
-                    `
-                  )
-                  .join("")}
-              </tbody>
-            </table>
-
-            <p>
-              Subtotal:
-              $${Number(
-                order.subtotal ||
-                0
-              ).toFixed(2)}
-            </p>
-
-            <p>
-              Tax:
-              $${Number(
-                order.tax ||
-                0
-              ).toFixed(2)}
-            </p>
-
-            <p>
-              Shipping:
-              $${Number(
-                order.shippingCost ??
-                order.shipping ??
-                0
-              ).toFixed(2)}
-            </p>
-
-            <p class="total">
-              Total:
-              $${Number(
-                order.finalPrice ||
-                0
-              ).toFixed(2)}
-            </p>
-
-            <p>
-              Status:
-              ${
-                order.status ||
-                ""
-              }
-            </p>
-
-            <p>
-              Payment Method:
-              ${
-                order.paymentMethod ||
-                "Online"
-              }
-            </p>
-          </body>
-        </html>
-      `
-
-      res.setHeader(
-        "Content-Type",
-        "text/html"
-      )
-
-      return res.send(
-        html
-      )
-    } catch (err) {
-      console.error(
-        "❌ RECEIPT ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            "Failed to generate receipt",
-          error:
-            err.message
-        })
-    }
-  }
-)
-
-/* =========================================================
-   GET SINGLE ORDER
-========================================================= */
-
-router.get(
-  "/:id",
-  async (req, res) => {
-    try {
-      const { id } =
-        req.params
-
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
-      }
-
-      const order =
-        await Order.findById(
-          id
-        )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
-      }
-
-      return res.json({
+      res.status(201).json({
         success: true,
         data: order
       })
     } catch (err) {
-      console.error(
-        "❌ GET ORDER BY ID ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            "Failed to fetch order",
-          error:
-            err.message
-        })
+      fail(res, err, "Failed to create custom order")
     }
   }
 )
 
-/* =========================================================
-   CREATE STORE ORDER
-========================================================= */
+/* ================= RECEIPT ================= */
+
+router.get(
+  "/:id/receipt",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const order = await getOrder(req, res)
+      if (!order) return
+
+      if (!order.receiptCreatedAt) {
+        order.receiptCreatedAt = new Date()
+        await order.save()
+      }
+
+      const lines = (order.items || [])
+        .map(item => {
+          const p = positive(item.price)
+          const q = quantity(item.quantity)
+
+          return `
+            <tr>
+              <td>${escapeHtml(item.name || "Item")}</td>
+              <td>${q}</td>
+              <td>$${p.toFixed(2)}</td>
+              <td>$${money(p * q).toFixed(2)}</td>
+            </tr>
+          `
+        })
+        .join("")
+
+      res.type("html").send(`
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Receipt</title>
+            <style>
+              body {
+                font: 16px Arial, sans-serif;
+                color: #111;
+                padding: 40px;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+              }
+              td, th {
+                border: 1px solid #ccc;
+                padding: 10px;
+                text-align: left;
+              }
+              th {
+                background: #f2f2f2;
+              }
+              @media print {
+                button { display: none; }
+              }
+            </style>
+          </head>
+          <body>
+            <button onclick="window.print()">
+              Print / Save Receipt
+            </button>
+
+            <h1>SignaVi Studio</h1>
+            <h2>Receipt</h2>
+
+            <p>
+              Order #
+              ${escapeHtml(String(order._id).slice(-6))}
+            </p>
+
+            <p>
+              Date Created:
+              ${escapeHtml(
+                order.createdAt
+                  ? new Date(order.createdAt).toLocaleString()
+                  : ""
+              )}
+            </p>
+
+            <p>
+              Receipt Created:
+              ${escapeHtml(
+                new Date(order.receiptCreatedAt)
+                  .toLocaleString()
+              )}
+            </p>
+
+            <h3>Customer</h3>
+            <p>${escapeHtml(order.customerName || "Customer")}</p>
+            <p>${escapeHtml(order.email)}</p>
+            <p>${escapeHtml(order.phone)}</p>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Qty</th>
+                  <th>Price</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>${lines}</tbody>
+            </table>
+
+            <p>
+              Subtotal:
+              $${positive(order.subtotal).toFixed(2)}
+            </p>
+            <p>
+              Tax:
+              $${positive(order.tax).toFixed(2)}
+            </p>
+            <p>
+              Shipping:
+              $${positive(
+                order.shippingCost ?? order.shipping
+              ).toFixed(2)}
+            </p>
+
+            <h3>
+              Total:
+              $${positive(order.finalPrice).toFixed(2)}
+            </h3>
+
+            <p>Status: ${escapeHtml(order.status)}</p>
+            <p>
+              Payment Method:
+              ${escapeHtml(order.paymentMethod || "Online")}
+            </p>
+          </body>
+        </html>
+      `)
+    } catch (err) {
+      fail(res, err, "Failed to generate receipt")
+    }
+  }
+)
+
+/* ================= GET SINGLE ORDER ================= */
+
+router.get(
+  "/:id",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const order = await getOrder(req, res)
+
+      if (order) {
+        res.json({
+          success: true,
+          data: order
+        })
+      }
+    } catch (err) {
+      fail(res, err, "Failed to fetch order")
+    }
+  }
+)
+
+/* ================= CREATE STORE ORDER ================= */
+
+// Product prices now come from MongoDB.
+//
+// IMPORTANT:
+// Shippo shipping amounts are not independently
+// verified yet. Do not deploy this intermediate
+// version until shipping and Square are integrated.
 
 router.post(
   "/",
   async (req, res) => {
     try {
-      const {
-        customerName,
-        email,
-        phone,
-        address,
-        items,
+      const b = req.body || {}
 
-        shipping,
-        shippingCost,
-        shippingTotal,
-        deliveryFee,
-
-        shippingRate,
-        shippingRateId,
-        shippingProvider,
-        shippingService,
-
-        source,
-        status
-      } = req.body || {}
+      const email = emailOf(b.email)
 
       if (!email) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Customer email is required"
-          })
-      }
-
-      if (
-        !Array.isArray(items) ||
-        !items.length
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "No items provided"
-          })
-      }
-
-      const requestedStatus =
-        status ||
-        "payment_required"
-
-      if (
-        !VALID_ORDER_STATUSES.includes(
-          requestedStatus
-        )
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              `Invalid order status: ${requestedStatus}`
-          })
-      }
-
-      const safeItems =
-        items.map(
-          (item) => {
-            const rawPrice =
-              item.finalPrice ??
-              item.salePrice ??
-              item.unitPrice ??
-              item.price ??
-              item.selectedVariant
-                ?.price ??
-              item.variant?.price ??
-              item.basePrice ??
-              item.listPrice ??
-              0
-
-            const price =
-              safePositiveNumber(
-                rawPrice,
-                0
-              )
-
-            console.log(
-              "🛒 ORDER ITEM:",
-              {
-                name:
-                  item.name,
-
-                rawPrice,
-
-                parsedPrice:
-                  price
-              }
-            )
-
-            return {
-              productId:
-                item.productId ||
-                item._id ||
-                item.id ||
-                item.product
-                  ?._id ||
-                null,
-
-              name:
-                String(
-                  item.name ||
-                  ""
-                ).trim(),
-
-              quantity:
-                safeQuantity(
-                  item.quantity,
-                  1
-                ),
-
-              price,
-
-              unitPrice:
-                safePositiveNumber(
-                  item.unitPrice,
-                  price
-                ),
-
-              salePrice:
-                safePositiveNumber(
-                  item.salePrice,
-                  price
-                ),
-
-              finalPrice:
-                safePositiveNumber(
-                  item.finalPrice,
-                  price
-                ),
-
-              cost:
-                safePositiveNumber(
-                  item.cost,
-                  0
-                ),
-
-              image:
-                item.image ||
-                item.imageUrl ||
-                item.selectedVariant
-                  ?.image ||
-                "",
-
-              productType:
-                item.productType ||
-                "physical",
-
-              serviceType:
-                item.serviceType ||
-                "",
-
-              source:
-                item.source ||
-                source ||
-                "store",
-
-              selectedVariant:
-                item.selectedVariant ||
-                null,
-
-              variant:
-                item.variant ||
-                item.selectedVariant ||
-                {}
-            }
-          }
-        )
-
-      const subtotal =
-        roundMoney(
-          safeItems.reduce(
-            (
-              sum,
-              item
-            ) =>
-              sum +
-              item.price *
-              item.quantity,
-            0
-          )
-        )
-
-      const shippingRateAmount =
-        shippingRate?.amount
-
-      const selectedShipping =
-        safePositiveNumber(
-          shippingCost ??
-          shipping ??
-          shippingTotal ??
-          deliveryFee ??
-          shippingRateAmount,
-          0
-        )
-
-      const tax =
-        roundMoney(
-          subtotal *
-          TAX_RATE
-        )
-
-      const finalPrice =
-        roundMoney(
-          subtotal +
-          tax +
-          selectedShipping
-        )
-
-      console.log(
-        "🚚 SHIPPING RECEIVED:",
-        {
-          shipping,
-          shippingCost,
-          shippingTotal,
-          deliveryFee,
-          shippingRate,
-          selectedShipping
-        }
-      )
-
-      console.log(
-        "🧾 ORDER CREATE TOTALS:",
-        {
-          subtotal,
-          tax,
-          selectedShipping,
-          finalPrice
-        }
-      )
-
-      const order =
-        await Order.create({
-          customerName:
-            String(
-              customerName ||
-              "Customer"
-            ).trim(),
-
-          email:
-            normalizeEmail(
-              email
-            ),
-
-          phone:
-            String(
-              phone ||
-              ""
-            ).trim(),
-
-          address: {
-            street:
-              address?.street ||
-              "",
-
-            city:
-              address?.city ||
-              "",
-
-            state:
-              address?.state ||
-              "",
-
-            zip:
-              address?.zip ||
-              "",
-
-            country:
-              address?.country ||
-              "US"
-          },
-
-          items:
-            safeItems,
-
-          subtotal,
-          tax,
-
-          shipping:
-            selectedShipping,
-
-          shippingCost:
-            selectedShipping,
-
-          shippingTotal:
-            selectedShipping,
-
-          deliveryFee:
-            selectedShipping,
-
-          shippingRate:
-            shippingRate ||
-            null,
-
-          shippingRateId:
-            shippingRateId ||
-            shippingRate?.id ||
-            shippingRate?.object_id ||
-            shippingRate?.raw
-              ?.object_id ||
-            "",
-
-          shippingProvider:
-            shippingProvider ||
-            shippingRate?.provider ||
-            "",
-
-          shippingService:
-            shippingService ||
-            getShippingService(
-              shippingRate
-            ),
-
-          finalPrice,
-
-          status:
-            requestedStatus,
-
-          source:
-            source ||
-            "store",
-
-          timeline: [
-            {
-              status:
-                requestedStatus,
-
-              note:
-                "Order created",
-
-              date:
-                new Date()
-            }
-          ]
-        })
-
-      console.log(
-        "✅ CREATED ORDER SHIPPING:",
-        {
-          orderId:
-            order._id,
-
-          shipping:
-            order.shipping,
-
-          shippingCost:
-            order.shippingCost,
-
-          shippingTotal:
-            order.shippingTotal,
-
-          deliveryFee:
-            order.deliveryFee,
-
-          finalPrice:
-            order.finalPrice
-        }
-      )
-
-      emitOrderCreated(
-        req,
-        order
-      )
-
-      return res
-        .status(201)
-        .json({
-          success: true,
-          data: order
-        })
-    } catch (err) {
-      console.error(
-        "❌ ORDER CREATE ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
+        return res.status(400).json({
           success: false,
-          message:
-            err.message
+          message: "Customer email is required"
         })
+      }
+
+      if (
+        !Array.isArray(b.items) ||
+        b.items.length === 0 ||
+        b.items.length > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Order must contain 1 to 100 items"
+        })
+      }
+
+      // The browser supplies product IDs, variants,
+      // and quantities, but never authoritative prices.
+
+      const productIds = b.items.map((item) =>
+        String(
+          item?.productId ||
+          item?._id ||
+          item?.id ||
+          item?.product?._id ||
+          ""
+        ).trim()
+      )
+
+      if (
+        productIds.some(
+          (id) => !/^[a-f0-9]{24}$/i.test(id)
+        )
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid product ID in cart"
+        })
+      }
+
+      const products = await Product.find({
+        _id: {
+          $in: [...new Set(productIds)]
+        },
+        storefront: "signavi_store"
+      })
+
+      let catalog
+
+      try {
+        catalog = calculateCatalogCart(
+          products,
+          b.items
+        )
+      } catch (pricingError) {
+        return res.status(400).json({
+          success: false,
+          message: pricingError.message
+        })
+      }
+
+      // All item prices and variant details below
+      // were calculated using saved products.
+
+      const items = catalog.items.map((item) => ({
+        productId: item.productId,
+        name: item.name,
+        quantity: item.quantity,
+
+        price: item.price,
+        unitPrice: item.unitPrice,
+        salePrice: item.salePrice,
+        finalPrice: item.finalPrice,
+
+        originalPrice: item.originalPrice,
+        regularPrice: item.regularPrice,
+
+        discountActive: item.discountActive,
+        discountType: item.discountType,
+        discountValue: item.discountValue,
+        discountLabel: item.discountLabel,
+
+        image: item.image,
+        productType: item.productType,
+
+        selectedVariant: item.selectedVariant,
+        variant: item.variant,
+
+        source: "store",
+        cost: 0
+      }))
+
+      const subtotal = money(catalog.subtotal)
+      const tax = money(subtotal * TAX_RATE)
+
+      // Initial storefront orders are unpaid and have no trusted
+      // shipping rate yet. Only the signed quote in /:id/checkout
+      // can set the shipping cost and carrier details.
+      const shipping = 0
+      const rate = null
+
+      const order = await Order.create({
+        customerName:
+          String(b.customerName || "Customer").trim(),
+
+        email,
+
+        phone:
+          String(b.phone || ""),
+
+        address:
+          addr(b.address),
+
+        items,
+        subtotal,
+        tax,
+
+        shipping,
+        shippingCost: shipping,
+        shippingTotal: shipping,
+        deliveryFee: shipping,
+
+        shippingRate: rate,
+        shippingRateId: "",
+        shippingProvider: "",
+        shippingService: "",
+
+        finalPrice:
+          money(subtotal + tax + shipping),
+
+        status: "payment_required",
+        paymentStatus: "unpaid",
+
+        source: "store",
+
+        timeline: [{
+          status: "payment_required",
+          note: "Store order created",
+          date: new Date()
+        }]
+      })
+
+      emit(req, "jobCreated", order)
+
+      // Issue a private token for this guest checkout.
+      const checkoutToken = createGuestCheckoutToken(order)
+
+      return res.status(201).json({
+        success: true,
+        data: order,
+        checkoutToken
+      })
+
+    } catch (err) {
+      return fail(
+        res,
+        err,
+        "Failed to create store order"
+      )
     }
   }
 )
 
-/* =========================================================
-   UPDATE ORDER
-========================================================= */
+/* ================= UPDATE ORDER ================= */
 
 router.patch(
   "/:id",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const { id } =
-        req.params
+      const order = await getOrder(req, res)
+      if (!order) return
 
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
-      }
+      const b = req.body || {}
 
-      const {
-        status,
-        finalPrice,
-        note,
-
-        customerName,
-        email,
-        phone,
-        address,
-
-        shipping,
-        shippingCost,
-        shippingTotal,
-        deliveryFee,
-
-        shippingRate,
-        shippingRateId,
-        shippingProvider,
-        shippingService,
-
-        paymentMethod,
-        notes
-      } = req.body || {}
-
-      const order =
-        await Order.findById(
-          id
-        )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
-      }
-
-      if (
-        !Array.isArray(
-          order.timeline
-        )
-      ) {
-        order.timeline = []
-      }
-
-      /* ================= CUSTOMER ================= */
-
-      if (
-        customerName !==
-        undefined
-      ) {
+      if (b.customerName !== undefined) {
         order.customerName =
-          String(
-            customerName ||
-            ""
-          ).trim()
+          String(b.customerName || "").trim()
       }
 
-      if (
-        email !==
-        undefined
-      ) {
-        order.email =
-          normalizeEmail(
-            email
-          )
+      if (b.email !== undefined) {
+        order.email = emailOf(b.email)
       }
 
-      if (
-        phone !==
-        undefined
-      ) {
-        order.phone =
-          String(
-            phone ||
-            ""
-          ).trim()
+      if (b.phone !== undefined) {
+        order.phone = String(b.phone || "").trim()
       }
 
-      if (
-        address !==
-        undefined
-      ) {
+      if (b.address !== undefined) {
         order.address = {
-          street:
-            address?.street ??
-            order.address?.street ??
-            "",
-
-          city:
-            address?.city ??
-            order.address?.city ??
-            "",
-
-          state:
-            address?.state ??
-            order.address?.state ??
-            "",
-
-          zip:
-            address?.zip ??
-            order.address?.zip ??
-            "",
-
-          country:
-            address?.country ??
-            order.address?.country ??
-            "US"
+          ...addr(order.address),
+          ...addr({
+            ...order.address,
+            ...b.address
+          })
         }
       }
 
-      /* ================= SHIPPING ================= */
+      const shippingChanged =
+        [
+          "shipping",
+          "shippingCost",
+          "shippingTotal",
+          "deliveryFee"
+        ].some(k => b[k] !== undefined) ||
+        b.shippingRate?.amount !== undefined
 
-      const hasShippingUpdate =
-        shipping !== undefined ||
-        shippingCost !== undefined ||
-        shippingTotal !== undefined ||
-        deliveryFee !== undefined ||
-        shippingRate?.amount !==
-          undefined
-
-      if (hasShippingUpdate) {
-        const selectedShipping =
-          safePositiveNumber(
-            shippingCost ??
-            shipping ??
-            shippingTotal ??
-            deliveryFee ??
-            shippingRate?.amount,
-            order.shippingCost ??
-            order.shipping ??
-            0
-          )
-
-        order.shipping =
-          selectedShipping
-
-        order.shippingCost =
-          selectedShipping
-
-        order.shippingTotal =
-          selectedShipping
-
-        order.deliveryFee =
-          selectedShipping
+      if (shippingChanged) {
+        setShipping(order, getShippingAmount(b))
       }
 
-      if (
-        shippingRate !==
-        undefined
-      ) {
-        order.shippingRate =
-          shippingRate
+      if (b.shippingRate !== undefined) {
+        order.shippingRate = b.shippingRate
 
         order.shippingRateId =
-          shippingRateId ||
-          shippingRate?.id ||
-          shippingRate?.object_id ||
-          shippingRate?.raw
-            ?.object_id ||
+          b.shippingRateId ||
+          getRateId(b.shippingRate) ||
           order.shippingRateId ||
           ""
 
-        if (
-          shippingProvider ===
-          undefined
-        ) {
+        if (b.shippingProvider === undefined) {
           order.shippingProvider =
-            shippingRate?.provider ||
+            b.shippingRate?.provider ||
             order.shippingProvider ||
             ""
         }
 
-        if (
-          shippingService ===
-          undefined
-        ) {
-          order.shippingService =
-            getShippingService(
-              shippingRate,
-              order.shippingService
-            )
+        if (b.shippingService === undefined) {
+          order.shippingService = shippingServiceOf(
+            b.shippingRate,
+            order.shippingService
+          )
         }
       }
 
-      if (
-        shippingRateId !==
-        undefined
-      ) {
-        order.shippingRateId =
-          shippingRateId ||
-          ""
+      if (b.shippingRateId !== undefined) {
+        order.shippingRateId = b.shippingRateId || ""
       }
 
-      if (
-        shippingProvider !==
-        undefined
-      ) {
+      if (b.shippingProvider !== undefined) {
         order.shippingProvider =
-          shippingProvider ||
-          ""
+          b.shippingProvider || ""
       }
 
-      if (
-        shippingService !==
-        undefined
-      ) {
+      if (b.shippingService !== undefined) {
         order.shippingService =
-          shippingService ||
-          ""
+          b.shippingService || ""
       }
 
-      /* ================= PRICE ================= */
-
-      if (
-        finalPrice !==
-        undefined
-      ) {
-        order.finalPrice =
-          roundMoney(
-            safePositiveNumber(
-              finalPrice,
-              order.finalPrice ||
-              0
-            )
+      if (b.finalPrice !== undefined) {
+        order.finalPrice = money(
+          positive(
+            b.finalPrice,
+            order.finalPrice || 0
           )
+        )
       }
 
-      /* ================= PAYMENT / NOTES ================= */
-
-      if (
-        paymentMethod !==
-        undefined
-      ) {
+      if (b.paymentMethod !== undefined) {
         order.paymentMethod =
-          String(
-            paymentMethod ||
-            ""
-          )
+          String(b.paymentMethod || "")
       }
 
-      if (
-        notes !==
-        undefined
-      ) {
-        order.notes =
-          String(
-            notes ||
-            ""
-          )
+      if (b.notes !== undefined) {
+        order.notes = String(b.notes || "")
       }
 
-      /* ================= STATUS ================= */
+      let statusChanged = false
 
-      let statusChanged =
-        false
-
-      if (status) {
-        if (
-          !VALID_ORDER_STATUSES.includes(
-            status
-          )
-        ) {
-          return res
-            .status(400)
-            .json({
-              success: false,
-
-              message:
-                `Invalid order status: ${status}`,
-
-              validStatuses:
-                VALID_ORDER_STATUSES
-            })
+      if (b.status) {
+        if (!VALID_STATUSES.has(b.status)) {
+          return res.status(400).json({
+            success: false,
+            message:
+              `Invalid order status: ${b.status}`,
+            validStatuses: [...VALID_STATUSES]
+          })
         }
 
-        const previousStatus =
-          order.status
+        if (order.status !== b.status) {
+          const previous = order.status
 
-        if (
-          previousStatus !==
-          status
-        ) {
-          order.status =
-            status
+          order.status = b.status
 
-          order.timeline.push({
-            status,
+          addTimeline(
+            order,
+            b.status,
+            b.note ||
+              `Order moved from ${previous || "unknown"} to ${b.status}`
+          )
 
-            note:
-              note ||
-              `Order moved from ${previousStatus || "unknown"} to ${status}`,
-
-            date:
-              new Date()
-          })
-
-          statusChanged =
-            true
+          statusChanged = true
         }
       }
 
       await order.save()
 
-      emitOrderUpdate(
-        req,
-        order
-      )
+      emit(req, "jobUpdated", order)
 
-      /* ================= STATUS EMAIL ================= */
+      if (statusChanged) {
+        await sendStatus(order, order.status)
 
-      if (
-        statusChanged &&
-        order.email
-      ) {
-        try {
-          await sendOrderStatusEmail(
-            order.email,
-            order.status,
-            order
-          )
-        } catch (emailError) {
-          console.warn(
-            "⚠️ ORDER STATUS EMAIL FAILED:",
-            emailError.message
-          )
-        }
-      }
-
-      /* ================= INVOICE EMAIL ================= */
-
-      if (
-        statusChanged &&
-        (
-          status ===
-            "payment_required" ||
-          status ===
-            "shipped"
-        ) &&
-        order.email
-      ) {
-        try {
-          const invoicePath =
-            await generateInvoice(
-              order
-            )
-
-          await sendOrderStatusEmail(
-            order.email,
-            "invoice",
-            order,
-            invoicePath
-          )
-        } catch (
-          invoiceError
+        if (
+          ["payment_required", "shipped"]
+            .includes(order.status) &&
+          order.email
         ) {
-          console.warn(
-            "⚠️ INVOICE GENERATION FAILED:",
-            invoiceError.message
-          )
+          try {
+            const invoicePath =
+              await generateInvoice(order)
+
+            await sendStatus(
+              order,
+              "invoice",
+              invoicePath
+            )
+          } catch (err) {
+            console.warn(
+              "Invoice generation failed:",
+              err.message
+            )
+          }
         }
       }
 
-      return res.json({
+      res.json({
         success: true,
         data: order
       })
     } catch (err) {
-      console.error(
-        "❌ UPDATE ORDER ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            err.message
-        })
+      fail(res, err, "Failed to update order")
     }
   }
 )
 
-/* =========================================================
-   CHECKOUT
-========================================================= */
+/* ================= CHECKOUT ================= */
+
+// WARNING: This route requires a guest ownership token and
+// full Square/Shippo integration tests before production deployment.
+// Catalog prices are calculated during order creation; this route
+// verifies shipping and sends a short-lived internal Square signature.
 
 router.patch(
   "/:id/checkout",
   async (req, res) => {
     try {
-      const { id } =
-        req.params
+      const order = await getOrder(req, res)
+      if (!order) return
+      // Verify ownership before changing a storefront order.
+      const isStorefrontOrder = ["store", "cart_drawer"].includes(
+        String(order.source || "").toLowerCase()
+      )
 
+      if (isStorefrontOrder) {
+        const guestToken = req.get(
+          "x-signavi-guest-checkout-token"
+        )
+
+        if (!verifyGuestCheckoutToken(order, guestToken)) {
+          return res.status(403).json({
+            success: false,
+            message:
+              "Checkout session invalid or expired. Please restart checkout."
+          })
+        }
+      }
+
+
+      // Stop checkout for orders that are already paid
+      // or no longer awaiting payment.
       if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
+        order.paymentStatus === "paid" ||
+        !["payment_required", "pending"].includes(order.status)
       ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
+        return res.status(409).json({
+          success: false,
+          message: "This order cannot be checked out."
+        })
       }
 
-      const order =
-        await Order.findById(
-          id
-        )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
+      // Verify the signed Shippo quote against
+      // the saved order before calling Square.
+      try {
+        applyCheckoutShipping(order, req.body || {})
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          message: error.message
+        })
       }
 
-      const baseUrl =
-        process.env.SERVER_URL ||
-        "https://signavi-backend.onrender.com"
+      // Square must read the server-calculated
+      // shipping amount, not a browser-supplied price.
+      await order.save()
 
-      const response =
-        await fetch(
-          `${baseUrl}/api/square/create-payment/${order._id}`,
-          {
-            method: "POST"
+      // Call Square through THIS backend instance, not a production URL.
+      // This prevents local checkout from contacting the deployed backend.
+      const localPort = Number(req.socket?.localPort)
+      if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535) {
+        return res.status(503).json({
+          success: false,
+          message: "Checkout server port could not be determined."
+        })
+      }
+
+      const base = `http://127.0.0.1:${localPort}`
+
+      const paymentAuthorization = createSquareAuthorization(order)
+
+      const response = await fetch(
+        `${base}/api/square/create-payment/${order._id}`,
+        {
+          method: "POST",
+          headers: {
+            "x-signavi-payment-authorization": paymentAuthorization
           }
-        )
+        }
+      )
 
-      const data =
-        await response.json()
+      const data = await response.json()
 
       if (!response.ok) {
-        console.error(
-          "❌ SQUARE CHECKOUT RESPONSE:",
-          data
-        )
-
-        return res
-          .status(
-            response.status ||
-            500
-          )
-          .json({
-            success: false,
-
-            message:
-              data?.message ||
-              "Payment checkout failed"
-          })
+        return res.status(response.status).json({
+          success: false,
+          message:
+            data?.message ||
+            "Payment checkout failed"
+        })
       }
 
       const paymentUrl =
@@ -2319,205 +1219,78 @@ router.patch(
         data?.url
 
       if (!paymentUrl) {
-        return res
-          .status(500)
-          .json({
-            success: false,
-            message:
-              "Payment URL was not returned"
-          })
-      }
-
-      if (
-        !Array.isArray(
-          order.timeline
-        )
-      ) {
-        order.timeline = []
-      }
-
-      order.paymentUrl =
-        paymentUrl
-
-      const previousStatus =
-        order.status
-
-      order.status =
-        "payment_required"
-
-      if (
-        previousStatus !==
-        "payment_required"
-      ) {
-        order.timeline.push({
-          status:
-            "payment_required",
-
-          note:
-            "Payment checkout created",
-
-          date:
-            new Date()
+        return res.status(500).json({
+          success: false,
+          message:
+            "Payment URL was not returned"
         })
+      }
+
+      order.paymentUrl = paymentUrl
+
+      if (order.status !== "payment_required") {
+        order.status = "payment_required"
+
+        addTimeline(
+          order,
+          "payment_required",
+          "Payment checkout created"
+        )
       }
 
       await order.save()
 
-      emitOrderUpdate(
-        req,
-        order
+      emit(req, "jobUpdated", order)
+
+      await sendStatus(
+        order,
+        "payment_required"
       )
 
-      if (order.email) {
-        try {
-          await sendOrderStatusEmail(
-            order.email,
-            "payment_required",
-            order
-          )
-        } catch (
-          emailError
-        ) {
-          console.warn(
-            "⚠️ PAYMENT EMAIL FAILED:",
-            emailError.message
-          )
-        }
-      }
-
-      return res.json({
+      res.json({
         success: true,
         paymentUrl,
-        orderId:
-          order._id.toString()
+        orderId: String(order._id)
       })
     } catch (err) {
-      console.error(
-        "❌ CHECKOUT ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            err.message
-        })
+      fail(res, err, "Payment checkout failed")
     }
   }
 )
 
-/* =========================================================
-   SHIP ORDER
-========================================================= */
+/* ================= SHIP ORDER ================= */
 
 router.post(
   "/ship/:id",
+  requireAuth,
+  requireAdmin,
   async (req, res) => {
     try {
-      const { id } =
-        req.params
+      const order = await getOrder(req, res)
+      if (!order) return
 
-      if (
-        !mongoose.Types.ObjectId
-          .isValid(id)
-      ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Invalid order ID"
-          })
-      }
+      if (order.status !== "shipped") {
+        order.status = "shipped"
 
-      const order =
-        await Order.findById(
-          id
+        addTimeline(
+          order,
+          "shipped",
+          "Order shipped"
         )
-
-      if (!order) {
-        return res
-          .status(404)
-          .json({
-            success: false,
-            message:
-              "Order not found"
-          })
-      }
-
-      if (
-        !Array.isArray(
-          order.timeline
-        )
-      ) {
-        order.timeline = []
-      }
-
-      const previousStatus =
-        order.status
-
-      order.status =
-        "shipped"
-
-      if (
-        previousStatus !==
-        "shipped"
-      ) {
-        order.timeline.push({
-          status:
-            "shipped",
-
-          note:
-            "Order shipped",
-
-          date:
-            new Date()
-        })
       }
 
       await order.save()
 
-      emitOrderUpdate(
-        req,
-        order
-      )
+      emit(req, "jobUpdated", order)
 
-      if (order.email) {
-        try {
-          await sendOrderStatusEmail(
-            order.email,
-            "shipped",
-            order
-          )
-        } catch (
-          emailError
-        ) {
-          console.warn(
-            "⚠️ SHIPPING EMAIL FAILED:",
-            emailError.message
-          )
-        }
-      }
+      await sendStatus(order, "shipped")
 
-      return res.json({
+      res.json({
         success: true,
         data: order
       })
     } catch (err) {
-      console.error(
-        "❌ SHIP ERROR:",
-        err
-      )
-
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message:
-            err.message
-        })
+      fail(res, err, "Failed to ship order")
     }
   }
 )

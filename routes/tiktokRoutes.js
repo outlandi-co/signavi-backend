@@ -161,21 +161,24 @@ router.get(
     ].join(",")
 
     const params =
-      new URLSearchParams({
-        client_key:
-          TIKTOK_CLIENT_KEY,
+  new URLSearchParams({
+    client_key:
+      TIKTOK_CLIENT_KEY,
 
-        scope:
-          scopes,
+    scope:
+      scopes,
 
-        response_type:
-          "code",
+    response_type:
+      "code",
 
-        redirect_uri:
-          TIKTOK_REDIRECT_URI,
+    redirect_uri:
+      TIKTOK_REDIRECT_URI,
 
-        state
-      })
+    state,
+
+    disable_auto_auth:
+      "1"
+  })
 
     const authUrl =
       `https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`

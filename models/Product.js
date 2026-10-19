@@ -1,3 +1,4 @@
+
 import mongoose from "mongoose"
 
 /* ================= COLOR SCHEMA ================= */
@@ -114,6 +115,60 @@ const digitalProductSchema = new mongoose.Schema(
   { _id: false }
 )
 
+/* ================= SHIPPING SCHEMA ================= */
+
+// Measurements are for ONE product before packaging.
+// Null means the measurement has not been entered.
+// The packaging calculator will later determine
+// the correct mailer or box for the entire order.
+
+const shippingSchema = new mongoose.Schema(
+  {
+    weightOz: {
+      type: Number,
+      default: null,
+      min: 0.01
+    },
+
+    lengthIn: {
+      type: Number,
+      default: null,
+      min: 0.01
+    },
+
+    widthIn: {
+      type: Number,
+      default: null,
+      min: 0.01
+    },
+
+    heightIn: {
+      type: Number,
+      default: null,
+      min: 0.01
+    },
+
+    packagingType: {
+      type: String,
+      enum: [
+        "unassigned",
+        "mailer",
+        "box",
+        "fragile",
+        "oversized",
+        "custom"
+      ],
+      default: "unassigned"
+    },
+
+    shipSeparately: {
+      type: Boolean,
+      default: false
+    }
+  },
+  { _id: false }
+)
+
 /* ================= PRODUCT SCHEMA ================= */
 
 const productSchema = new mongoose.Schema(
@@ -167,6 +222,15 @@ const productSchema = new mongoose.Schema(
       type: digitalProductSchema,
       default: () => ({})
     },
+
+    /* ================= PRODUCT SHIPPING ================= */
+
+    shipping: {
+      type: shippingSchema,
+      default: () => ({})
+    },
+
+    /* ================= PRICING ================= */
 
     cost: {
       type: Number,
@@ -248,6 +312,8 @@ const productSchema = new mongoose.Schema(
       index: true
     },
 
+    /* ================= INVENTORY ================= */
+
     stock: {
       type: Number,
       default: 0,
@@ -259,6 +325,8 @@ const productSchema = new mongoose.Schema(
       default: 0,
       min: 0
     },
+
+    /* ================= IMAGES AND VARIANTS ================= */
 
     image: {
       type: String,
@@ -290,6 +358,8 @@ const productSchema = new mongoose.Schema(
       default: []
     },
 
+    /* ================= STOREFRONTS ================= */
+
     storefrontVisible: {
       type: Boolean,
       default: true,
@@ -298,7 +368,10 @@ const productSchema = new mongoose.Schema(
 
     storefront: {
       type: String,
-      enum: ["signavi_store", "signavi_studio"],
+      enum: [
+        "signavi_store",
+        "signavi_studio"
+      ],
       required: true,
       default: "signavi_store",
       index: true
@@ -306,7 +379,10 @@ const productSchema = new mongoose.Schema(
 
     salesChannel: {
       type: String,
-      enum: ["signavi_store", "signavi_studio"],
+      enum: [
+        "signavi_store",
+        "signavi_studio"
+      ],
       required: true,
       default: "signavi_store",
       index: true
