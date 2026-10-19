@@ -1,4 +1,4 @@
-import { Readable } from "stream"
+﻿import { Readable } from "stream"
 import csvParser from "csv-parser"
 
 import Material from "../models/Material.js"
@@ -46,7 +46,13 @@ const parseCSVBuffer = (buffer) => {
     const rows = []
 
     Readable.from(buffer)
-      .pipe(csvParser())
+      .pipe(csvParser({
+        mapHeaders: ({ header }) =>
+          header
+            .replace(/^\uFEFF/, "")
+            .trim()
+            .replace(/^"|"$/g, "")
+      }))
       .on("data", (row) => {
         rows.push(row)
       })
@@ -329,6 +335,13 @@ export const importMaterialsCSV = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "CSV file is empty"
+      })
+    }
+
+    if (!rows.some((row) => String(row.id || "").trim())) {
+      return res.status(400).json({
+        success: false,
+        message: "CSV import rejected: no valid material IDs found. Check CSV headers."
       })
     }
 
