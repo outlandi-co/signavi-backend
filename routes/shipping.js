@@ -95,20 +95,34 @@ const getShippoKey = () =>
 
 /* ================= SHIPPO REQUEST ================= */
 
+
 const requestShippoRates = async ({
   from,
   to,
   parcels,
   token
 }) => {
+  const carrierAccounts = String(
+    process.env.SHIPPO_CARRIER_ACCOUNT_IDS || ""
+  )
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+
+  const shipmentData = {
+    address_from: from,
+    address_to: to,
+    parcels,
+    async: false
+  }
+
+  if (carrierAccounts.length > 0) {
+    shipmentData.carrier_accounts = carrierAccounts
+  }
+
   const response = await axios.post(
     "https://api.goshippo.com/shipments/",
-    {
-      address_from: from,
-      address_to: to,
-      parcels,
-      async: false
-    },
+    shipmentData,
     {
       headers: {
         Authorization: `ShippoToken ${token}`,
