@@ -45,6 +45,7 @@ export function applyCheckoutShipping(
   if (!hasPhysicalItems) {
     setShippingAmount(order, 0)
     order.shippingRateId = ""
+    order.shippingRateIds = []
     order.shippingProvider = ""
     order.shippingService = ""
     order.shippingRate = null
@@ -89,11 +90,14 @@ export function applyCheckoutShipping(
   setShippingAmount(order, quote.amount)
 
   order.shippingRateId = quote.rateId
+  order.shippingRateIds = quote.rateIds
   order.shippingProvider = quote.provider
   order.shippingService = quote.service
 
   order.shippingRate = {
     object_id: quote.rateId,
+    rateIds: quote.rateIds,
+    parcelRates: quote.parcelRates,
     amount: String(quote.amount),
     currency: quote.currency,
     provider: quote.provider,

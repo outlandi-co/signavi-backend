@@ -354,6 +354,11 @@ const orderSchema = new mongoose.Schema(
       trim: true
     },
 
+    shippingRateIds: {
+      type: [String],
+      default: []
+    },
+
     shippingProvider: {
       type: String,
       default: "",
