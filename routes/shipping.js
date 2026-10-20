@@ -248,6 +248,7 @@ const orientations = ([a, b, c]) => [
   [c, b, a]
 ]
 
+
 const choosePackage = (
   productShipping,
   quantity,
@@ -260,29 +261,44 @@ const choosePackage = (
   ]
 
   const unitWeight = Number(productShipping.weightOz)
-
-  const desiredType = String(
-    productShipping.packagingType || ""
-  )
-
   const shipSeparately =
     productShipping.shipSeparately === true
 
   if (
     !dims.every((value) => validPositive(value, 120)) ||
     !validPositive(unitWeight, 2400) ||
-    !allowedPackaging.has(desiredType)
+    !Number.isInteger(quantity) ||
+    quantity < 1
   ) {
     return null
   }
 
   const candidates = []
 
-  for (
-    const box of packages.filter(
-      (entry) => entry.type === desiredType
-    )
-  ) {
+
+  // Protect specialized packaging categories.
+  // Regular products can use boxes, mailers, or custom packaging.
+  // Fragile and oversized products require their designated packaging.
+
+  const preferredType = String(
+    productShipping.packagingType || ""
+  ).toLowerCase()
+
+  const specializedTypes = new Set([
+    "fragile",
+    "oversized"
+  ])
+
+  const compatiblePackages = packages.filter((box) => {
+    if (specializedTypes.has(preferredType)) {
+      return box.type === preferredType
+    }
+
+    return !specializedTypes.has(box.type)
+  })
+
+  for (const box of compatiblePackages) {
+
     const usable = [
       box.length - box.clearance,
       box.width - box.clearance,
@@ -297,10 +313,7 @@ const choosePackage = (
         Math.floor(usable[1] / w) *
         Math.floor(usable[2] / h)
 
-      maxBySpace = Math.max(
-        maxBySpace,
-        capacity
-      )
+      maxBySpace = Math.max(maxBySpace, capacity)
     }
 
     const maxByWeight = Math.floor(
@@ -313,9 +326,7 @@ const choosePackage = (
       maxByWeight
     )
 
-    if (perParcel < 1) {
-      continue
-    }
+    if (perParcel < 1) continue
 
     candidates.push({
       box,
@@ -333,6 +344,7 @@ const choosePackage = (
 
   return candidates[0] || null
 }
+
 
 /* ================= BUILD CART PARCELS ================= */
 
