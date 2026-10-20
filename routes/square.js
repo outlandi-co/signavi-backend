@@ -8,12 +8,41 @@ const router = express.Router()
 
 console.log("💳 SQUARE ROUTE LOADED")
 
-const client = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
-  environment: SquareEnvironment.Production
-})
+// Set SQUARE_ENVIRONMENT=sandbox or production in the V2 environment.
+// Never default to Production: require an explicit choice.
+const squareMode = String(process.env.SQUARE_ENVIRONMENT || "")
+  .trim()
+  .toLowerCase()
 
-const LOCATION_ID = process.env.SQUARE_LOCATION_ID
+const configuredEnvironment =
+  squareMode === "sandbox"
+    ? SquareEnvironment.Sandbox
+    : squareMode === "production"
+      ? SquareEnvironment.Production
+      : null
+
+const squareToken = String(process.env.SQUARE_ACCESS_TOKEN || "").trim()
+const LOCATION_ID = String(process.env.SQUARE_LOCATION_ID || "").trim()
+const CLIENT_URL = String(process.env.CLIENT_URL || "").trim().replace(/\/$/, "")
+
+// Build the client only when all required configuration exists.
+// Keeping it null allows unrelated V2 API endpoints to remain available.
+const client = configuredEnvironment && squareToken && LOCATION_ID
+  ? new SquareClient({
+      token: squareToken,
+      environment: configuredEnvironment
+    })
+  : null
+
+if (!client) {
+  console.warn(
+    "⚠️ Square payments not configured: set SQUARE_ENVIRONMENT " +
+    "(sandbox or production), SQUARE_ACCESS_TOKEN, and SQUARE_LOCATION_ID."
+  )
+} else {
+  console.log(`💳 Square environment: ${squareMode}`)
+}
+
 const TAX_RATE = 0.0825
 
 const toNumber = (value, fallback = 0) => {
@@ -76,6 +105,21 @@ const getSubtotal = (record = {}) => {
 
 router.post("/create-payment/:id", async (req, res) => {
   try {
+    // Do not call Square or modify an order if V2 isn't explicitly configured.
+    if (!client) {
+      return res.status(503).json({
+        success: false,
+        message: "Square payments are not configured for this backend."
+      })
+    }
+
+    if (!CLIENT_URL) {
+      return res.status(503).json({
+        success: false,
+        message: "CLIENT_URL is not configured for Square checkout."
+      })
+    }
+
     const { id } = req.params
 
     if (!id || id === "null" || id === "undefined") {
@@ -136,7 +180,6 @@ router.post("/create-payment/:id", async (req, res) => {
     }
 
     const subtotal = getSubtotal(record)
-
     const shipping = getShipping(record)
 
     const tax =
@@ -154,7 +197,6 @@ router.post("/create-payment/:id", async (req, res) => {
             : subtotal + shipping + tax
         )
 
-
     console.log("💰 FINAL SQUARE CALC:", {
       type,
       id: record._id,
@@ -169,7 +211,7 @@ router.post("/create-payment/:id", async (req, res) => {
       savedShippingRateAmount: record.shippingRate?.amount
     })
 
-    if (!total || total <= 0) {
+    if (!Number.isFinite(total) || total <= 0) {
       return res.status(400).json({
         success: false,
         message: "Invalid total",
@@ -203,7 +245,7 @@ router.post("/create-payment/:id", async (req, res) => {
         lineItems
       },
       checkoutOptions: {
-        redirectUrl: `${process.env.CLIENT_URL}/success/${id}`,
+        redirectUrl: `${CLIENT_URL}/success/${id}`,
         askForShippingAddress: false
       }
     })
@@ -211,7 +253,7 @@ router.post("/create-payment/:id", async (req, res) => {
     const paymentUrl = response?.paymentLink?.url
 
     if (!paymentUrl) {
-      console.error("❌ Square response:", response)
+      console.error("❌ Square did not return a payment link")
       throw new Error("No payment URL returned")
     }
 
@@ -224,7 +266,7 @@ router.post("/create-payment/:id", async (req, res) => {
 
     await record.save()
 
-    console.log("✅ PAYMENT LINK CREATED:", paymentUrl)
+    console.log("✅ PAYMENT LINK CREATED")
 
     res.json({
       success: true,
