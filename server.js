@@ -119,7 +119,8 @@ const corsOptions = {
 
   allowedHeaders: [
     "Content-Type",
-    "Authorization"
+    "Authorization",
+    "x-signavi-guest-checkout-token"
   ],
 
   optionsSuccessStatus: 204
