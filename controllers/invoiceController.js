@@ -43,10 +43,29 @@ export const PROOF_TERMS_TEXT =
 
 const APPROVAL_LINK_DAYS = 14
 
-const squareClient = new SquareClient({
-  token: process.env.SQUARE_ACCESS_TOKEN,
-  environment: SquareEnvironment.Production
-})
+
+const squareMode = String(
+  process.env.SQUARE_ENVIRONMENT || ""
+).trim().toLowerCase()
+
+const squareEnvironment =
+  squareMode === "sandbox"
+    ? SquareEnvironment.Sandbox
+    : squareMode === "production"
+      ? SquareEnvironment.Production
+      : null
+
+const squareToken = String(
+  process.env.SQUARE_ACCESS_TOKEN || ""
+).trim()
+
+const squareClient = squareEnvironment && squareToken
+  ? new SquareClient({
+      token: squareToken,
+      environment: squareEnvironment
+    })
+  : null
+
 
 if (process.env.SENDGRID_API_KEY) {
   sgMail.setApiKey(process.env.SENDGRID_API_KEY)
@@ -302,10 +321,21 @@ const publicInvoice = (invoice) => ({
 // SQUARE INVOICE PAYMENT
 // =====================================================
 
+
 const createSquarePaymentLinkForInvoice = async (
   invoice
 ) => {
+  if (!squareClient || !String(process.env.SQUARE_LOCATION_ID || "").trim()) {
+    throw Object.assign(
+      new Error(
+        "Square payments are not configured for this backend."
+      ),
+      { status: 503 }
+    )
+  }
+
   if (!isProofApproved(invoice)) {
+
     throw Object.assign(
       new Error(
         "Final proof and terms must be approved before payment."
@@ -326,9 +356,20 @@ const createSquarePaymentLinkForInvoice = async (
     )
   }
 
-  if (invoice.paymentUrl) {
-    return invoice.paymentUrl
+
+if (invoice.paymentUrl) {
+  if (invoice.squareEnvironment !== squareMode) {
+    throw Object.assign(
+      new Error(
+        "Existing invoice payment link belongs to another or unknown Square environment. Deactivate the existing link in Square before creating a replacement."
+      ),
+      { status: 409 }
+    )
   }
+
+  return invoice.paymentUrl
+}
+
 
   const amount = Math.round(
     Number(invoice.total || 0) * 100
@@ -339,7 +380,9 @@ const createSquarePaymentLinkForInvoice = async (
     amount < 1
   ) {
     throw Object.assign(
-      new Error("Invoice total must be greater than $0.00"),
+      new Error(
+        "Invoice total must be greater than $0.00"
+      ),
       { status: 400 }
     )
   }
@@ -350,11 +393,14 @@ const createSquarePaymentLinkForInvoice = async (
 
       quickPay: {
         name: `Invoice ${invoice.invoiceNumber}`,
+
         priceMoney: {
           amount: BigInt(amount),
           currency: "USD"
         },
-        locationId: process.env.SQUARE_LOCATION_ID
+
+        locationId:
+          process.env.SQUARE_LOCATION_ID
       },
 
       checkoutOptions: {
@@ -363,27 +409,30 @@ const createSquarePaymentLinkForInvoice = async (
       }
     })
 
-  const link = response.paymentLink
+const link = response.paymentLink
 
-  if (!link?.url || !link?.id) {
-    throw new Error(
-      "Square did not return a complete invoice payment link."
-    )
-  }
+if (!link?.url || !link?.id) {
+  throw new Error(
+    "Square did not return a complete invoice payment link."
+  )
+}
 
-  const squareOrderId =
-    link.orderId || link.order_id || ""
+const squareOrderId =
+  link.orderId || link.order_id || ""
 
-  if (!squareOrderId) {
-    throw new Error(
-      "Square payment link is missing its associated order ID."
-    )
-  }
+if (!squareOrderId) {
+  throw new Error(
+    "Square payment link is missing its associated order ID."
+  )
+}
 
-  invoice.paymentUrl = link.url
-  invoice.squareCheckoutId = link.id
-  invoice.squarePaymentLinkId = link.id
-  invoice.squareOrderId = squareOrderId
+invoice.paymentUrl = link.url
+invoice.squareCheckoutId = link.id
+invoice.squarePaymentLinkId = link.id
+invoice.squareOrderId = squareOrderId
+invoice.squareEnvironment = squareMode
+
+
   invoice.status = "payment_required"
 
   addTimeline(
@@ -456,7 +505,7 @@ export const createInvoice = async (req, res) => {
 }
 
 // =====================================================
-// GET ALL INVOICES — ADMIN
+// GET ALL INVOICES â€” ADMIN
 // =====================================================
 
 export const getInvoices = async (req, res) => {
@@ -479,7 +528,7 @@ export const getInvoices = async (req, res) => {
 }
 
 // =====================================================
-// GET ONE INVOICE — ADMIN
+// GET ONE INVOICE â€” ADMIN
 // Route must use requireAuth and requireAdmin.
 // =====================================================
 
@@ -555,7 +604,7 @@ export const getCustomerProofInvoice = async (
 }
 
 // =====================================================
-// CREATE SQUARE PAYMENT LINK — ADMIN
+// CREATE SQUARE PAYMENT LINK â€” ADMIN
 // =====================================================
 
 export const createInvoicePaymentLink = async (
@@ -777,7 +826,7 @@ export const sendInvoiceEmail = async (
 }
 
 // =====================================================
-// UPDATE INVOICE — ADMIN
+// UPDATE INVOICE â€” ADMIN
 // Does not permit direct payment or approval changes.
 // =====================================================
 
@@ -929,7 +978,7 @@ export const updateInvoice = async (
 }
 
 // =====================================================
-// DELETE INVOICE — ADMIN
+// DELETE INVOICE â€” ADMIN
 // =====================================================
 
 export const deleteInvoice = async (
@@ -963,7 +1012,7 @@ export const deleteInvoice = async (
 }
 
 // =====================================================
-// UPLOAD FINAL PROOF — ADMIN
+// UPLOAD FINAL PROOF â€” ADMIN
 // Revokes any prior approval and approval link.
 // =====================================================
 
@@ -1307,7 +1356,7 @@ export const approveFinalProof = async (
 }
 
 // =====================================================
-// MARK PAID — ADMIN MANUAL RECONCILIATION
+// MARK PAID â€” ADMIN MANUAL RECONCILIATION
 // =====================================================
 
 export const markInvoicePaid = async (
@@ -1393,7 +1442,7 @@ export const markInvoicePaid = async (
 }
 
 // =====================================================
-// START PRODUCTION — ADMIN
+// START PRODUCTION â€” ADMIN
 // Requires payment and approved current proof.
 // =====================================================
 
@@ -1468,7 +1517,7 @@ export const startProduction = async (
 }
 
 // =====================================================
-// MARK SHIPPED — ADMIN
+// MARK SHIPPED â€” ADMIN
 // =====================================================
 
 export const markInvoiceShipped = async (
@@ -1529,7 +1578,7 @@ export const markInvoiceShipped = async (
 }
 
 // =====================================================
-// MARK DELIVERED — ADMIN
+// MARK DELIVERED â€” ADMIN
 // =====================================================
 
 export const markInvoiceDelivered = async (

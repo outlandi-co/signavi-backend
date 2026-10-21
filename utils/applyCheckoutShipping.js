@@ -62,16 +62,29 @@ export function applyCheckoutShipping(
     )
   }
 
-  const quote = verifyShippingQuote(
-    body.shippingQuote,
-    {
-      items: items.map((item) => ({
-        productId: String(item.productId || ""),
-        quantity: item.quantity
-      })),
-      destination
-    }
-  )
+  // Test shipping quotes are permitted only when Square
+// is explicitly configured for Sandbox.
+// Production and missing configurations reject test rates.
+const squareEnvironment = String(
+  process.env.SQUARE_ENVIRONMENT || ""
+).trim().toLowerCase()
+
+const allowTestShipping =
+  squareEnvironment === "sandbox" &&
+  Boolean(String(process.env.SQUARE_ACCESS_TOKEN || "").trim()) &&
+  Boolean(String(process.env.SQUARE_LOCATION_ID || "").trim())
+
+const quote = verifyShippingQuote(
+  body.shippingQuote,
+  {
+    items: items.map((item) => ({
+      productId: String(item.productId || ""),
+      quantity: item.quantity
+    })),
+    destination,
+    allowTest: allowTestShipping
+  }
+)
 
   order.address = {
     street: String(

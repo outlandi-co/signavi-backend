@@ -448,6 +448,11 @@ const orderSchema = new mongoose.Schema(
       default: ""
     },
 
+    squareEnvironment: {
+      type: String,
+      enum: ["sandbox", "production"],
+      default: null
+    },
     squarePaymentId: {
       type: String,
       default: "",

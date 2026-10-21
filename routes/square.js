@@ -1,3 +1,4 @@
+
 import express from "express"
 import { SquareClient, SquareEnvironment } from "square"
 import Quote from "../models/Quote.js"
@@ -6,13 +7,15 @@ import { verifySquareAuthorization } from "../utils/squarePaymentAuth.js"
 
 const router = express.Router()
 
-console.log("💳 SQUARE ROUTE LOADED")
+console.log("Square payment route loaded")
 
-// Set SQUARE_ENVIRONMENT=sandbox or production in the V2 environment.
-// Never default to Production: require an explicit choice.
-const squareMode = String(process.env.SQUARE_ENVIRONMENT || "")
-  .trim()
-  .toLowerCase()
+// =====================================================
+// SQUARE CONFIGURATION
+// =====================================================
+
+const squareMode = String(
+  process.env.SQUARE_ENVIRONMENT || ""
+).trim().toLowerCase()
 
 const configuredEnvironment =
   squareMode === "sandbox"
@@ -21,120 +24,182 @@ const configuredEnvironment =
       ? SquareEnvironment.Production
       : null
 
-const squareToken = String(process.env.SQUARE_ACCESS_TOKEN || "").trim()
-const LOCATION_ID = String(process.env.SQUARE_LOCATION_ID || "").trim()
-const CLIENT_URL = String(process.env.CLIENT_URL || "").trim().replace(/\/$/, "")
+const squareToken = String(
+  process.env.SQUARE_ACCESS_TOKEN || ""
+).trim()
 
-// Build the client only when all required configuration exists.
-// Keeping it null allows unrelated V2 API endpoints to remain available.
-const client = configuredEnvironment && squareToken && LOCATION_ID
-  ? new SquareClient({
-      token: squareToken,
-      environment: configuredEnvironment
-    })
-  : null
+const LOCATION_ID = String(
+  process.env.SQUARE_LOCATION_ID || ""
+).trim()
+
+const CLIENT_URL = String(
+  process.env.CLIENT_URL || ""
+).trim().replace(/\/$/, "")
+
+const client =
+  configuredEnvironment && squareToken && LOCATION_ID
+    ? new SquareClient({
+        token: squareToken,
+        environment: configuredEnvironment
+      })
+    : null
 
 if (!client) {
   console.warn(
-    "⚠️ Square payments not configured: set SQUARE_ENVIRONMENT " +
-    "(sandbox or production), SQUARE_ACCESS_TOKEN, and SQUARE_LOCATION_ID."
+    "Square payments unavailable: configuration incomplete."
   )
 } else {
-  console.log(`💳 Square environment: ${squareMode}`)
+  console.log(`Square environment: ${squareMode}`)
 }
 
 const TAX_RATE = 0.0825
 
+// =====================================================
+// MONEY HELPERS
+// =====================================================
+
 const toNumber = (value, fallback = 0) => {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return fallback
+  }
+
   const number = Number(value)
-  return Number.isFinite(number) ? number : fallback
+
+  return Number.isFinite(number)
+    ? number
+    : fallback
 }
 
-const getItemPrice = (item = {}) => {
-  return toNumber(
+const getItemPrice = (item = {}) =>
+  toNumber(
     item.salePrice ??
-      item.finalPrice ??
-      item.unitPrice ??
-      item.price ??
-      item.selectedVariant?.price ??
-      item.variant?.price ??
-      item.basePrice ??
-      item.listPrice ??
-      0
+    item.finalPrice ??
+    item.unitPrice ??
+    item.price ??
+    item.selectedVariant?.price ??
+    item.variant?.price ??
+    item.basePrice ??
+    item.listPrice ??
+    0
   )
-}
 
-const getItemQuantity = (item = {}) => {
-  return Math.max(1, toNumber(item.quantity, 1))
-}
+const getItemQuantity = (item = {}) =>
+  Math.max(1, toNumber(item.quantity, 1))
 
-const getShipping = (record = {}) => {
-  return toNumber(
+const getShipping = (record = {}) =>
+  toNumber(
     record.shippingCost ??
-      record.shipping ??
-      record.shippingTotal ??
-      record.deliveryFee ??
-      record.shippingRate?.amount ??
-      0
+    record.shipping ??
+    record.shippingTotal ??
+    record.deliveryFee ??
+    record.shippingRate?.amount ??
+    0
   )
-}
 
 const getSubtotal = (record = {}) => {
-  if (Array.isArray(record.items) && record.items.length > 0) {
+  if (
+    Array.isArray(record.items) &&
+    record.items.length > 0
+  ) {
     return record.items.reduce((sum, item) => {
       const price = getItemPrice(item)
-      const qty = getItemQuantity(item)
+      const quantity = getItemQuantity(item)
 
-      console.log("🛒 SQUARE ITEM:", {
-        name: item.name,
-        salePrice: item.salePrice,
-        finalPrice: item.finalPrice,
-        unitPrice: item.unitPrice,
-        price: item.price,
-        selectedVariantPrice: item.selectedVariant?.price,
-        parsedPrice: price,
-        quantity: qty
-      })
-
-      return sum + price * qty
+      return sum + price * quantity
     }, 0)
   }
 
-  return toNumber(record.subtotal) || toNumber(record.price) || 0
+  return (
+    toNumber(record.subtotal) ||
+    toNumber(record.price) ||
+    0
+  )
 }
+
+// =====================================================
+// CREATE SQUARE PAYMENT LINK
+// =====================================================
 
 router.post("/create-payment/:id", async (req, res) => {
   try {
-    // Do not call Square or modify an order if V2 isn't explicitly configured.
+    // =================================================
+    // STEP 1 - VERIFY CONFIGURATION
+    // =================================================
+
     if (!client) {
       return res.status(503).json({
         success: false,
-        message: "Square payments are not configured for this backend."
+        message:
+          "Square payments are not configured for this backend."
       })
     }
 
     if (!CLIENT_URL) {
       return res.status(503).json({
         success: false,
-        message: "CLIENT_URL is not configured for Square checkout."
+        message:
+          "CLIENT_URL is not configured for Square checkout."
       })
     }
 
+    // =================================================
+    // STEP 2 - VALIDATE RECORD ID
+    // =================================================
+
     const { id } = req.params
 
-    if (!id || id === "null" || id === "undefined") {
+    if (
+      !id ||
+      !/^[a-f0-9]{24}$/i.test(id)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Invalid ID"
       })
     }
 
-    let record = await Quote.findById(id)
-    let type = "quote"
+    // =================================================
+    // STEP 3 - FIND ORDER OR APPROVED QUOTE
+    // =================================================
 
-    if (!record) {
+    let record = await Quote.findById(id)
+    let type = "order"
+
+    if (record) {
+      const quote = record
+
+      if (
+        quote.approvalStatus !== "approved" ||
+        !quote.orderId
+      ) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "Quote approval and an associated order " +
+            "are required before payment."
+        })
+      }
+
+      const associatedOrder = await Order.findOne({
+        _id: quote.orderId,
+        quoteId: quote._id
+      })
+
+      if (!associatedOrder) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "The associated quote order could not be verified."
+        })
+      }
+
+      record = associatedOrder
+    } else {
       record = await Order.findById(id)
-      type = "order"
     }
 
     if (!record) {
@@ -144,19 +209,46 @@ router.post("/create-payment/:id", async (req, res) => {
       })
     }
 
-    // Storefront orders must be authorized by backend checkout.
-    // Preserve the separate custom quote payment workflow.
+    // Orders created from quotes must still have
+    // an approved source quote.
+    if (
+      String(record.source || "").toLowerCase() === "quote"
+    ) {
+      if (!record.quoteId) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "Quote order is missing its source quote."
+        })
+      }
+
+      const sourceQuote = await Quote.findOne({
+        _id: record.quoteId,
+        orderId: record._id,
+        approvalStatus: "approved"
+      })
+
+      if (!sourceQuote) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "The quote approval could not be verified."
+        })
+      }
+    }
+
+    // =================================================
+    // STEP 4 - VERIFY STOREFRONT AUTHORIZATION
+    // =================================================
+
     const isStorefrontOrder =
-      type === "order" &&
+      ["store", "cart_drawer"].includes(
+        String(record.source || "").toLowerCase()
+      ) ||
       (
-        ["store", "cart_drawer"].includes(
-          String(record.source || "").toLowerCase()
-        ) ||
-        (
-          Array.isArray(record.items) &&
-          record.items.some((item) =>
-            Boolean(item.productId)
-          )
+        Array.isArray(record.items) &&
+        record.items.some((item) =>
+          Boolean(item.productId)
         )
       )
 
@@ -179,6 +271,51 @@ router.post("/create-payment/:id", async (req, res) => {
       }
     }
 
+    // =================================================
+    // STEP 5 - REQUIRE PAYMENT-READY ORDER
+    // =================================================
+
+    if (record.status !== "payment_required") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Order is not ready for Square payment."
+      })
+    }
+
+    if (
+      ["paid", "refunded"].includes(
+        String(record.paymentStatus || "").toLowerCase()
+      )
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This order has already been paid or refunded."
+      })
+    }
+
+    // =================================================
+    // STEP 6 - PREVENT DUPLICATE PAYMENT LINKS
+    // =================================================
+
+    if (
+      record.paymentUrl ||
+      record.squarePaymentLinkId ||
+      record.squareOrderId
+    ) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "This order already has Square payment tracking. " +
+          "Review or cancel the existing payment link."
+      })
+    }
+
+    // =================================================
+    // STEP 7 - CALCULATE PAYMENT AMOUNT
+    // =================================================
+
     const subtotal = getSubtotal(record)
     const shipping = getShipping(record)
 
@@ -186,92 +323,115 @@ router.post("/create-payment/:id", async (req, res) => {
       toNumber(record.tax) ||
       subtotal * TAX_RATE
 
-    // Storefront orders must charge the exact total
-    // calculated and saved by the backend checkout.
-    // Preserve existing custom quote calculations.
-    const total = isStorefrontOrder
-      ? toNumber(record.finalPrice)
-      : (
-          toNumber(record.finalPrice) && shipping
-            ? toNumber(record.finalPrice)
-            : subtotal + shipping + tax
-        )
+    // Use the order total saved by backend checkout.
+    // Do not recalculate a storefront customer's charge.
+    const total = toNumber(record.finalPrice)
 
-    console.log("💰 FINAL SQUARE CALC:", {
-      type,
-      id: record._id,
-      subtotal,
-      shipping,
-      tax,
-      total,
-      savedShippingCost: record.shippingCost,
-      savedShipping: record.shipping,
-      savedShippingTotal: record.shippingTotal,
-      savedDeliveryFee: record.deliveryFee,
-      savedShippingRateAmount: record.shippingRate?.amount
-    })
-
-    if (!Number.isFinite(total) || total <= 0) {
+    if (
+      !Number.isFinite(total) ||
+      total <= 0
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid total",
-        debug: {
-          subtotal,
-          shipping,
-          tax,
-          total
-        }
+        message:
+          "The order does not have a valid payable total."
       })
     }
 
-    const amount = BigInt(Math.round(total * 100))
+    const cents = Math.round(total * 100)
 
-    const lineItems = [
-      {
-        name: `${type.toUpperCase()} #${record._id}`,
-        quantity: "1",
-        basePriceMoney: {
-          amount,
-          currency: "USD"
-        }
-      }
-    ]
-
-    const response = await client.checkout.paymentLinks.create({
-      idempotencyKey: `${id}-${Date.now()}`,
-      order: {
-        locationId: LOCATION_ID,
-        note: `ID:${record._id}`,
-        lineItems
-      },
-      checkoutOptions: {
-        redirectUrl: `${CLIENT_URL}/success/${id}`,
-        askForShippingAddress: false
-      }
-    })
-
-    const paymentUrl = response?.paymentLink?.url
-
-    if (!paymentUrl) {
-      console.error("❌ Square did not return a payment link")
-      throw new Error("No payment URL returned")
+    if (
+      !Number.isSafeInteger(cents) ||
+      cents < 1
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid Square payment amount."
+      })
     }
 
-    record.subtotal = subtotal
-    record.shipping = shipping
-    record.shippingCost = shipping
-    record.tax = tax
-    record.finalPrice = total
+    // =================================================
+    // STEP 8 - CREATE SQUARE PAYMENT LINK
+    // =================================================
+
+    const response =
+      await client.checkout.paymentLinks.create({
+        idempotencyKey:
+          `signavi-${squareMode}-${record._id}`,
+        order: {
+          locationId: LOCATION_ID,
+          note: `ID:${record._id}`,
+          lineItems: [
+            {
+              name: `ORDER #${record._id}`,
+              quantity: "1",
+              basePriceMoney: {
+                amount: BigInt(cents),
+                currency: "USD"
+              }
+            }
+          ]
+        },
+        checkoutOptions: {
+          redirectUrl:
+            `${CLIENT_URL}/success/${record._id}`,
+          askForShippingAddress: false
+        }
+      })
+
+    // =================================================
+    // STEP 9 - VALIDATE SQUARE RESPONSE
+    // =================================================
+
+    const paymentLink = response?.paymentLink
+
+    const paymentUrl =
+      paymentLink?.url
+
+    const squareOrderId =
+      paymentLink?.orderId ||
+      paymentLink?.order_id
+
+    if (
+      !paymentUrl ||
+      !paymentLink?.id ||
+      !squareOrderId
+    ) {
+      console.error(
+        "Square returned incomplete payment-link data."
+      )
+
+      throw new Error(
+        "Square payment link missing required identifiers."
+      )
+    }
+
+    // =================================================
+    // STEP 10 - SAVE PAYMENT TRACKING
+    // =================================================
+
     record.paymentUrl = paymentUrl
+    record.squareEnvironment = squareMode
+    record.squarePaymentLinkId = paymentLink.id
+    record.squareOrderId = squareOrderId
+    record.squareExpectedAmountCents = cents
 
     await record.save()
 
-    console.log("✅ PAYMENT LINK CREATED")
+    console.log("Square payment link created:", {
+      orderId: String(record._id),
+      environment: squareMode
+    })
 
-    res.json({
+    // =================================================
+    // STEP 11 - RETURN PAYMENT LINK
+    // =================================================
+
+    return res.json({
       success: true,
       paymentUrl,
       orderId: record._id,
+      environment: squareMode,
       totals: {
         subtotal,
         shipping,
@@ -279,12 +439,17 @@ router.post("/create-payment/:id", async (req, res) => {
         total
       }
     })
-  } catch (err) {
-    console.error("❌ SQUARE ERROR:", err)
 
-    res.status(500).json({
+  } catch (error) {
+    console.error(
+      "Square payment creation failed:",
+      error.message
+    )
+
+    return res.status(500).json({
       success: false,
-      message: err.message || "Square payment failed"
+      message:
+        "Unable to create Square payment link."
     })
   }
 })

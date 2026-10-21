@@ -1241,11 +1241,20 @@ router.patch(
       await order.save()
 
       emit(req, "jobUpdated", order)
-
-      await sendStatus(
-        order,
-        "payment_required"
-      )
+if (
+  String(process.env.SQUARE_ENVIRONMENT || "")
+    .trim()
+    .toLowerCase() !== "sandbox"
+) {
+  await sendStatus(
+    order,
+    "payment_required"
+  )
+} else {
+  console.log(
+    "Sandbox checkout: payment-required email suppressed"
+  )
+}
 
       res.json({
         success: true,
