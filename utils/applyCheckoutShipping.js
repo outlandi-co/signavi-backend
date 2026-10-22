@@ -45,6 +45,7 @@ export function applyCheckoutShipping(
   if (!hasPhysicalItems) {
     setShippingAmount(order, 0)
     order.shippingRateId = ""
+    order.shippingRateIds = []
     order.shippingProvider = ""
     order.shippingService = ""
     order.shippingRate = null
@@ -61,16 +62,29 @@ export function applyCheckoutShipping(
     )
   }
 
-  const quote = verifyShippingQuote(
-    body.shippingQuote,
-    {
-      items: items.map((item) => ({
-        productId: String(item.productId || ""),
-        quantity: item.quantity
-      })),
-      destination
-    }
-  )
+  // Test shipping quotes are permitted only when Square
+// is explicitly configured for Sandbox.
+// Production and missing configurations reject test rates.
+const squareEnvironment = String(
+  process.env.SQUARE_ENVIRONMENT || ""
+).trim().toLowerCase()
+
+const allowTestShipping =
+  squareEnvironment === "sandbox" &&
+  Boolean(String(process.env.SQUARE_ACCESS_TOKEN || "").trim()) &&
+  Boolean(String(process.env.SQUARE_LOCATION_ID || "").trim())
+
+const quote = verifyShippingQuote(
+  body.shippingQuote,
+  {
+    items: items.map((item) => ({
+      productId: String(item.productId || ""),
+      quantity: item.quantity
+    })),
+    destination,
+    allowTest: allowTestShipping
+  }
+)
 
   order.address = {
     street: String(
@@ -89,11 +103,14 @@ export function applyCheckoutShipping(
   setShippingAmount(order, quote.amount)
 
   order.shippingRateId = quote.rateId
+  order.shippingRateIds = quote.rateIds
   order.shippingProvider = quote.provider
   order.shippingService = quote.service
 
   order.shippingRate = {
     object_id: quote.rateId,
+    rateIds: quote.rateIds,
+    parcelRates: quote.parcelRates,
     amount: String(quote.amount),
     currency: quote.currency,
     provider: quote.provider,

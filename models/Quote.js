@@ -279,6 +279,45 @@ const quoteSchema = new mongoose.Schema(
       ref: "Order",
       default: null
     },
+/* ================= SQUARE PAYMENT TRACKING ================= */
+
+paymentUrl: {
+  type: String,
+  default: ""
+},
+
+paymentStatus: {
+  type: String,
+  enum: ["unpaid", "pending", "paid", "refunded"],
+  default: "unpaid"
+},
+
+squareEnvironment: {
+  type: String,
+  enum: ["sandbox", "production"],
+  default: null
+},
+
+squarePaymentLinkId: {
+  type: String,
+  default: ""
+},
+
+squareOrderId: {
+  type: String,
+  default: ""
+},
+
+squarePaymentId: {
+  type: String,
+  default: ""
+},
+
+squareExpectedAmountCents: {
+  type: Number,
+  default: null,
+  min: 0
+},
 
     /* ================= SOURCE ================= */
 
