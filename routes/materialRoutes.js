@@ -14,8 +14,20 @@ import {
 import { generateMaterial } from "../controllers/materialGeneratorController.js"
 
 import upload from "../middleware/upload.js"
+import { requireAuth } from "../middleware/auth.js"
 
 const router = express.Router()
+
+const requireAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required"
+    })
+  }
+
+  next()
+}
 
 /* =========================================================
    MATERIAL CATALOG ROUTES
@@ -31,13 +43,15 @@ router.get("/search", (req, res, next) => {
   next()
 }, searchMaterials)
 
-router.get("/export", (req, res, next) => {
+router.get("/export", requireAuth, requireAdmin, (req, res, next) => {
   console.log("⬇️ GET /api/materials/export")
   next()
 }, exportMaterialsCSV)
 
 router.post(
   "/import",
+  requireAuth,
+  requireAdmin,
   upload.single("file"),
   (req, res, next) => {
     console.log("⬆️ POST /api/materials/import")
@@ -51,7 +65,7 @@ router.post(
    KEEP THIS ABOVE /:id
 ========================================================= */
 
-router.post("/generate", (req, res, next) => {
+router.post("/generate", requireAuth, requireAdmin, (req, res, next) => {
   console.log("⚡ POST /api/materials/generate")
   next()
 }, generateMaterial)
@@ -70,17 +84,17 @@ router.get("/:id", (req, res, next) => {
    MATERIAL MANAGEMENT
 ========================================================= */
 
-router.post("/", (req, res, next) => {
+router.post("/", requireAuth, requireAdmin, (req, res, next) => {
   console.log("➕ CREATE MATERIAL")
   next()
 }, createMaterial)
 
-router.put("/:id", (req, res, next) => {
+router.put("/:id", requireAuth, requireAdmin, (req, res, next) => {
   console.log(`✏️ UPDATE MATERIAL: ${req.params.id}`)
   next()
 }, updateMaterial)
 
-router.delete("/:id", (req, res, next) => {
+router.delete("/:id", requireAuth, requireAdmin, (req, res, next) => {
   console.log(`🗑️ DELETE MATERIAL: ${req.params.id}`)
   next()
 }, deleteMaterial)

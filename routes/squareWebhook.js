@@ -11,18 +11,18 @@ import sendReceiptEmail from "../utils/sendReceiptEmail.js"
 
 const router = express.Router()
 
+// =====================================================
+// SQUARE ENVIRONMENT
+// =====================================================
+
+const squareMode = String(
+  process.env.SQUARE_ENVIRONMENT || ""
+).trim().toLowerCase()
+
+const validSquareMode =
+  ["sandbox", "production"].includes(squareMode)
+
 const OBJECT_ID = /^[a-f0-9]{24}$/i
-
-const CLOSED_INVOICE_STATES = [
-  "cancelled",
-  "production",
-  "shipped",
-  "delivered",
-  "completed"
-]
-
-const ADMIN_EMAIL =
-  process.env.ADMIN_EMAIL || "admin@signavistudio.store"
 
 const CLOSED_ORDER_STATES = [
   "cancelled",
@@ -34,14 +34,22 @@ const CLOSED_ORDER_STATES = [
   "completed"
 ]
 
+const CLOSED_INVOICE_STATES = [
+  "cancelled",
+  "production",
+  "shipped",
+  "delivered",
+  "completed"
+]
+
+const ADMIN_EMAIL =
+  process.env.ADMIN_EMAIL ||
+  "admin@signavistudio.store"
+
 console.log("Square storefront payment webhook loaded")
 
 // =====================================================
 // VERIFY SQUARE WEBHOOK SIGNATURE
-// =====================================================
-// Requires the ORIGINAL raw request body.
-// SQUARE_WEBHOOK_URL must match the registered
-// Square notification URL exactly.
 // =====================================================
 
 const verifySignature = (rawBody, signature) => {
@@ -76,18 +84,31 @@ const verifySignature = (rawBody, signature) => {
 }
 
 // =====================================================
-// RETRIEVE VERIFIED DATA DIRECTLY FROM SQUARE
+// RETRIEVE VERIFIED PAYMENT DATA FROM SQUARE
 // =====================================================
 
 const squareGet = async (endpoint) => {
-  const token = process.env.SQUARE_ACCESS_TOKEN
+  if (!validSquareMode) {
+    throw new Error(
+      "Invalid Square environment configuration"
+    )
+  }
+
+  const token = String(
+    process.env.SQUARE_ACCESS_TOKEN || ""
+  ).trim()
 
   if (!token) {
     throw new Error("SQUARE_ACCESS_TOKEN is missing")
   }
 
+  const baseUrl =
+    squareMode === "sandbox"
+      ? "https://connect.squareupsandbox.com"
+      : "https://connect.squareup.com"
+
   const response = await fetch(
-    `https://connect.squareup.com/v2/${endpoint}`,
+    `${baseUrl}/v2/${endpoint}`,
     {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -136,11 +157,7 @@ const toCents = (value) => {
 }
 
 // =====================================================
-// GET SIGNAVI ORDER REFERENCE
-// =====================================================
-// Supports existing Square order references:
-// ID:xxxxxxxxxxxxxxxxxxxxxxxx
-// SIGNAVI_ORDER:xxxxxxxxxxxxxxxxxxxxxxxx
+// EXTRACT LOCAL ORDER REFERENCE
 // =====================================================
 
 const taggedId = (squareOrder) => {
@@ -164,7 +181,7 @@ const taggedId = (squareOrder) => {
 }
 
 // =====================================================
-// FIND LOCAL SIGNAVI ORDER
+// FIND SIGNAVI ORDER
 // =====================================================
 
 const resolveOrder = async (squareOrder) => {
@@ -209,14 +226,7 @@ const resolveOrder = async (squareOrder) => {
 }
 
 // =====================================================
-// SEND CUSTOMER RECEIPT
-// =====================================================
-// Uses an atomic receipt claim to reduce duplicate
-// emails from repeated/concurrent webhook events.
-// Failed sends release the claim for a later retry.
-//
-// For guaranteed delivery after process crashes,
-// use a durable email outbox in the future.
+// SEND RECEIPT ONLY ONCE
 // =====================================================
 
 const sendReceiptOnce = async (
@@ -230,6 +240,7 @@ const sendReceiptOnce = async (
       _id: orderId,
       paymentStatus: "paid",
       squarePaymentId: paymentId,
+      squareEnvironment: "production",
       receiptEmailSent: {
         $ne: true
       },
@@ -303,15 +314,7 @@ const sendReceiptOnce = async (
 }
 
 // =====================================================
-// SQUARE PAYMENT WEBHOOK
-// =====================================================
-// Accepts payment.created and payment.updated.
-// Only COMPLETED payments can be marked paid.
-// =====================================================
-
-
-// =====================================================
-// VERIFIED SQUARE CUSTOM INVOICE RECONCILIATION
+// RECONCILE CUSTOM INVOICE PAYMENT
 // =====================================================
 
 const reconcileInvoicePayment = async (
@@ -321,6 +324,17 @@ const reconcileInvoicePayment = async (
   payment,
   paidAmount
 ) => {
+  if (
+    !validSquareMode ||
+    invoice.squareEnvironment !== squareMode
+  ) {
+    console.warn(
+      "Invoice Square environment missing or mismatched:",
+      String(invoice._id)
+    )
+    return
+  }
+
   const expectedAmount = toCents(invoice.total)
 
   if (
@@ -360,7 +374,7 @@ const reconcileInvoicePayment = async (
     )
   ) {
     console.warn(
-      "Conflicting or manually recorded invoice payment:",
+      "Conflicting invoice payment:",
       String(invoice._id)
     )
     return
@@ -376,11 +390,11 @@ const reconcileInvoicePayment = async (
 
   const now = new Date()
 
-  // Atomic update prevents duplicate webhook processing.
   const updated = await Invoice.findOneAndUpdate(
     {
       _id: invoice._id,
       squareOrderId: squareOrder.id,
+      squareEnvironment: squareMode,
       paymentStatus: "unpaid",
       squarePaymentId: {
         $in: [null, "", payment.id]
@@ -396,7 +410,6 @@ const reconcileInvoicePayment = async (
         paidAt: now,
         status: "paid"
       },
-
       $push: {
         timeline: {
           status: "paid",
@@ -419,7 +432,8 @@ const reconcileInvoicePayment = async (
 
     if (
       latest?.paymentStatus === "paid" &&
-      latest.squarePaymentId === payment.id
+      latest.squarePaymentId === payment.id &&
+      latest.squareEnvironment === squareMode
     ) {
       console.log(
         "Concurrent invoice payment already reconciled:",
@@ -440,7 +454,14 @@ const reconcileInvoicePayment = async (
     String(updated._id)
   )
 
-  // Payment is already saved; notification is best-effort.
+  // Sandbox payments must not send real notifications.
+  if (squareMode === "sandbox") {
+    console.log(
+      "Sandbox invoice verified; admin notification suppressed"
+    )
+    return
+  }
+
   try {
     const notification = await Notification.create({
       userEmail: ADMIN_EMAIL,
@@ -467,15 +488,24 @@ const reconcileInvoicePayment = async (
     )
   }
 
-  // Production is NOT started automatically.
-  // The existing production controller still requires
-  // approved artwork and accepted proof terms.
+  // Never automatically start production.
 }
+
+// =====================================================
+// SQUARE PAYMENT WEBHOOK
+// =====================================================
 
 router.post("/webhook", async (req, res) => {
   // ===================================================
-  // STEP 1 — VERIFY WEBHOOK SIGNATURE
+  // STEP 1 - VERIFY CONFIGURATION AND SIGNATURE
   // ===================================================
+
+  if (!validSquareMode) {
+    console.error(
+      "Square webhook disabled: invalid SQUARE_ENVIRONMENT"
+    )
+    return res.sendStatus(503)
+  }
 
   const signature =
     req.headers["x-square-hmacsha256-signature"]
@@ -484,12 +514,11 @@ router.post("/webhook", async (req, res) => {
     console.warn(
       "Rejected invalid Square webhook signature"
     )
-
     return res.sendStatus(401)
   }
 
   // ===================================================
-  // STEP 2 — PARSE WEBHOOK EVENT
+  // STEP 2 - PARSE EVENT
   // ===================================================
 
   let event
@@ -518,10 +547,7 @@ router.post("/webhook", async (req, res) => {
     event?.data?.object?.payment
 
   // ===================================================
-  // STEP 3 — REQUIRE COMPLETED PAYMENT
-  // ===================================================
-  // APPROVED means authorized, not captured.
-  // Missing statuses must also be rejected.
+  // STEP 3 - REQUIRE COMPLETED PAYMENT
   // ===================================================
 
   const status = String(
@@ -536,13 +562,12 @@ router.post("/webhook", async (req, res) => {
       "Ignoring Square payment status:",
       status || "MISSING"
     )
-
     return res.sendStatus(200)
   }
 
   try {
     // =================================================
-    // STEP 4 — VERIFY PAYMENT WITH SQUARE API
+    // STEP 4 - VERIFY PAYMENT WITH SQUARE API
     // =================================================
 
     const paymentResponse = await squareGet(
@@ -560,16 +585,16 @@ router.post("/webhook", async (req, res) => {
       console.warn(
         "Square payment incomplete or missing order ID"
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 5 — VERIFY SQUARE LOCATION
+    // STEP 5 - VERIFY SQUARE LOCATION
     // =================================================
 
-    const locationId =
-      process.env.SQUARE_LOCATION_ID
+    const locationId = String(
+      process.env.SQUARE_LOCATION_ID || ""
+    ).trim()
 
     if (
       !locationId ||
@@ -578,12 +603,11 @@ router.post("/webhook", async (req, res) => {
       console.error(
         "Square payment location mismatch"
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 6 — GET VERIFIED SQUARE ORDER
+    // STEP 6 - RETRIEVE VERIFIED SQUARE ORDER
     // =================================================
 
     const orderResponse = await squareGet(
@@ -599,7 +623,7 @@ router.post("/webhook", async (req, res) => {
       squareOrder?.total_money?.amount
 
     // =================================================
-    // STEP 7 — VERIFY PAYMENT AMOUNT/CURRENCY
+    // STEP 7 - VERIFY AMOUNT, CURRENCY AND LOCATION
     // =================================================
 
     if (
@@ -617,16 +641,11 @@ router.post("/webhook", async (req, res) => {
         "Square payment amount, location, or currency mismatch:",
         incoming.id
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 8 — MATCH SIGNAVI DATABASE ORDER
-    // =================================================
-
-    // =================================================
-    // MATCH CUSTOM INVOICES BEFORE STOREFRONT ORDERS
+    // STEP 8 - CHECK CUSTOM INVOICES FIRST
     // =================================================
 
     const matchingInvoices = await Invoice.find({
@@ -664,6 +683,10 @@ router.post("/webhook", async (req, res) => {
       return res.sendStatus(200)
     }
 
+    // =================================================
+    // STEP 9 - FIND SIGNAVI ORDER
+    // =================================================
+
     const order = await resolveOrder(squareOrder)
 
     if (!order) {
@@ -671,12 +694,23 @@ router.post("/webhook", async (req, res) => {
         "Square payment requires manual reconciliation:",
         squareOrder.id
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 9 — VERIFY ASSOCIATED SQUARE ORDER
+    // STEP 10 - VERIFY STORED ENVIRONMENT
+    // =================================================
+
+    if (order.squareEnvironment !== squareMode) {
+      console.warn(
+        "Order Square environment missing or mismatched:",
+        String(order._id)
+      )
+      return res.sendStatus(200)
+    }
+
+    // =================================================
+    // STEP 11 - VERIFY SQUARE ORDER ID
     // =================================================
 
     if (
@@ -687,12 +721,11 @@ router.post("/webhook", async (req, res) => {
         "SignaVi order linked to another Square order:",
         String(order._id)
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 10 — MATCH SIGNAVI EXPECTED TOTAL
+    // STEP 12 - MATCH EXPECTED PAYMENT TOTAL
     // =================================================
 
     const expectedAmount =
@@ -710,12 +743,11 @@ router.post("/webhook", async (req, res) => {
         "Payment does not match SignaVi order total:",
         String(order._id)
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 11 — PROTECT REFUNDED / CLOSED ORDERS
+    // STEP 13 - PROTECT REFUNDED AND CLOSED ORDERS
     // =================================================
 
     if (
@@ -729,12 +761,11 @@ router.post("/webhook", async (req, res) => {
         "Payment requires review for closed order:",
         String(order._id)
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 12 — BLOCK CONFLICTING PAYMENTS
+    // STEP 14 - REJECT CONFLICTING PAYMENTS
     // =================================================
 
     if (
@@ -751,105 +782,92 @@ router.post("/webhook", async (req, res) => {
         "Conflicting payment detected:",
         String(order._id)
       )
-
       return res.sendStatus(200)
     }
 
     // =================================================
-    // STEP 13 — MARK ORDER PAID
-    // =================================================
-    // Atomic update prevents duplicate webhook
-    // events from marking orders paid repeatedly.
-    // Do not automatically start production.
+    // STEP 15 - MARK ORDER PAID ATOMICALLY
     // =================================================
 
     if (order.paymentStatus !== "paid") {
       const now = new Date()
 
-      const updated =
-        await Order.findOneAndUpdate(
-          {
-            _id: order._id,
+      const updated = await Order.findOneAndUpdate(
+        {
+          _id: order._id,
+          squareEnvironment: squareMode,
 
-            paymentStatus: {
-              $nin: ["paid", "refunded"]
-            },
+          paymentStatus: {
+            $nin: ["paid", "refunded"]
+          },
 
-            status: {
-              $nin: CLOSED_ORDER_STATES
-            },
+          status: {
+            $nin: CLOSED_ORDER_STATES
+          },
 
-            squarePaymentId: {
-              $in: [
-                null,
-                "",
-                payment.id
-              ]
-            },
-
-            $or: [
-              {
-                squareOrderId: {
-                  $exists: false
-                }
-              },
-              {
-                squareOrderId: null
-              },
-              {
-                squareOrderId: ""
-              },
-              {
-                squareOrderId: squareOrder.id
-              }
+          squarePaymentId: {
+            $in: [
+              null,
+              "",
+              payment.id
             ]
           },
-          {
-            $set: {
-              paymentStatus: "paid",
-              paymentMethod: "Square",
 
-              squarePaymentId:
-                payment.id,
-
-              squareOrderId:
-                squareOrder.id,
-
-              squareExpectedAmountCents:
-                paidAmount,
-
-              paidAt: now,
-
-              status: "paid"
-            },
-
-            $push: {
-              timeline: {
-                status: "paid",
-                date: now,
-                note:
-                  "Verified Square payment; hold for fulfillment review"
+          $or: [
+            {
+              squareOrderId: {
+                $exists: false
               }
+            },
+            {
+              squareOrderId: null
+            },
+            {
+              squareOrderId: ""
+            },
+            {
+              squareOrderId: squareOrder.id
             }
+          ]
+        },
+        {
+          $set: {
+            paymentStatus: "paid",
+            paymentMethod: "Square",
+            squarePaymentId: payment.id,
+            squareOrderId: squareOrder.id,
+            squareExpectedAmountCents: paidAmount,
+            paidAt: now,
+            status: "paid"
           },
-          {
-            new: true
+
+          $push: {
+            timeline: {
+              status: "paid",
+              date: now,
+              note:
+                "Verified Square payment; " +
+                "hold for fulfillment review"
+            }
           }
-        )
+        },
+        {
+          new: true
+        }
+      )
 
       if (!updated) {
-        const latest =
-          await Order.findById(order._id)
+        const latest = await Order.findById(order._id)
 
         if (
           latest?.paymentStatus !== "paid" ||
-          latest.squarePaymentId !== payment.id
+          latest.squarePaymentId !== payment.id ||
+          latest.squareEnvironment !== squareMode
         ) {
           console.warn(
             "Order changed during Square reconciliation:",
             String(order._id)
           )
-
           return res.sendStatus(200)
         }
       } else {
@@ -866,16 +884,22 @@ router.post("/webhook", async (req, res) => {
     }
 
     // =================================================
-    // STEP 14 — CUSTOMER RECEIPT
+    // STEP 16 - CUSTOMER RECEIPT
     // =================================================
 
-    await sendReceiptOnce(
-      order._id,
-      payment.id
-    )
+    if (squareMode === "production") {
+      await sendReceiptOnce(
+        order._id,
+        payment.id
+      )
+    } else {
+      console.log(
+        "Sandbox order verified; customer receipt suppressed"
+      )
+    }
 
     // =================================================
-    // STEP 15 — CONFIRM WEBHOOK RECEIPT
+    // STEP 17 - CONFIRM WEBHOOK RECEIPT
     // =================================================
 
     return res.sendStatus(200)
@@ -886,7 +910,6 @@ router.post("/webhook", async (req, res) => {
       error.message
     )
 
-    // Return retryable status for temporary errors.
     return res.sendStatus(503)
   }
 })

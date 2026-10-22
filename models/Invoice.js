@@ -74,6 +74,13 @@ const invoiceSchema = new mongoose.Schema({
   },
 
   paymentUrl: { type: String, default: "" },
+
+  squareEnvironment: {
+    type: String,
+    enum: ["sandbox", "production"],
+    default: null
+  },
+
   squareCheckoutId: { type: String, default: "" },
   squarePaymentLinkId: { type: String, default: "" },
   squareOrderId: { type: String, default: "" },

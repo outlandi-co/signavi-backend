@@ -2,7 +2,10 @@
 import express from "express"
 import axios from "axios"
 import Product from "../models/Product.js"
-import { createShippingQuote } from "../utils/shippingQuote.js"
+import {
+  createShippingQuote,
+  createMultiParcelShippingQuote
+} from "../utils/shippingQuote.js"
 import { requireAuth } from "../middleware/auth.js"
 
 const router = express.Router()
@@ -95,20 +98,34 @@ const getShippoKey = () =>
 
 /* ================= SHIPPO REQUEST ================= */
 
+
 const requestShippoRates = async ({
   from,
   to,
   parcels,
   token
 }) => {
+  const carrierAccounts = String(
+    process.env.SHIPPO_CARRIER_ACCOUNT_IDS || ""
+  )
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+
+  const shipmentData = {
+    address_from: from,
+    address_to: to,
+    parcels,
+    async: false
+  }
+
+  if (carrierAccounts.length > 0) {
+    shipmentData.carrier_accounts = carrierAccounts
+  }
+
   const response = await axios.post(
     "https://api.goshippo.com/shipments/",
-    {
-      address_from: from,
-      address_to: to,
-      parcels,
-      async: false
-    },
+    shipmentData,
     {
       headers: {
         Authorization: `ShippoToken ${token}`,
@@ -119,6 +136,75 @@ const requestShippoRates = async ({
   )
 
   return response.data
+}
+
+/* ================= MULTI-PARCEL RATE AGGREGATION ================= */
+
+const validUsdRate = (rate) =>
+  Boolean(rate?.object_id) &&
+  String(rate.currency || "").toUpperCase() === "USD" &&
+  Number.isFinite(Number(rate.amount)) &&
+  Number(rate.amount) > 0 &&
+  Number.isSafeInteger(Math.round(Number(rate.amount) * 100))
+
+const multiParcelServiceKey = (rate) => {
+  const provider = String(rate?.provider || "").trim()
+  const account = String(rate?.carrier_account || "").trim()
+  const token = String(rate?.servicelevel?.token || "").trim()
+  return provider && account && token
+    ? JSON.stringify([provider, account, token])
+    : null
+}
+
+// Every returned option must cover EVERY parcel. Never quote a partial order.
+const combineParcelRates = (shipments) => {
+  const first = new Map()
+  for (const rate of shipments[0]?.rates || []) {
+    if (!validUsdRate(rate)) continue
+    const key = multiParcelServiceKey(rate)
+    if (!key) continue
+    const prior = first.get(key)
+    if (!prior || Number(rate.amount) < Number(prior.amount)) {
+      first.set(key, rate)
+    }
+  }
+
+  const common = [...first.entries()].map(([key, rate]) => ({
+    key,
+    rates: [rate]
+  }))
+
+  for (const shipment of shipments.slice(1)) {
+    const choices = new Map()
+    for (const rate of shipment.rates || []) {
+      if (!validUsdRate(rate)) continue
+      const key = multiParcelServiceKey(rate)
+      if (!key) continue
+      const prior = choices.get(key)
+      if (!prior || Number(rate.amount) < Number(prior.amount)) {
+        choices.set(key, rate)
+      }
+    }
+    for (let index = common.length - 1; index >= 0; index--) {
+      const next = choices.get(common[index].key)
+      if (!next) common.splice(index, 1)
+      else common[index].rates.push(next)
+    }
+  }
+
+  return common.map(({ rates }) => {
+    const totalCents = rates.reduce(
+      (sum, rate) => sum + Math.round(Number(rate.amount) * 100), 0
+    )
+    return {
+      ...rates[0],
+      // UI compatibility: the first real Shippo ID is only a display ID;
+      // the signed quote stores the full set of underlying rate IDs.
+      amount: (totalCents / 100).toFixed(2),
+      parcelRateIds: rates.map((rate) => rate.object_id),
+      parcelRates: rates
+    }
+  }).sort((a, b) => Number(a.amount) - Number(b.amount))
 }
 
 /* =========================================================
@@ -248,6 +334,7 @@ const orientations = ([a, b, c]) => [
   [c, b, a]
 ]
 
+
 const choosePackage = (
   productShipping,
   quantity,
@@ -260,29 +347,44 @@ const choosePackage = (
   ]
 
   const unitWeight = Number(productShipping.weightOz)
-
-  const desiredType = String(
-    productShipping.packagingType || ""
-  )
-
   const shipSeparately =
     productShipping.shipSeparately === true
 
   if (
     !dims.every((value) => validPositive(value, 120)) ||
     !validPositive(unitWeight, 2400) ||
-    !allowedPackaging.has(desiredType)
+    !Number.isInteger(quantity) ||
+    quantity < 1
   ) {
     return null
   }
 
   const candidates = []
 
-  for (
-    const box of packages.filter(
-      (entry) => entry.type === desiredType
-    )
-  ) {
+
+  // Protect specialized packaging categories.
+  // Regular products can use boxes, mailers, or custom packaging.
+  // Fragile and oversized products require their designated packaging.
+
+  const preferredType = String(
+    productShipping.packagingType || ""
+  ).toLowerCase()
+
+  const specializedTypes = new Set([
+    "fragile",
+    "oversized"
+  ])
+
+  const compatiblePackages = packages.filter((box) => {
+    if (specializedTypes.has(preferredType)) {
+      return box.type === preferredType
+    }
+
+    return !specializedTypes.has(box.type)
+  })
+
+  for (const box of compatiblePackages) {
+
     const usable = [
       box.length - box.clearance,
       box.width - box.clearance,
@@ -297,10 +399,7 @@ const choosePackage = (
         Math.floor(usable[1] / w) *
         Math.floor(usable[2] / h)
 
-      maxBySpace = Math.max(
-        maxBySpace,
-        capacity
-      )
+      maxBySpace = Math.max(maxBySpace, capacity)
     }
 
     const maxByWeight = Math.floor(
@@ -313,9 +412,7 @@ const choosePackage = (
       maxByWeight
     )
 
-    if (perParcel < 1) {
-      continue
-    }
+    if (perParcel < 1) continue
 
     candidates.push({
       box,
@@ -333,6 +430,7 @@ const choosePackage = (
 
   return candidates[0] || null
 }
+
 
 /* ================= BUILD CART PARCELS ================= */
 
@@ -535,37 +633,59 @@ router.post("/get-rates", async (req, res) => {
       })
     }
 
-    const shipment = await requestShippoRates({
-      from,
-      to,
-      parcels: result.parcels,
-      token
+    const testMode = token.startsWith("shippo_test_")
+
+    if (result.parcels.length === 1) {
+      const shipment = await requestShippoRates({
+        from, to, parcels: result.parcels, token
+      })
+      return res.json({
+        success: true,
+        rates: (shipment.rates || [])
+          .filter(validUsdRate)
+          .map((rate) => ({
+            ...rate,
+            shippingQuote: createShippingQuote({
+              items: req.body.items,
+              destination: to,
+              rate,
+              testMode
+            })
+          })),
+        testMode,
+        parcelCount: 1,
+        messages: shipment.messages || []
+      })
+    }
+
+    // Quote every parcel individually. Sequential requests avoid bursts
+    // against carrier sandbox accounts and never accept missing parcels.
+    const shipments = []
+    for (const parcel of result.parcels) {
+      shipments.push(await requestShippoRates({
+        from, to, parcels: [parcel], token
+      }))
+    }
+
+    const rates = combineParcelRates(shipments).map((rate) => {
+      const { parcelRates, ...displayRate } = rate
+      return {
+        ...displayRate,
+        shippingQuote: createMultiParcelShippingQuote({
+          items: req.body.items,
+          destination: to,
+          rates: parcelRates,
+          testMode
+        })
+      }
     })
 
     return res.json({
       success: true,
-
-      // Preserve the existing frontend rate format.
-      rates: (shipment.rates || [])
-        .filter((rate) =>
-          Boolean(rate?.object_id) &&
-          String(rate?.currency || "").toUpperCase() === "USD" &&
-          Number.isFinite(Number(rate?.amount)) &&
-          Number(rate.amount) > 0
-        )
-        .map((rate) => ({
-          ...rate,
-          shippingQuote: createShippingQuote({
-            items: req.body.items,
-            destination: to,
-            rate,
-            testMode: token.startsWith("shippo_test_")
-          })
-        })),
-
-      testMode: token.startsWith("shippo_test_"),
+      rates,
+      testMode,
       parcelCount: result.parcels.length,
-      messages: shipment.messages || []
+      messages: shipments.flatMap((shipment) => shipment.messages || [])
     })
   } catch (err) {
     console.error(

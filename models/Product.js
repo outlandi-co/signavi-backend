@@ -14,6 +14,31 @@ const colorSchema = new mongoose.Schema(
   { _id: false }
 )
 
+/* ================= PRODUCT MATERIAL LINKS ================= */
+
+const productMaterialSchema = new mongoose.Schema(
+  {
+    material: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Material",
+      required: true
+    },
+
+    colorSku: {
+      type: String,
+      default: "",
+      trim: true
+    },
+
+    quantityPerUnit: {
+      type: Number,
+      required: true,
+      min: 0.000001
+    }
+  },
+  { _id: false }
+)
+
 /* ================= VARIANT SCHEMA ================= */
 
 const variantSchema = new mongoose.Schema(
@@ -58,6 +83,11 @@ const variantSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0
+    },
+
+    materialUsage: {
+      type: [productMaterialSchema],
+      default: []
     },
 
     images: {
@@ -350,6 +380,11 @@ const productSchema = new mongoose.Schema(
 
     sizes: {
       type: [String],
+      default: []
+    },
+
+    materialUsage: {
+      type: [productMaterialSchema],
       default: []
     },
 

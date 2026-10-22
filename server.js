@@ -68,14 +68,14 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true })
 }
 
-console.log("📁 Upload directory:", uploadDir)
+console.log("Ã°Å¸â€œÂ Upload directory:", uploadDir)
 
 /* ================= APP ================= */
 
 const app = express()
 const server = http.createServer(app)
 
-console.log("\n🔥 SERVER READY 🚀\n")
+console.log("\nÃ°Å¸â€Â¥ SERVER READY Ã°Å¸Å¡â‚¬\n")
 
 /* ================= CORS ================= */
 
@@ -86,7 +86,9 @@ const allowedOrigins = [
   "https://www.signavi.store",
   "http://localhost:5173",
   "http://localhost:5174",
-  "http://localhost:3000"
+  "http://localhost:3000",
+  "https://signavi-studio-osb4608sk-signavistudio-9574s-projects.vercel.app",
+  "https://signavi-studio-git-develop-v2-signavistudio-9574s-projects.vercel.app"
 ]
 
 const corsOptions = {
@@ -99,7 +101,7 @@ const corsOptions = {
       return callback(null, true)
     }
 
-    console.warn("❌ CORS BLOCKED:", origin)
+    console.warn("Ã¢ÂÅ’ CORS BLOCKED:", origin)
 
     return callback(
       new Error(`Not allowed by CORS: ${origin}`)
@@ -119,7 +121,8 @@ const corsOptions = {
 
   allowedHeaders: [
     "Content-Type",
-    "Authorization"
+    "Authorization",
+    "x-signavi-guest-checkout-token"
   ],
 
   optionsSuccessStatus: 204
@@ -131,12 +134,12 @@ app.use(cors(corsOptions))
 
 app.use((req, res, next) => {
   console.log(
-    "🌐 ORIGIN:",
+    "Ã°Å¸Å’Â ORIGIN:",
     req.headers.origin || "No origin"
   )
 
   console.log(
-    "➡️ REQUEST:",
+    "Ã¢Å¾Â¡Ã¯Â¸Â REQUEST:",
     req.method,
     req.originalUrl
   )
@@ -179,7 +182,7 @@ app.use((err, req, res, next) => {
     "body" in err
   ) {
     console.error(
-      "❌ BAD JSON:",
+      "Ã¢ÂÅ’ BAD JSON:",
       err.message
     )
 
@@ -402,7 +405,7 @@ app.get(
       )
     } catch (err) {
       console.error(
-        "❌ ORDERS CSV ERROR:",
+        "Ã¢ÂÅ’ ORDERS CSV ERROR:",
         err
       )
 
@@ -531,7 +534,7 @@ app.get(
       )
     } catch (err) {
       console.error(
-        "❌ TAX CSV ERROR:",
+        "Ã¢ÂÅ’ TAX CSV ERROR:",
         err
       )
 
@@ -554,7 +557,7 @@ app.use(
 )
 
 console.log(
-  "📦 MATERIAL CATALOG ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¦ MATERIAL CATALOG ROUTE MOUNTED"
 )
 
 /* ================= SUPPLIERS ================= */
@@ -565,7 +568,7 @@ app.use(
 )
 
 console.log(
-  "🏢 SUPPLIER ROUTE MOUNTED"
+  "Ã°Å¸ÂÂ¢ SUPPLIER ROUTE MOUNTED"
 )
 
 /* ================= PURCHASE ORDERS ================= */
@@ -576,7 +579,7 @@ app.use(
 )
 
 console.log(
-  "📋 PURCHASE ORDER ROUTE MOUNTED"
+  "Ã°Å¸â€œâ€¹ PURCHASE ORDER ROUTE MOUNTED"
 )
 
 /* ================= ESTIMATES ================= */
@@ -587,7 +590,7 @@ app.use(
 )
 
 console.log(
-  "🧮 ESTIMATE ROUTE MOUNTED"
+  "Ã°Å¸Â§Â® ESTIMATE ROUTE MOUNTED"
 )
 
 /* ================= PRODUCTS ================= */
@@ -623,7 +626,7 @@ app.use(
 )
 
 console.log(
-  "🔥 ORDERS ROUTES ACTIVE"
+  "Ã°Å¸â€Â¥ ORDERS ROUTES ACTIVE"
 )
 
 /* ================= INVOICES ================= */
@@ -634,7 +637,7 @@ app.use(
 )
 
 console.log(
-  "🧾 INVOICE ROUTE MOUNTED"
+  "Ã°Å¸Â§Â¾ INVOICE ROUTE MOUNTED"
 )
 
 /* ================= AUTH ================= */
@@ -645,7 +648,7 @@ app.use(
 )
 
 console.log(
-  "🔐 AUTH ROUTES LOADED"
+  "Ã°Å¸â€Â AUTH ROUTES LOADED"
 )
 
 app.use(
@@ -675,7 +678,7 @@ app.use(
 )
 
 console.log(
-  "🔥 QUOTES ROUTE LOADED"
+  "Ã°Å¸â€Â¥ QUOTES ROUTE LOADED"
 )
 
 /* ================= EXPENSES / PRICING / CUSTOMERS ================= */
@@ -703,7 +706,7 @@ app.use(
 )
 
 console.log(
-  "💳 SQUARE ROUTE LOADED"
+  "Ã°Å¸â€™Â³ SQUARE ROUTE LOADED"
 )
 
 /* ================= SHIPPING ================= */
@@ -728,7 +731,7 @@ app.use(
 )
 
 console.log(
-  "📥 NOTIFICATION ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¥ NOTIFICATION ROUTE MOUNTED"
 )
 
 /* ================= AI CHAT ================= */
@@ -739,7 +742,7 @@ app.use(
 )
 
 console.log(
-  "🤖 AI CHAT ROUTE MOUNTED"
+  "Ã°Å¸Â¤â€“ AI CHAT ROUTE MOUNTED"
 )
 
 /* ================= ADMIN EMAIL ================= */
@@ -750,7 +753,7 @@ app.use(
 )
 
 console.log(
-  "📧 ADMIN EMAIL ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ§ ADMIN EMAIL ROUTE MOUNTED"
 )
 
 /* ================= ADMIN EMAIL THREADS ================= */
@@ -761,7 +764,7 @@ app.use(
 )
 
 console.log(
-  "💬 ADMIN EMAIL THREAD ROUTE MOUNTED"
+  "Ã°Å¸â€™Â¬ ADMIN EMAIL THREAD ROUTE MOUNTED"
 )
 
 /* ================= EMAIL WEBHOOKS ================= */
@@ -772,7 +775,7 @@ app.use(
 )
 
 console.log(
-  "📨 ADMIN EMAIL WEBHOOK ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¨ ADMIN EMAIL WEBHOOK ROUTE MOUNTED"
 )
 
 /* ================= SUPPORT ================= */
@@ -783,7 +786,7 @@ app.use(
 )
 
 console.log(
-  "🛟 SUPPORT ROUTE MOUNTED"
+  "Ã°Å¸â€ºÅ¸ SUPPORT ROUTE MOUNTED"
 )
 
 /* ================= INSTAGRAM ================= */
@@ -794,7 +797,7 @@ app.use(
 )
 
 console.log(
-  "📸 INSTAGRAM ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¸ INSTAGRAM ROUTE MOUNTED"
 )
 
 /* ================= SOCIAL PUBLISHER ================= */
@@ -805,7 +808,7 @@ app.use(
 )
 
 console.log(
-  "🌐 SOCIAL PUBLISHER ROUTE MOUNTED"
+  "Ã°Å¸Å’Â SOCIAL PUBLISHER ROUTE MOUNTED"
 )
 
 /* ================= TIKTOK ================= */
@@ -816,7 +819,7 @@ app.use(
 )
 
 console.log(
-  "🎵 TIKTOK ROUTE MOUNTED"
+  "Ã°Å¸Å½Âµ TIKTOK ROUTE MOUNTED"
 )
 
 /* ================= SOCKET ================= */
@@ -849,7 +852,7 @@ io.on(
   "connection",
   (socket) => {
     console.log(
-      "🟢 Socket connected:",
+      "Ã°Å¸Å¸Â¢ Socket connected:",
       socket.id
     )
 
@@ -867,7 +870,7 @@ io.on(
       "disconnect",
       () => {
         console.log(
-          "🔴 Socket disconnected:",
+          "Ã°Å¸â€Â´ Socket disconnected:",
           socket.id
         )
       }
@@ -894,7 +897,7 @@ app.use(
 app.use(
   (err, req, res, next) => {
     console.error(
-      "❌ GLOBAL ERROR:",
+      "Ã¢ÂÅ’ GLOBAL ERROR:",
       err
     )
 
@@ -915,7 +918,7 @@ mongoose
   )
   .then(() => {
     console.log(
-      "✅ Mongo connected"
+      "Ã¢Å“â€¦ Mongo connected"
     )
 
     const PORT =
@@ -926,14 +929,14 @@ mongoose
       PORT,
       () => {
         console.log(
-          `🚀 Server running on ${PORT}`
+          `Ã°Å¸Å¡â‚¬ Server running on ${PORT}`
         )
       }
     )
   })
   .catch((err) => {
     console.error(
-      "❌ DB ERROR:",
+      "Ã¢ÂÅ’ DB ERROR:",
       err
     )
   })
