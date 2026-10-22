@@ -68,14 +68,14 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true })
 }
 
-console.log("ðŸ“ Upload directory:", uploadDir)
+console.log("Ã°Å¸â€œÂ Upload directory:", uploadDir)
 
 /* ================= APP ================= */
 
 const app = express()
 const server = http.createServer(app)
 
-console.log("\nðŸ”¥ SERVER READY ðŸš€\n")
+console.log("\nÃ°Å¸â€Â¥ SERVER READY Ã°Å¸Å¡â‚¬\n")
 
 /* ================= CORS ================= */
 
@@ -87,7 +87,8 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:3000",
-  "https://signavi-studio-osb4608sk-signavistudio-9574s-projects.vercel.app"
+  "https://signavi-studio-osb4608sk-signavistudio-9574s-projects.vercel.app",
+  "https://signavi-studio-git-develop-v2-signavistudio-9574s-projects.vercel.app"
 ]
 
 const corsOptions = {
@@ -100,7 +101,7 @@ const corsOptions = {
       return callback(null, true)
     }
 
-    console.warn("âŒ CORS BLOCKED:", origin)
+    console.warn("Ã¢ÂÅ’ CORS BLOCKED:", origin)
 
     return callback(
       new Error(`Not allowed by CORS: ${origin}`)
@@ -133,12 +134,12 @@ app.use(cors(corsOptions))
 
 app.use((req, res, next) => {
   console.log(
-    "ðŸŒ ORIGIN:",
+    "Ã°Å¸Å’Â ORIGIN:",
     req.headers.origin || "No origin"
   )
 
   console.log(
-    "âž¡ï¸ REQUEST:",
+    "Ã¢Å¾Â¡Ã¯Â¸Â REQUEST:",
     req.method,
     req.originalUrl
   )
@@ -181,7 +182,7 @@ app.use((err, req, res, next) => {
     "body" in err
   ) {
     console.error(
-      "âŒ BAD JSON:",
+      "Ã¢ÂÅ’ BAD JSON:",
       err.message
     )
 
@@ -404,7 +405,7 @@ app.get(
       )
     } catch (err) {
       console.error(
-        "âŒ ORDERS CSV ERROR:",
+        "Ã¢ÂÅ’ ORDERS CSV ERROR:",
         err
       )
 
@@ -533,7 +534,7 @@ app.get(
       )
     } catch (err) {
       console.error(
-        "âŒ TAX CSV ERROR:",
+        "Ã¢ÂÅ’ TAX CSV ERROR:",
         err
       )
 
@@ -556,7 +557,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ“¦ MATERIAL CATALOG ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¦ MATERIAL CATALOG ROUTE MOUNTED"
 )
 
 /* ================= SUPPLIERS ================= */
@@ -567,7 +568,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ¢ SUPPLIER ROUTE MOUNTED"
+  "Ã°Å¸ÂÂ¢ SUPPLIER ROUTE MOUNTED"
 )
 
 /* ================= PURCHASE ORDERS ================= */
@@ -578,7 +579,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ“‹ PURCHASE ORDER ROUTE MOUNTED"
+  "Ã°Å¸â€œâ€¹ PURCHASE ORDER ROUTE MOUNTED"
 )
 
 /* ================= ESTIMATES ================= */
@@ -589,7 +590,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ§® ESTIMATE ROUTE MOUNTED"
+  "Ã°Å¸Â§Â® ESTIMATE ROUTE MOUNTED"
 )
 
 /* ================= PRODUCTS ================= */
@@ -625,7 +626,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ”¥ ORDERS ROUTES ACTIVE"
+  "Ã°Å¸â€Â¥ ORDERS ROUTES ACTIVE"
 )
 
 /* ================= INVOICES ================= */
@@ -636,7 +637,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ§¾ INVOICE ROUTE MOUNTED"
+  "Ã°Å¸Â§Â¾ INVOICE ROUTE MOUNTED"
 )
 
 /* ================= AUTH ================= */
@@ -647,7 +648,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ” AUTH ROUTES LOADED"
+  "Ã°Å¸â€Â AUTH ROUTES LOADED"
 )
 
 app.use(
@@ -677,7 +678,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ”¥ QUOTES ROUTE LOADED"
+  "Ã°Å¸â€Â¥ QUOTES ROUTE LOADED"
 )
 
 /* ================= EXPENSES / PRICING / CUSTOMERS ================= */
@@ -705,7 +706,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ’³ SQUARE ROUTE LOADED"
+  "Ã°Å¸â€™Â³ SQUARE ROUTE LOADED"
 )
 
 /* ================= SHIPPING ================= */
@@ -730,7 +731,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ“¥ NOTIFICATION ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¥ NOTIFICATION ROUTE MOUNTED"
 )
 
 /* ================= AI CHAT ================= */
@@ -741,7 +742,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ¤– AI CHAT ROUTE MOUNTED"
+  "Ã°Å¸Â¤â€“ AI CHAT ROUTE MOUNTED"
 )
 
 /* ================= ADMIN EMAIL ================= */
@@ -752,7 +753,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ“§ ADMIN EMAIL ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ§ ADMIN EMAIL ROUTE MOUNTED"
 )
 
 /* ================= ADMIN EMAIL THREADS ================= */
@@ -763,7 +764,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ’¬ ADMIN EMAIL THREAD ROUTE MOUNTED"
+  "Ã°Å¸â€™Â¬ ADMIN EMAIL THREAD ROUTE MOUNTED"
 )
 
 /* ================= EMAIL WEBHOOKS ================= */
@@ -774,7 +775,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ“¨ ADMIN EMAIL WEBHOOK ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¨ ADMIN EMAIL WEBHOOK ROUTE MOUNTED"
 )
 
 /* ================= SUPPORT ================= */
@@ -785,7 +786,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ›Ÿ SUPPORT ROUTE MOUNTED"
+  "Ã°Å¸â€ºÅ¸ SUPPORT ROUTE MOUNTED"
 )
 
 /* ================= INSTAGRAM ================= */
@@ -796,7 +797,7 @@ app.use(
 )
 
 console.log(
-  "ðŸ“¸ INSTAGRAM ROUTE MOUNTED"
+  "Ã°Å¸â€œÂ¸ INSTAGRAM ROUTE MOUNTED"
 )
 
 /* ================= SOCIAL PUBLISHER ================= */
@@ -807,7 +808,7 @@ app.use(
 )
 
 console.log(
-  "ðŸŒ SOCIAL PUBLISHER ROUTE MOUNTED"
+  "Ã°Å¸Å’Â SOCIAL PUBLISHER ROUTE MOUNTED"
 )
 
 /* ================= TIKTOK ================= */
@@ -818,7 +819,7 @@ app.use(
 )
 
 console.log(
-  "ðŸŽµ TIKTOK ROUTE MOUNTED"
+  "Ã°Å¸Å½Âµ TIKTOK ROUTE MOUNTED"
 )
 
 /* ================= SOCKET ================= */
@@ -851,7 +852,7 @@ io.on(
   "connection",
   (socket) => {
     console.log(
-      "ðŸŸ¢ Socket connected:",
+      "Ã°Å¸Å¸Â¢ Socket connected:",
       socket.id
     )
 
@@ -869,7 +870,7 @@ io.on(
       "disconnect",
       () => {
         console.log(
-          "ðŸ”´ Socket disconnected:",
+          "Ã°Å¸â€Â´ Socket disconnected:",
           socket.id
         )
       }
@@ -896,7 +897,7 @@ app.use(
 app.use(
   (err, req, res, next) => {
     console.error(
-      "âŒ GLOBAL ERROR:",
+      "Ã¢ÂÅ’ GLOBAL ERROR:",
       err
     )
 
@@ -917,7 +918,7 @@ mongoose
   )
   .then(() => {
     console.log(
-      "âœ… Mongo connected"
+      "Ã¢Å“â€¦ Mongo connected"
     )
 
     const PORT =
@@ -928,14 +929,14 @@ mongoose
       PORT,
       () => {
         console.log(
-          `ðŸš€ Server running on ${PORT}`
+          `Ã°Å¸Å¡â‚¬ Server running on ${PORT}`
         )
       }
     )
   })
   .catch((err) => {
     console.error(
-      "âŒ DB ERROR:",
+      "Ã¢ÂÅ’ DB ERROR:",
       err
     )
   })
