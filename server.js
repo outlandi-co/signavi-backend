@@ -68,14 +68,14 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true })
 }
 
-console.log("📁 Upload directory:", uploadDir)
+console.log("ðŸ“ Upload directory:", uploadDir)
 
 /* ================= APP ================= */
 
 const app = express()
 const server = http.createServer(app)
 
-console.log("\n🔥 SERVER READY 🚀\n")
+console.log("\nðŸ”¥ SERVER READY ðŸš€\n")
 
 /* ================= CORS ================= */
 
@@ -86,7 +86,8 @@ const allowedOrigins = [
   "https://www.signavi.store",
   "http://localhost:5173",
   "http://localhost:5174",
-  "http://localhost:3000"
+  "http://localhost:3000",
+  "https://signavi-studio-osb4608sk-signavistudio-9574s-projects.vercel.app"
 ]
 
 const corsOptions = {
@@ -99,7 +100,7 @@ const corsOptions = {
       return callback(null, true)
     }
 
-    console.warn("❌ CORS BLOCKED:", origin)
+    console.warn("âŒ CORS BLOCKED:", origin)
 
     return callback(
       new Error(`Not allowed by CORS: ${origin}`)
@@ -132,12 +133,12 @@ app.use(cors(corsOptions))
 
 app.use((req, res, next) => {
   console.log(
-    "🌐 ORIGIN:",
+    "ðŸŒ ORIGIN:",
     req.headers.origin || "No origin"
   )
 
   console.log(
-    "➡️ REQUEST:",
+    "âž¡ï¸ REQUEST:",
     req.method,
     req.originalUrl
   )
@@ -180,7 +181,7 @@ app.use((err, req, res, next) => {
     "body" in err
   ) {
     console.error(
-      "❌ BAD JSON:",
+      "âŒ BAD JSON:",
       err.message
     )
 
@@ -403,7 +404,7 @@ app.get(
       )
     } catch (err) {
       console.error(
-        "❌ ORDERS CSV ERROR:",
+        "âŒ ORDERS CSV ERROR:",
         err
       )
 
@@ -532,7 +533,7 @@ app.get(
       )
     } catch (err) {
       console.error(
-        "❌ TAX CSV ERROR:",
+        "âŒ TAX CSV ERROR:",
         err
       )
 
@@ -555,7 +556,7 @@ app.use(
 )
 
 console.log(
-  "📦 MATERIAL CATALOG ROUTE MOUNTED"
+  "ðŸ“¦ MATERIAL CATALOG ROUTE MOUNTED"
 )
 
 /* ================= SUPPLIERS ================= */
@@ -566,7 +567,7 @@ app.use(
 )
 
 console.log(
-  "🏢 SUPPLIER ROUTE MOUNTED"
+  "ðŸ¢ SUPPLIER ROUTE MOUNTED"
 )
 
 /* ================= PURCHASE ORDERS ================= */
@@ -577,7 +578,7 @@ app.use(
 )
 
 console.log(
-  "📋 PURCHASE ORDER ROUTE MOUNTED"
+  "ðŸ“‹ PURCHASE ORDER ROUTE MOUNTED"
 )
 
 /* ================= ESTIMATES ================= */
@@ -588,7 +589,7 @@ app.use(
 )
 
 console.log(
-  "🧮 ESTIMATE ROUTE MOUNTED"
+  "ðŸ§® ESTIMATE ROUTE MOUNTED"
 )
 
 /* ================= PRODUCTS ================= */
@@ -624,7 +625,7 @@ app.use(
 )
 
 console.log(
-  "🔥 ORDERS ROUTES ACTIVE"
+  "ðŸ”¥ ORDERS ROUTES ACTIVE"
 )
 
 /* ================= INVOICES ================= */
@@ -635,7 +636,7 @@ app.use(
 )
 
 console.log(
-  "🧾 INVOICE ROUTE MOUNTED"
+  "ðŸ§¾ INVOICE ROUTE MOUNTED"
 )
 
 /* ================= AUTH ================= */
@@ -646,7 +647,7 @@ app.use(
 )
 
 console.log(
-  "🔐 AUTH ROUTES LOADED"
+  "ðŸ” AUTH ROUTES LOADED"
 )
 
 app.use(
@@ -676,7 +677,7 @@ app.use(
 )
 
 console.log(
-  "🔥 QUOTES ROUTE LOADED"
+  "ðŸ”¥ QUOTES ROUTE LOADED"
 )
 
 /* ================= EXPENSES / PRICING / CUSTOMERS ================= */
@@ -704,7 +705,7 @@ app.use(
 )
 
 console.log(
-  "💳 SQUARE ROUTE LOADED"
+  "ðŸ’³ SQUARE ROUTE LOADED"
 )
 
 /* ================= SHIPPING ================= */
@@ -729,7 +730,7 @@ app.use(
 )
 
 console.log(
-  "📥 NOTIFICATION ROUTE MOUNTED"
+  "ðŸ“¥ NOTIFICATION ROUTE MOUNTED"
 )
 
 /* ================= AI CHAT ================= */
@@ -740,7 +741,7 @@ app.use(
 )
 
 console.log(
-  "🤖 AI CHAT ROUTE MOUNTED"
+  "ðŸ¤– AI CHAT ROUTE MOUNTED"
 )
 
 /* ================= ADMIN EMAIL ================= */
@@ -751,7 +752,7 @@ app.use(
 )
 
 console.log(
-  "📧 ADMIN EMAIL ROUTE MOUNTED"
+  "ðŸ“§ ADMIN EMAIL ROUTE MOUNTED"
 )
 
 /* ================= ADMIN EMAIL THREADS ================= */
@@ -762,7 +763,7 @@ app.use(
 )
 
 console.log(
-  "💬 ADMIN EMAIL THREAD ROUTE MOUNTED"
+  "ðŸ’¬ ADMIN EMAIL THREAD ROUTE MOUNTED"
 )
 
 /* ================= EMAIL WEBHOOKS ================= */
@@ -773,7 +774,7 @@ app.use(
 )
 
 console.log(
-  "📨 ADMIN EMAIL WEBHOOK ROUTE MOUNTED"
+  "ðŸ“¨ ADMIN EMAIL WEBHOOK ROUTE MOUNTED"
 )
 
 /* ================= SUPPORT ================= */
@@ -784,7 +785,7 @@ app.use(
 )
 
 console.log(
-  "🛟 SUPPORT ROUTE MOUNTED"
+  "ðŸ›Ÿ SUPPORT ROUTE MOUNTED"
 )
 
 /* ================= INSTAGRAM ================= */
@@ -795,7 +796,7 @@ app.use(
 )
 
 console.log(
-  "📸 INSTAGRAM ROUTE MOUNTED"
+  "ðŸ“¸ INSTAGRAM ROUTE MOUNTED"
 )
 
 /* ================= SOCIAL PUBLISHER ================= */
@@ -806,7 +807,7 @@ app.use(
 )
 
 console.log(
-  "🌐 SOCIAL PUBLISHER ROUTE MOUNTED"
+  "ðŸŒ SOCIAL PUBLISHER ROUTE MOUNTED"
 )
 
 /* ================= TIKTOK ================= */
@@ -817,7 +818,7 @@ app.use(
 )
 
 console.log(
-  "🎵 TIKTOK ROUTE MOUNTED"
+  "ðŸŽµ TIKTOK ROUTE MOUNTED"
 )
 
 /* ================= SOCKET ================= */
@@ -850,7 +851,7 @@ io.on(
   "connection",
   (socket) => {
     console.log(
-      "🟢 Socket connected:",
+      "ðŸŸ¢ Socket connected:",
       socket.id
     )
 
@@ -868,7 +869,7 @@ io.on(
       "disconnect",
       () => {
         console.log(
-          "🔴 Socket disconnected:",
+          "ðŸ”´ Socket disconnected:",
           socket.id
         )
       }
@@ -895,7 +896,7 @@ app.use(
 app.use(
   (err, req, res, next) => {
     console.error(
-      "❌ GLOBAL ERROR:",
+      "âŒ GLOBAL ERROR:",
       err
     )
 
@@ -916,7 +917,7 @@ mongoose
   )
   .then(() => {
     console.log(
-      "✅ Mongo connected"
+      "âœ… Mongo connected"
     )
 
     const PORT =
@@ -927,14 +928,14 @@ mongoose
       PORT,
       () => {
         console.log(
-          `🚀 Server running on ${PORT}`
+          `ðŸš€ Server running on ${PORT}`
         )
       }
     )
   })
   .catch((err) => {
     console.error(
-      "❌ DB ERROR:",
+      "âŒ DB ERROR:",
       err
     )
   })
