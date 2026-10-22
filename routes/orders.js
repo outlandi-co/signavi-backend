@@ -746,23 +746,38 @@ router.get(
 router.get(
   "/:id",
   requireAuth,
-  requireAdmin,
   async (req, res) => {
     try {
       const order = await getOrder(req, res)
+      if (!order) return
 
-      if (order) {
-        res.json({
-          success: true,
-          data: order
+      const isAdmin = req.user?.role === "admin"
+      const customerEmail = emailOf(req.user?.email)
+      const orderEmail = emailOf(order.email)
+
+      if (
+        !isAdmin &&
+        (
+          !customerEmail ||
+          !orderEmail ||
+          customerEmail !== orderEmail
+        )
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "Access denied to this order"
         })
       }
+
+      return res.json({
+        success: true,
+        data: order
+      })
     } catch (err) {
-      fail(res, err, "Failed to fetch order")
+      return fail(res, err, "Failed to fetch order")
     }
   }
 )
-
 /* ================= CREATE STORE ORDER ================= */
 
 // Product prices now come from MongoDB.
