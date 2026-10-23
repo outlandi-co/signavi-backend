@@ -1,6 +1,7 @@
 import { calculateVerifiedApparelParcels } from "./smartShippingV3Service.js"
 import { quoteV3Parcels } from "./smartShippingV3QuoteService.js"
 import { selectV3ShippingOptions } from "./smartShippingV3Options.js"
+import { validateV3CombinedQuote } from "./smartShippingV3QuoteIntegrity.js"
 
 // Internal development workflow.
 // Product weights must come from trusted backend records.
@@ -61,14 +62,17 @@ export const calculateV3ApparelShipping = async ({
     }
   }
 
+  const verifiedRates = quote.rates.filter((rate) =>
+    validateV3CombinedQuote(rate, packing.parcelCount)
+  )
   return {
     success: true,
     totalUnits: packing.totalUnits,
     parcelCount: packing.parcelCount,
     parcels: packing.parcels,
-    rates: quote.rates,
+    rates: verifiedRates,
     shippingOptions: selectV3ShippingOptions(
-      quote.rates,
+      verifiedRates,
       packing.parcelCount
     ),
     messages: quote.messages
