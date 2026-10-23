@@ -37,6 +37,10 @@ const schema = new mongoose.Schema({
     default: "pending",
     required: true
   },
+  squareCreationAttemptClaimedAt: {
+    type: Date,
+    default: null
+  },
   requestOwner: {
     type: String,
     default: ""
