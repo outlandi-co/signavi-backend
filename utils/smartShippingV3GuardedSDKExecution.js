@@ -1,4 +1,7 @@
 import {
+  classifyV3SafeSquareError
+} from "./smartShippingV3SafeSquareError.js"
+import {
   buildV3SquarePaymentLinkRequest
 } from "./smartShippingV3SquarePaymentLinkRequest.js"
 
@@ -86,11 +89,18 @@ export const executeV3GuardedSandboxCreation = async ({
     const response = await createPaymentLink(request)
 
     return classifyV3SquareCreationOutcome({ response })
-  } catch {
+  } catch (error) {
     // A timeout may mean Square created the link.
     // Do not clear the durable claim or retry.
-    return classifyV3SquareCreationOutcome({
+    const diagnostic = classifyV3SafeSquareError(error)
+
+    const outcome = classifyV3SquareCreationOutcome({
       error: new Error("Square creation result uncertain.")
+    })
+
+    return Object.freeze({
+      ...outcome,
+      diagnostic
     })
   }
 }
