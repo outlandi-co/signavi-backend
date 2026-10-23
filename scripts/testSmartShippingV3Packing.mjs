@@ -93,4 +93,36 @@ const separate = packVerifiedApparel({
 assert.equal(separate.parcelCount, 5)
 console.log("SHIP SEPARATELY: PASS (5 parcels)")
 
+const invalidFlatRatePackages = [
+  {
+    ...testPackage,
+    carrier: "USPS",
+    uspsFlatRate: true,
+    shippoParcelTemplate: ""
+  },
+  {
+    ...testPackage,
+    carrier: "Generic",
+    uspsFlatRate: true,
+    shippoParcelTemplate: "TEST_TEMPLATE"
+  },
+  {
+    ...testPackage,
+    carrier: "Generic",
+    uspsFlatRate: false,
+    shippoParcelTemplate: "TEST_TEMPLATE"
+  }
+]
+
+for (const pkg of invalidFlatRatePackages) {
+  const result = packVerifiedApparel({
+    quantity: 5,
+    unitWeightOz: 8,
+    packages: [pkg]
+  })
+
+  assert.ok(result.error)
+}
+
+console.log("USPS FLAT RATE VALIDATION: PASS (3 invalid configurations rejected)")
 console.log("ALL V3 PACKING TESTS PASSED")

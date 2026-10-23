@@ -45,6 +45,18 @@ export const packVerifiedApparel = ({
 
     if (!compatible(packagingType, pkg.type)) continue
 
+    // Reject inconsistent USPS Flat Rate configuration.
+    const flatRate = pkg.uspsFlatRate === true
+    const template = String(
+      pkg.shippoParcelTemplate || ""
+    ).trim()
+
+    if (flatRate) {
+      if (pkg.carrier !== "USPS" || !template) continue
+    } else if (template) {
+      continue
+    }
+
     const capacity = pkg.verifiedShirtCapacity
 
     if (!Number.isInteger(capacity) || capacity < 1) continue
