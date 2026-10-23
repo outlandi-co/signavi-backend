@@ -4,6 +4,12 @@ import mongoose from "mongoose"
 import fetch from "node-fetch"
 import Order from "../models/Order.js"
 import { applyCheckoutShipping } from "../utils/applyCheckoutShipping.js"
+import { getSmartShippingCheckoutVersion } from "../utils/smartShippingV3FeatureFlags.js"
+import { prepareV3CheckoutPayment } from "../utils/smartShippingV3PaymentPreparation.js"
+import {
+  applyV3PreparedPayment,
+  verifyV3AppliedPayment
+} from "../utils/smartShippingV3ApplyPayment.js"
 import { createSquareAuthorization } from "../utils/squarePaymentAuth.js"
 import {
   createGuestCheckoutToken,
@@ -1180,6 +1186,60 @@ router.patch(
 
       // Verify the signed Shippo quote against
       // the saved order before calling Square.
+      // Development-only V3 preview. No database save or Square call.
+      if (
+        isStorefrontOrder &&
+        getSmartShippingCheckoutVersion() === "v3"
+      ) {
+        if (
+          String(process.env.SQUARE_ENVIRONMENT || "")
+            .trim()
+            .toLowerCase() !== "sandbox"
+        ) {
+          return res.status(503).json({
+            success: false,
+            message: "V3 checkout requires Square Sandbox."
+          })
+        }
+
+        const prepared = prepareV3CheckoutPayment({
+          order,
+          guestToken: req.get("x-signavi-guest-checkout-token"),
+          signedQuote: req.body?.v3ShippingQuote
+        })
+
+        if (!prepared) {
+          return res.status(400).json({
+            success: false,
+            message: "V3 checkout verification failed."
+          })
+        }
+
+        try {
+          applyV3PreparedPayment(order, prepared)
+
+          if (!verifyV3AppliedPayment(order, prepared)) {
+            throw new Error("Prepared payment mismatch.")
+          }
+        } catch {
+          return res.status(400).json({
+            success: false,
+            message: "V3 payment preparation failed."
+          })
+        }
+
+        return res.status(501).json({
+          success: false,
+          code: "V3_PREVIEW_ONLY",
+          message:
+            "V3 payment preparation verified. Payment creation disabled.",
+          preview: {
+            orderId: prepared.orderId,
+            totalCents: prepared.totalCents,
+            shippingAmountCents: prepared.shippingAmountCents
+          }
+        })
+      }
       try {
         applyCheckoutShipping(order, req.body || {})
       } catch (error) {
