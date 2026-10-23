@@ -125,4 +125,35 @@ for (const pkg of invalidFlatRatePackages) {
 }
 
 console.log("USPS FLAT RATE VALIDATION: PASS (3 invalid configurations rejected)")
+const validUspsPackage = {
+  ...testPackage,
+  carrier: "USPS",
+  uspsFlatRate: true,
+  shippoParcelTemplate: "USPS_MediumFlatRateBox1"
+}
+
+const acceptedTemplate = packVerifiedApparel({
+  quantity: 5,
+  unitWeightOz: 8,
+  packages: [validUspsPackage]
+})
+
+assert.equal(acceptedTemplate.success, true)
+assert.equal(
+  acceptedTemplate.parcels[0].shippoParcelTemplate,
+  "USPS_MediumFlatRateBox1"
+)
+
+const unsupportedTemplate = packVerifiedApparel({
+  quantity: 5,
+  unitWeightOz: 8,
+  packages: [{
+    ...validUspsPackage,
+    shippoParcelTemplate: "USPS_NotARealFlatRateBox"
+  }]
+})
+
+assert.ok(unsupportedTemplate.error)
+
+console.log("USPS TEMPLATE ALLOWLIST: PASS (valid accepted, invalid rejected)")
 console.log("ALL V3 PACKING TESTS PASSED")

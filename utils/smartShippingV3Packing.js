@@ -1,3 +1,4 @@
+import { isSupportedUspsFlatRateTemplate } from "./shippoParcelTemplatesV3.js"
 const validPositive = (value) =>
   typeof value === "number" &&
   Number.isFinite(value) &&
@@ -52,7 +53,7 @@ export const packVerifiedApparel = ({
     ).trim()
 
     if (flatRate) {
-      if (pkg.carrier !== "USPS" || !template) continue
+      if (pkg.carrier !== "USPS" || !isSupportedUspsFlatRateTemplate(template)) continue
     } else if (template) {
       continue
     }
