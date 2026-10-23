@@ -4,6 +4,7 @@ import crypto from "node:crypto"
 import express from "express"
 import mongoose from "mongoose"
 import Order from "../models/Order.js"
+import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import orderRoutes from "../routes/orders.js"
 import { createGuestCheckoutToken } from "../utils/guestCheckoutToken.js"
 import { createV3OrderFingerprint } from "../utils/smartShippingV3OrderFingerprint.js"
@@ -161,6 +162,29 @@ try {
   )
 
   console.log("DATABASE ORDER UNCHANGED: PASS")
+
+  const paymentOperation =
+    await PaymentOperation.findOne({ orderId }).lean()
+
+  assert.equal(
+    paymentOperation,
+    null,
+    "Preview must not create a payment operation"
+  )
+
+  console.log("NO V3 PAYMENT OPERATION: PASS")
+
+  const checkoutLock = await mongoose.connection
+    .collection("smart_shipping_v3_checkout_locks")
+    .findOne({ _id: orderId })
+
+  assert.equal(
+    checkoutLock,
+    null,
+    "Preview must not acquire or persist a checkout lock"
+  )
+
+  console.log("NO V3 CHECKOUT LOCK: PASS")
   console.log("SQUARE PAYMENT NOT CREATED: PASS")
   console.log("ALL V3 CHECKOUT HTTP TESTS PASSED")
 
