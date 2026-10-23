@@ -43,8 +43,17 @@ export const selectV3ShippingOptions = (
       const ids = rate?.parcelRateIds
       const amount = Number(rate?.amount)
 
+      const provider = String(rate?.provider || "")
+        .trim()
+        .toUpperCase()
+
+      const validCarrierService =
+        (provider === "USPS" && token.startsWith("usps_")) ||
+        (provider === "UPS" && token.startsWith("ups_"))
+
       return (
         tokens.has(token) &&
+        validCarrierService &&
         Array.isArray(ids) &&
         ids.length === expectedParcelCount &&
         ids.every((id) => typeof id === "string" && id.length > 0) &&
