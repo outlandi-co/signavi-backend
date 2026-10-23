@@ -19,6 +19,7 @@ const makeFixture = () => {
   const order = {
     id: "sandbox-order-456",
     referenceId: "signavi-v3-order-123",
+    locationId: "sandbox-location",
     totalMoney: {
       amount: 5528n,
       currency: "USD"
@@ -57,7 +58,8 @@ const makeFixture = () => {
       client,
       expectedPaymentLinkId: "sandbox-link-123",
       expectedAmountCents: 5528,
-      expectedReferenceId: "signavi-v3-order-123"
+      expectedReferenceId: "signavi-v3-order-123",
+    expectedLocationId: "sandbox-location"
     }
   }
 }
@@ -145,7 +147,7 @@ await reject(
       return {}
     }
   },
-  /order identity mismatch/
+  /order location missing/
 )
 
 await reject(
@@ -175,6 +177,53 @@ await reject(
   f => { f.input.expectedAmountCents = -1 },
   /Invalid V3 Square lookup expectations/,
   0
+)
+
+
+await reject(
+  "WRONG SQUARE LOCATION",
+  f => { f.order.locationId = "other-sandbox-location" },
+  /location mismatch/
+)
+
+await reject(
+  "MISSING SQUARE LOCATION",
+  f => { delete f.order.locationId },
+  /location missing/
+)
+
+
+const missingTrustedLocation = makeFixture()
+missingTrustedLocation.input.expectedLocationId = ""
+
+await assert.rejects(
+  lookupV3SquarePaymentLink(
+    missingTrustedLocation.input
+  ),
+  /Invalid V3 Square lookup expectations/
+)
+
+assert.equal(missingTrustedLocation.calls.linkGet, 0)
+assert.equal(missingTrustedLocation.calls.orderGet, 0)
+assert.equal(missingTrustedLocation.calls.create, 0)
+
+console.log("MISSING TRUSTED LOCATION: PASS (no lookup)")
+
+await reject(
+  "CONFLICTING SQUARE LOCATION FIELDS",
+  f => {
+    f.order.location_id = "another-location"
+  },
+  /location mismatch/
+)
+
+await reject(
+  "REVERSED SQUARE LOCATION CONFLICT",
+  f => {
+    f.order.locationId = "another-location"
+    f.order.location_id = "sandbox-location"
+  },
+  /location mismatch/
 )
 
 const snake = makeFixture()

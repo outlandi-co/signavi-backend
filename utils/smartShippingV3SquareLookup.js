@@ -12,11 +12,16 @@ import {
 //
 // A verified link is NOT evidence that a buyer paid.
 
+import {
+  verifyV3SquareOrderLocation
+} from "./smartShippingV3SquareLocation.js"
+
 export const lookupV3SquarePaymentLink = async ({
   client,
   expectedPaymentLinkId,
   expectedAmountCents,
-  expectedReferenceId
+  expectedReferenceId,
+  expectedLocationId
 }) => {
   if (
     !client ||
@@ -32,7 +37,9 @@ export const lookupV3SquarePaymentLink = async ({
     !Number.isSafeInteger(expectedAmountCents) ||
     expectedAmountCents <= 0 ||
     typeof expectedReferenceId !== "string" ||
-    !expectedReferenceId.trim()
+    !expectedReferenceId.trim() ||
+    typeof expectedLocationId !== "string" ||
+    !expectedLocationId.trim()
   ) {
     throw new Error("Invalid V3 Square lookup expectations.")
   }
@@ -68,7 +75,12 @@ export const lookupV3SquarePaymentLink = async ({
   const squareOrder =
     orderResponse?.order
 
-  return verifyV3SquareCheckoutAssociation({
+  const location = verifyV3SquareOrderLocation({
+    squareOrder,
+    expectedLocationId
+  })
+
+  const association = verifyV3SquareCheckoutAssociation({
     expectedPaymentLinkId,
     expectedAmountCents,
     expectedReferenceId,
@@ -78,4 +90,9 @@ export const lookupV3SquarePaymentLink = async ({
     },
     squareOrder
   })
+
+  return {
+    ...association,
+    ...location
+  }
 }

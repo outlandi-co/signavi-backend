@@ -10,7 +10,8 @@ import {
 const expected = {
   expectedPaymentLinkId: "sandbox-link-123",
   expectedAmountCents: 5528,
-  expectedReferenceId: "signavi-v3-order-123"
+  expectedReferenceId: "signavi-v3-order-123",
+    expectedLocationId: "sandbox-location"
 }
 
 const makeFixture = () => {
@@ -29,6 +30,7 @@ const makeFixture = () => {
   const order = {
     id: "sandbox-order-456",
     referenceId: "signavi-v3-order-123",
+    locationId: "sandbox-location",
     totalMoney: {
       amount: 5528n,
       currency: "USD"
@@ -155,6 +157,19 @@ await reject(
     input.expectedPaymentLinkId = "different-link"
   },
   /payment-link lookup mismatch|AssertionError/
+)
+
+
+await reject(
+  "WRONG SQUARE LOCATION",
+  f => { f.order.locationId = "other-sandbox-location" },
+  /location mismatch/
+)
+
+await reject(
+  "MISSING SQUARE LOCATION",
+  f => { delete f.order.locationId },
+  /location missing/
 )
 
 const production = () => createV3SquareSandboxReader({
