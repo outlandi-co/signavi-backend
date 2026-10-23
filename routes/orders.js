@@ -1228,6 +1228,69 @@ router.patch(
           })
         }
 
+        // Explicitly gated development-only preparation.
+        // No Square payment is created here.
+        const sandboxHttpEnabled =
+          ["development", "test"].includes(
+            String(process.env.NODE_ENV || "").toLowerCase()
+          ) &&
+          String(process.env.SQUARE_ENVIRONMENT || "")
+            .trim().toLowerCase() === "sandbox" &&
+          String(process.env.SMART_SHIPPING_V3_SANDBOX_PREPARE_ENABLED || "")
+            .trim().toLowerCase() === "true" &&
+          String(process.env.SMART_SHIPPING_V3_SANDBOX_HTTP_ENABLED || "")
+            .trim().toLowerCase() === "true" &&
+          req.get("x-signavi-v3-sandbox-mode") === "prepare"
+
+        if (sandboxHttpEnabled) {
+          try {
+            const { prepareV3SandboxCheckoutWorkflow } =
+              await import(
+                "../utils/smartShippingV3SandboxCheckoutWorkflow.js"
+              )
+
+            const result =
+              await prepareV3SandboxCheckoutWorkflow({
+                orderId: String(order._id),
+                guestToken: req.get(
+                  "x-signavi-guest-checkout-token"
+                ),
+                signedQuote: req.body?.v3ShippingQuote
+              })
+
+            if (!result.success) {
+              return res.status(409).json({
+                success: false,
+                code: "V3_SANDBOX_CHECKOUT_IN_PROGRESS",
+                message: "Sandbox checkout preparation already in progress."
+              })
+            }
+
+            return res.status(202).json({
+              success: true,
+              code: "V3_SANDBOX_PREPARED_NO_PAYMENT",
+              paymentCreated: false,
+              squareRequestAuthorized: false,
+              orderId: result.orderId,
+              totalCents: result.amountCents,
+              shippingAmountCents: result.shippingAmountCents
+            })
+          } catch (error) {
+            console.error(
+              "V3 Sandbox checkout preparation failed:",
+              error.message
+            )
+
+            // Retain the lock for explicit state-aware recovery.
+            return res.status(503).json({
+              success: false,
+              code: "V3_SANDBOX_PREPARATION_FAILED",
+              message:
+                "Sandbox preparation failed; checkout state requires review."
+            })
+          }
+        }
+
         return res.status(501).json({
           success: false,
           code: "V3_PREVIEW_ONLY",
