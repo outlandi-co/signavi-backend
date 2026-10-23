@@ -6,6 +6,12 @@ const schema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  checkoutReferenceId: {
+    type: String,
+    default: "",
+    trim: true,
+    immutable: true
+  },
   idempotencyKey: {
     type: String,
     required: true,

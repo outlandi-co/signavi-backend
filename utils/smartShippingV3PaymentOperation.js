@@ -1,6 +1,9 @@
 import crypto from "node:crypto"
 import mongoose from "mongoose"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import {
+  createV3CheckoutReference
+} from "./smartShippingV3CheckoutReference.js"
 
 export const prepareV3PaymentOperation = async ({
   orderId,
@@ -15,6 +18,9 @@ export const prepareV3PaymentOperation = async ({
   }
 
   const id = String(orderId).toLowerCase()
+  const checkoutReferenceId = createV3CheckoutReference({
+    orderId: id
+  })
 
   let operation = await PaymentOperation.findOne({
     orderId: id
@@ -27,7 +33,8 @@ export const prepareV3PaymentOperation = async ({
         idempotencyKey: `signavi-v3-sandbox-${crypto.randomUUID()}`,
         amountCents,
         environment: "sandbox",
-        status: "pending"
+        status: "pending",
+        checkoutReferenceId
       })
     } catch (error) {
       if (error?.code !== 11000) throw error
@@ -42,7 +49,8 @@ export const prepareV3PaymentOperation = async ({
 
   if (
     operation.amountCents !== amountCents ||
-    operation.environment !== "sandbox"
+    operation.environment !== "sandbox" ||
+    operation.checkoutReferenceId !== checkoutReferenceId
   ) {
     throw new Error(
       "V3 payment amount or environment mismatch."
@@ -57,6 +65,7 @@ export const prepareV3PaymentOperation = async ({
 
   return {
     orderId: id,
+    checkoutReferenceId,
     amountCents: operation.amountCents,
     idempotencyKey: operation.idempotencyKey,
     status: operation.status
