@@ -28,9 +28,10 @@ import {
 // No Square request inside a MongoDB transaction.
 // Production V2 routes are not used.
 
-export const runV3TrustedSandboxExecution = async ({
+const runTrustedExecution = async ({
   orderId,
-  owner
+  owner,
+  sdkFactory
 }) => {
   if (
     !["development", "test"].includes(process.env.NODE_ENV) ||
@@ -77,7 +78,7 @@ export const runV3TrustedSandboxExecution = async ({
     throw new Error("V3 unclaimed reservation not found.")
   }
 
-  const sdk = createV3TrustedSandboxSdk()
+  const sdk = sdkFactory()
 
   return runV3SandboxExecutionWorkflow({
     orderId: id,
@@ -100,5 +101,43 @@ export const runV3TrustedSandboxExecution = async ({
         squareOrderId: data.squareOrderId,
         paymentUrl: data.paymentUrl
       })
+  })
+}
+
+// Production-facing entry: always constructs the trusted SDK.
+// Do not accept SDK objects or callbacks from HTTP callers.
+export const runV3TrustedSandboxExecution = ({
+  orderId,
+  owner
+}) => runTrustedExecution({
+  orderId,
+  owner,
+  sdkFactory: createV3TrustedSandboxSdk
+})
+
+// Internal integration-test seam only.
+// Never connect this export to a route or user input.
+export const runV3TrustedSandboxExecutionForTests = ({
+  orderId,
+  owner,
+  sdk
+}) => {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("V3 SDK injection is test-only.")
+  }
+
+  if (
+    !sdk ||
+    typeof sdk.verifyIdentity !== "function" ||
+    typeof sdk.createPaymentLink !== "function" ||
+    !sdk.lookupClient
+  ) {
+    throw new Error("Invalid V3 test SDK.")
+  }
+
+  return runTrustedExecution({
+    orderId,
+    owner,
+    sdkFactory: () => sdk
   })
 }
