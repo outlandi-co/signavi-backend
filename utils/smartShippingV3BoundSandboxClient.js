@@ -66,7 +66,7 @@ export const bindV3SandboxClient = ({
     // The guarded executor must call this only after
     // the durable MongoDB creation claim succeeds.
     verified = false
-    return client.checkout.paymentLinks.create(request)
+    return client.checkout.paymentLinks.create(request, { maxRetries: 0 })
   }
 
   return Object.freeze({
