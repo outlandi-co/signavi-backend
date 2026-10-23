@@ -31,6 +31,10 @@ const schema = new mongoose.Schema({
     default: "pending",
     required: true
   },
+  requestOwner: {
+    type: String,
+    default: ""
+  },
   squarePaymentLinkId: {
     type: String,
     default: ""

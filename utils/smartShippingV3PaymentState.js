@@ -41,6 +41,7 @@ export const markV3PaymentRequestStarted = async ({
     {
       $set: {
         status: "reconciliation_required",
+        requestOwner: owner,
         lastError: "Square request outcome not yet confirmed."
       }
     },
@@ -82,6 +83,7 @@ export const markV3PaymentCompleted = async ({
       idempotencyKey,
       environment: "sandbox",
       status: "reconciliation_required",
+      requestOwner: owner,
       squarePaymentLinkId: "",
       squareOrderId: ""
     },
