@@ -73,17 +73,18 @@ try {
 
   await assert.rejects(
     releaseV3UnstartedPreparation({
-      lock: winner.lock,
-      squareRequestStarted: true
+      lock: {
+        ...winner.lock,
+        owner: "not-the-lock-owner"
+      }
     }),
-    /Cannot release/
+    /ownership/
   )
 
-  console.log("POST-SQUARE RELEASE BLOCKED: PASS")
+  console.log("INCORRECT OWNER RELEASE BLOCKED: PASS")
 
   const released = await releaseV3UnstartedPreparation({
-    lock: winner.lock,
-    squareRequestStarted: false
+    lock: winner.lock
   })
 
   assert.equal(released, true)
@@ -103,8 +104,7 @@ try {
   console.log("REPREPARATION REUSES ORIGINAL KEY: PASS")
 
   await releaseV3UnstartedPreparation({
-    lock: second.lock,
-    squareRequestStarted: false
+    lock: second.lock
   })
 
   console.log("ALL V3 PAYMENT COORDINATOR TESTS PASSED")

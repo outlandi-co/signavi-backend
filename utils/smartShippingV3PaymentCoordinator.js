@@ -1,7 +1,10 @@
 import mongoose from "mongoose"
+import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
-  acquireV3CheckoutLock,
-  releaseV3CheckoutLock
+  runV3OwnedPaymentTransition
+} from "./smartShippingV3AtomicTransition.js"
+import {
+  acquireV3CheckoutLock
 } from "./smartShippingV3CheckoutLock.js"
 import {
   prepareV3PaymentOperation
@@ -50,17 +53,46 @@ export const coordinateV3PaymentPreparation = async ({
   }
 }
 
-// For test-only cleanup before any Square request.
-// Do not use as general payment recovery.
+// Only release a preparation that has not started a
+// Square request. Database state is authoritative.
 export const releaseV3UnstartedPreparation = async ({
-  lock,
-  squareRequestStarted = true
+  lock
 }) => {
-  if (squareRequestStarted) {
-    throw new Error(
-      "Cannot release a payment lock after Square may have been contacted."
-    )
+  if (!lock?.orderId || !lock?.owner) {
+    return false
   }
 
-  return releaseV3CheckoutLock(lock)
+  return runV3OwnedPaymentTransition({
+    orderId: lock.orderId,
+    owner: lock.owner,
+    transition: async (session) => {
+      const operation = await PaymentOperation.findOne({
+        orderId: lock.orderId,
+        environment: "sandbox",
+        status: "pending",
+        requestOwner: "",
+        squarePaymentLinkId: "",
+        squareOrderId: "",
+        paymentUrl: ""
+      }).session(session)
+
+      if (!operation) {
+        throw new Error(
+          "V3 payment lock release requires unstarted operation."
+        )
+      }
+
+      const result = await mongoose.connection
+        .collection("smart_shipping_v3_checkout_locks")
+        .deleteOne(
+          {
+            _id: new mongoose.Types.ObjectId(lock.orderId),
+            owner: lock.owner
+          },
+          { session }
+        )
+
+      return result.deletedCount === 1
+    }
+  })
 }

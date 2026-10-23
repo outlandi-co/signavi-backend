@@ -1,23 +1,26 @@
 import mongoose from "mongoose"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import {
+  runV3OwnedPaymentTransition
+} from "./smartShippingV3AtomicTransition.js"
 
-const getLock = async (orderId, owner) => {
+const validatePayment = ({
+  orderId,
+  owner,
+  amountCents,
+  idempotencyKey
+}) => {
   if (
     !mongoose.isValidObjectId(orderId) ||
     typeof owner !== "string" ||
-    !owner
+    !owner.trim() ||
+    !Number.isSafeInteger(amountCents) ||
+    amountCents <= 0 ||
+    typeof idempotencyKey !== "string" ||
+    !idempotencyKey.trim()
   ) {
-    return false
+    throw new Error("Invalid V3 payment transition.")
   }
-
-  const lock = await mongoose.connection
-    .collection("smart_shipping_v3_checkout_locks")
-    .findOne({
-      _id: new mongoose.Types.ObjectId(orderId),
-      owner
-    })
-
-  return Boolean(lock)
 }
 
 export const markV3PaymentRequestStarted = async ({
@@ -26,33 +29,39 @@ export const markV3PaymentRequestStarted = async ({
   amountCents,
   idempotencyKey
 }) => {
-  if (!(await getLock(orderId, owner))) {
-    throw new Error("V3 checkout lock ownership required.")
-  }
+  validatePayment({
+    orderId,
+    owner,
+    amountCents,
+    idempotencyKey
+  })
 
-  const operation = await PaymentOperation.findOneAndUpdate(
-    {
-      orderId,
-      amountCents,
-      idempotencyKey,
-      environment: "sandbox",
-      status: "pending"
-    },
-    {
-      $set: {
-        status: "reconciliation_required",
-        requestOwner: owner,
-        lastError: "Square request outcome not yet confirmed."
-      }
-    },
-    { returnDocument: "after" }
-  )
-
-  if (!operation) {
-    throw new Error("V3 payment transition rejected.")
-  }
-
-  return operation
+  return runV3OwnedPaymentTransition({
+    orderId,
+    owner,
+    transition: async (session) => {
+      return PaymentOperation.findOneAndUpdate(
+        {
+          orderId,
+          amountCents,
+          idempotencyKey,
+          environment: "sandbox",
+          status: "pending"
+        },
+        {
+          $set: {
+            status: "reconciliation_required",
+            requestOwner: owner,
+            lastError: "Square request outcome not yet confirmed."
+          }
+        },
+        {
+          session,
+          returnDocument: "after"
+        }
+      )
+    }
+  })
 }
 
 export const markV3PaymentCompleted = async ({
@@ -64,44 +73,53 @@ export const markV3PaymentCompleted = async ({
   squarePaymentLinkId,
   squareOrderId
 }) => {
-  if (!(await getLock(orderId, owner))) {
-    throw new Error("V3 checkout lock ownership required.")
-  }
+  validatePayment({
+    orderId,
+    owner,
+    amountCents,
+    idempotencyKey
+  })
 
   if (
-    !String(paymentUrl || "").startsWith("https://") ||
-    !squarePaymentLinkId ||
-    !squareOrderId
+    typeof paymentUrl !== "string" ||
+    !paymentUrl.startsWith("https://") ||
+    typeof squarePaymentLinkId !== "string" ||
+    !squarePaymentLinkId.trim() ||
+    typeof squareOrderId !== "string" ||
+    !squareOrderId.trim()
   ) {
     throw new Error("Incomplete Square payment-link response.")
   }
 
-  const operation = await PaymentOperation.findOneAndUpdate(
-    {
-      orderId,
-      amountCents,
-      idempotencyKey,
-      environment: "sandbox",
-      status: "reconciliation_required",
-      requestOwner: owner,
-      squarePaymentLinkId: "",
-      squareOrderId: ""
-    },
-    {
-      $set: {
-        status: "completed",
-        paymentUrl,
-        squarePaymentLinkId,
-        squareOrderId,
-        lastError: ""
-      }
-    },
-    { returnDocument: "after" }
-  )
-
-  if (!operation) {
-    throw new Error("V3 completed payment transition rejected.")
-  }
-
-  return operation
+  return runV3OwnedPaymentTransition({
+    orderId,
+    owner,
+    transition: async (session) => {
+      return PaymentOperation.findOneAndUpdate(
+        {
+          orderId,
+          amountCents,
+          idempotencyKey,
+          environment: "sandbox",
+          status: "reconciliation_required",
+          requestOwner: owner,
+          squarePaymentLinkId: "",
+          squareOrderId: ""
+        },
+        {
+          $set: {
+            status: "completed",
+            paymentUrl,
+            squarePaymentLinkId,
+            squareOrderId,
+            lastError: ""
+          }
+        },
+        {
+          session,
+          returnDocument: "after"
+        }
+      )
+    }
+  })
 }
