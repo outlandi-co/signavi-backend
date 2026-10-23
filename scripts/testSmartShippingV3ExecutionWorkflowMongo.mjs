@@ -222,10 +222,37 @@ try {
 
   console.log("CLAIM AND VERIFIED LINK PERSISTED: PASS")
 
+  // Simulate a database connection being closed and
+  // re-established after the first durable claim.
+  await mongoose.disconnect()
+  connected = false
+
+  await mongoose.connect(process.env.MONGO_URI, {
+    dbName: databaseName,
+    serverSelectionTimeoutMS: 10000
+  })
+  connected = true
+
+  assert.equal(
+    mongoose.connection.db.databaseName,
+    databaseName
+  )
+
+  const persisted = await PaymentOperation.collection.findOne({
+    orderId: id
+  })
+
+  assert.ok(persisted.squareCreationAttemptClaimedAt)
+  assert.equal(persisted.status, "completed")
+
+  console.log("CLAIM SURVIVES DATABASE RECONNECTION: PASS")
+
   await assert.rejects(run())
 
   assert.equal(createCalls, 1)
   assert.equal(recordCalls, 1)
+
+  console.log("NO SECOND CREATION AFTER RECONNECTION: PASS")
 
   console.log("SECOND CREATION ATTEMPT BLOCKED: PASS")
 
