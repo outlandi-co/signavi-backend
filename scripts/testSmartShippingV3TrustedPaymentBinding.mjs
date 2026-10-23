@@ -4,6 +4,9 @@ import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
+  createV3CheckoutReference
+} from "../utils/smartShippingV3CheckoutReference.js"
+import {
   inspectV3TrustedPaymentBinding
 } from "../utils/smartShippingV3TrustedPaymentBinding.js"
 
@@ -198,8 +201,54 @@ try {
     "checkout_reference_binding_required"
   )
 
-  assert.equal(matching.recordsConsistent, true)
-  assert.equal(matching.amountCents, 5528)
+  assert.equal(matching.squareLookupAuthorized, false)
+  assert.equal(matching.recordsConsistent, undefined)
+  assert.equal(matching.checkoutReferenceVerified, undefined)
+
+  const canonicalReference = createV3CheckoutReference({
+    orderId
+  })
+
+  await setOperation({
+    checkoutReferenceId: canonicalReference
+  })
+
+  const verifiedReference = await expectClassification(
+    "CANONICAL REFERENCE MATCHED",
+    "square_merchant_binding_required"
+  )
+
+  assert.equal(verifiedReference.recordsConsistent, true)
+  assert.equal(verifiedReference.checkoutReferenceVerified, true)
+  assert.equal(verifiedReference.amountCents, 5528)
+  assert.equal(verifiedReference.squareLookupAuthorized, false)
+
+  console.log("MERCHANT BINDING STILL REQUIRED: PASS")
+
+  await setOperation({
+    checkoutReferenceId: createV3CheckoutReference({
+      orderId: new mongoose.Types.ObjectId()
+    })
+  })
+
+  await expectClassification(
+    "SUBSTITUTED REFERENCE REJECTED",
+    "checkout_reference_mismatch"
+  )
+
+  await setOperation({
+    checkoutReferenceId: canonicalReference
+  })
+
+  const restored = await inspect()
+
+  assert.equal(
+    restored.classification,
+    "square_merchant_binding_required"
+  )
+  assert.equal(restored.squareLookupAuthorized, false)
+
+  console.log("ORIGINAL CHECKOUT REFERENCE RESTORED: PASS")
 
   const persisted = await PaymentOperation.findOne({
     orderId

@@ -1,6 +1,9 @@
 import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import {
+  createV3CheckoutReference
+} from "./smartShippingV3CheckoutReference.js"
 
 // Read-only V3 consistency inspection.
 //
@@ -112,14 +115,25 @@ export const inspectV3TrustedPaymentBinding = async ({
     return result("square_order_identity_mismatch")
   }
 
-  // IMPORTANT:
-  // Current V3 schema has no confirmed persisted
-  // checkoutReferenceId. Even if all local fields match,
-  // this must remain blocked until that identity is
-  // persisted, authenticated, and tested.
+  if (!operation.checkoutReferenceId) {
+    return result("checkout_reference_binding_required")
+  }
 
-  return result("checkout_reference_binding_required", {
+  const canonicalReference = createV3CheckoutReference({
+    orderId: id
+  })
+
+  if (operation.checkoutReferenceId !== canonicalReference) {
+    return result("checkout_reference_mismatch")
+  }
+
+  // The canonical reference matches the persisted order ID.
+  // This is still not sufficient to authorize Square lookup:
+  // merchant/location ownership and checkout validity remain
+  // separate required checks.
+  return result("square_merchant_binding_required", {
     recordsConsistent: true,
+    checkoutReferenceVerified: true,
     amountCents: operation.amountCents,
     environment: "sandbox"
   })
