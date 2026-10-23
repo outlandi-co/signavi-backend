@@ -78,6 +78,14 @@ export const combineV3ParcelRates = (shipments) => {
 
   return [...(common || new Map()).values()]
     .map((items) => {
+      const rateIds = items.map(
+        (item) => String(item.rate.object_id)
+      )
+
+      if (new Set(rateIds).size !== rateIds.length) {
+        return null
+      }
+
       const totalCents = items.reduce(
         (sum, item) => sum + item.cents,
         0
