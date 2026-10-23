@@ -1,5 +1,6 @@
 import { calculateVerifiedApparelParcels } from "./smartShippingV3Service.js"
 import { quoteV3Parcels } from "./smartShippingV3QuoteService.js"
+import { selectV3ShippingOptions } from "./smartShippingV3Options.js"
 
 // Internal development workflow.
 // Product weights must come from trusted backend records.
@@ -66,6 +67,10 @@ export const calculateV3ApparelShipping = async ({
     parcelCount: packing.parcelCount,
     parcels: packing.parcels,
     rates: quote.rates,
+    shippingOptions: selectV3ShippingOptions(
+      quote.rates,
+      packing.parcelCount
+    ),
     messages: quote.messages
   }
 }

@@ -80,7 +80,14 @@ try {
           currency: "USD",
           provider: "USPS",
           carrier_account: "test_account",
-          servicelevel: { token: "ground" }
+          servicelevel: { token: "usps_ground_advantage", name: "Ground Advantage" }
+        }, {
+          object_id: `test_priority_${requests}`,
+          amount: "9.00",
+          currency: "USD",
+          provider: "USPS",
+          carrier_account: "test_account",
+          servicelevel: { token: "usps_priority", name: "Priority Mail" }
         }]
       }
     }
@@ -90,9 +97,41 @@ try {
   assert.equal(result.totalUnits, 20)
   assert.equal(result.parcelCount, 4)
   assert.equal(requests, 4)
-  assert.equal(result.rates.length, 1)
+  assert.equal(result.rates.length, 2)
   assert.equal(result.rates[0].amount, "24.00")
   assert.equal(result.rates[0].parcelRateIds.length, 4)
+
+  assert.equal(result.shippingOptions.length, 2)
+
+  const standard = result.shippingOptions[0]
+
+  assert.equal(standard.category, "standard")
+  assert.equal(standard.label, "Standard Shipping")
+  assert.equal(standard.amount, "24.00")
+  assert.equal(standard.parcelCount, 4)
+  assert.deepEqual(
+    standard.parcelRateIds,
+    result.rates[0].parcelRateIds
+  )
+
+  console.log("STANDARD SHIPPING OPTION: PASS ($24.00)")
+  console.log("COMPLETE PARCEL RATE IDS: PASS (4 IDs)")
+  const expedited = result.shippingOptions[1]
+
+  assert.equal(expedited.category, "expedited")
+  assert.equal(expedited.label, "Expedited Shipping")
+  assert.equal(expedited.carrier, "USPS")
+  assert.equal(expedited.serviceToken, "usps_priority")
+  assert.equal(expedited.amount, "36.00")
+  assert.equal(expedited.parcelCount, 4)
+  assert.equal(expedited.parcelRateIds.length, 4)
+  assert.deepEqual(
+    expedited.parcelRateIds,
+    result.rates.find(rate => rate.servicelevel.token === "usps_priority").parcelRateIds
+  )
+
+  console.log("EXPEDITED SHIPPING OPTION: PASS ($36.00)")
+  console.log("EXPEDITED PARCEL RATE IDS: PASS (4 IDs)")
 
   console.log("MONGODB PACKAGING: PASS")
   console.log("20 SHIRTS -> 4 PARCELS: PASS")
