@@ -183,6 +183,40 @@ try {
 
   assert.equal(conflictExitCode, 0, "Transaction conflict test failed.")
   console.log("ISOLATED TRANSACTION CONFLICT: PASS")
+  console.log("INTERRUPTED RELEASE TEST: START")
+
+  const interruptedExitCode = await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["scripts/testSmartShippingV3InterruptedRelease.mjs"],
+      {
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          NODE_ENV: "test",
+          SQUARE_ENVIRONMENT: "sandbox",
+          MONGO_URI: uri,
+          DOTENV_CONFIG_PATH: "__signavi_v3_isolated_no_env__.txt",
+          DOTENV_CONFIG_QUIET: "true"
+        },
+        stdio: "inherit"
+      }
+    )
+
+    child.once("error", reject)
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`Interrupted release test terminated: ${signal}`))
+      } else {
+        resolve(code)
+      }
+    })
+  })
+
+  assert.equal(interruptedExitCode, 0, "Interrupted release test failed.")
+  console.log("ISOLATED INTERRUPTED RELEASE: PASS")
   console.log("REMOTE DATABASE: NOT USED")
 } finally {
   await replica.stop()
