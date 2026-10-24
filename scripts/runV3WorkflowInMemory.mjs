@@ -80,6 +80,41 @@ try {
 
   assert.equal(restartExitCode, 0, "Process restart test failed.")
   console.log("ISOLATED PROCESS RESTART: PASS")
+  console.log("CONTROLLED RECOVERY TEST: START")
+
+  const recoveryExitCode = await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["scripts/testSmartShippingV3ControlledRecovery.mjs"],
+      {
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          NODE_ENV: "test",
+          SQUARE_ENVIRONMENT: "sandbox",
+          MONGO_URI: uri,
+          DOTENV_CONFIG_PATH: "__signavi_v3_isolated_no_env__.txt",
+          DOTENV_CONFIG_QUIET: "true"
+        },
+        stdio: "inherit"
+      }
+    )
+
+    child.once("error", reject)
+
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`Recovery test terminated: ${signal}`))
+      } else {
+        resolve(code)
+      }
+    })
+  })
+
+  assert.equal(recoveryExitCode, 0, "Controlled recovery test failed.")
+  console.log("ISOLATED CONTROLLED RECOVERY: PASS")
   console.log("REMOTE DATABASE: NOT USED")
 } finally {
   await replica.stop()
