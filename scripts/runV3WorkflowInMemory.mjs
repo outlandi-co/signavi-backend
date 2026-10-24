@@ -251,6 +251,40 @@ try {
 
   assert.equal(unknownExitCode, 0, "Unknown outcome reconnect test failed.")
   console.log("ISOLATED UNKNOWN OUTCOME RECONNECT: PASS")
+  console.log("RELEASE START RACE TEST: START")
+
+  const releaseStartExitCode = await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["scripts/testSmartShippingV3ReleaseStartRace.mjs"],
+      {
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          NODE_ENV: "test",
+          SQUARE_ENVIRONMENT: "sandbox",
+          MONGO_URI: uri,
+          DOTENV_CONFIG_PATH: "__signavi_v3_isolated_no_env__.txt",
+          DOTENV_CONFIG_QUIET: "true"
+        },
+        stdio: "inherit"
+      }
+    )
+
+    child.once("error", reject)
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`Release/start race terminated: ${signal}`))
+      } else {
+        resolve(code)
+      }
+    })
+  })
+
+  assert.equal(releaseStartExitCode, 0, "Release/start race test failed.")
+  console.log("ISOLATED RELEASE START RACE: PASS")
   console.log("REMOTE DATABASE: NOT USED")
 } finally {
   await replica.stop()
