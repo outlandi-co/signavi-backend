@@ -387,6 +387,15 @@ if (invoice.paymentUrl) {
     )
   }
 
+  // Smart Shipping V3 safety gate.
+  // No configuration setting can bypass this guard.
+  // Replace only with verified durable payment execution.
+  throw Object.assign(
+    new Error(
+      "Invoice payment-link creation is disabled pending durable payment execution."
+    ),
+    { status: 423 }
+  )
   const response =
     await squareClient.checkout.paymentLinks.create({
       idempotencyKey: crypto.randomUUID(),

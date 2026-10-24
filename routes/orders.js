@@ -4,6 +4,12 @@ import mongoose from "mongoose"
 import fetch from "node-fetch"
 import Order from "../models/Order.js"
 import { applyCheckoutShipping } from "../utils/applyCheckoutShipping.js"
+import { getSmartShippingCheckoutVersion } from "../utils/smartShippingV3FeatureFlags.js"
+import { prepareV3CheckoutPayment } from "../utils/smartShippingV3PaymentPreparation.js"
+import {
+  applyV3PreparedPayment,
+  verifyV3AppliedPayment
+} from "../utils/smartShippingV3ApplyPayment.js"
 import { createSquareAuthorization } from "../utils/squarePaymentAuth.js"
 import {
   createGuestCheckoutToken,
@@ -1180,6 +1186,123 @@ router.patch(
 
       // Verify the signed Shippo quote against
       // the saved order before calling Square.
+      // Development-only V3 preview. No database save or Square call.
+      if (
+        isStorefrontOrder &&
+        getSmartShippingCheckoutVersion() === "v3"
+      ) {
+        if (
+          String(process.env.SQUARE_ENVIRONMENT || "")
+            .trim()
+            .toLowerCase() !== "sandbox"
+        ) {
+          return res.status(503).json({
+            success: false,
+            message: "V3 checkout requires Square Sandbox."
+          })
+        }
+
+        const prepared = prepareV3CheckoutPayment({
+          order,
+          guestToken: req.get("x-signavi-guest-checkout-token"),
+          signedQuote: req.body?.v3ShippingQuote
+        })
+
+        if (!prepared) {
+          return res.status(400).json({
+            success: false,
+            message: "V3 checkout verification failed."
+          })
+        }
+
+        try {
+          applyV3PreparedPayment(order, prepared)
+
+          if (!verifyV3AppliedPayment(order, prepared)) {
+            throw new Error("Prepared payment mismatch.")
+          }
+        } catch {
+          return res.status(400).json({
+            success: false,
+            message: "V3 payment preparation failed."
+          })
+        }
+
+        // Explicitly gated development-only preparation.
+        // No Square payment is created here.
+        const sandboxHttpEnabled =
+          ["development", "test"].includes(
+            String(process.env.NODE_ENV || "").toLowerCase()
+          ) &&
+          String(process.env.SQUARE_ENVIRONMENT || "")
+            .trim().toLowerCase() === "sandbox" &&
+          String(process.env.SMART_SHIPPING_V3_SANDBOX_PREPARE_ENABLED || "")
+            .trim().toLowerCase() === "true" &&
+          String(process.env.SMART_SHIPPING_V3_SANDBOX_HTTP_ENABLED || "")
+            .trim().toLowerCase() === "true" &&
+          req.get("x-signavi-v3-sandbox-mode") === "prepare"
+
+        if (sandboxHttpEnabled) {
+          try {
+            const { prepareV3SandboxCheckoutWorkflow } =
+              await import(
+                "../utils/smartShippingV3SandboxCheckoutWorkflow.js"
+              )
+
+            const result =
+              await prepareV3SandboxCheckoutWorkflow({
+                orderId: String(order._id),
+                guestToken: req.get(
+                  "x-signavi-guest-checkout-token"
+                ),
+                signedQuote: req.body?.v3ShippingQuote
+              })
+
+            if (!result.success) {
+              return res.status(409).json({
+                success: false,
+                code: "V3_SANDBOX_CHECKOUT_IN_PROGRESS",
+                message: "Sandbox checkout preparation already in progress."
+              })
+            }
+
+            return res.status(202).json({
+              success: true,
+              code: "V3_SANDBOX_PREPARED_NO_PAYMENT",
+              paymentCreated: false,
+              squareRequestAuthorized: false,
+              orderId: result.orderId,
+              totalCents: result.amountCents,
+              shippingAmountCents: result.shippingAmountCents
+            })
+          } catch (error) {
+            console.error(
+              "V3 Sandbox checkout preparation failed:",
+              error.message
+            )
+
+            // Retain the lock for explicit state-aware recovery.
+            return res.status(503).json({
+              success: false,
+              code: "V3_SANDBOX_PREPARATION_FAILED",
+              message:
+                "Sandbox preparation failed; checkout state requires review."
+            })
+          }
+        }
+
+        return res.status(501).json({
+          success: false,
+          code: "V3_PREVIEW_ONLY",
+          message:
+            "V3 payment preparation verified. Payment creation disabled.",
+          preview: {
+            orderId: prepared.orderId,
+            totalCents: prepared.totalCents,
+            shippingAmountCents: prepared.shippingAmountCents
+          }
+        })
+      }
       try {
         applyCheckoutShipping(order, req.body || {})
       } catch (error) {

@@ -1,12 +1,27 @@
 import express from "express"
 
 import Order from "../models/Order.js"
+import { requireAuth } from "../middleware/auth.js"
 
 import {
   sendOrderStatusEmail
 } from "../utils/emailService.js"
 
 const router = express.Router()
+
+const requireAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Administrator access required"
+    })
+  }
+
+  next()
+}
+
+// Protect every order-workflow endpoint.
+router.use(requireAuth, requireAdmin)
 
 /* =========================================================
    HELPERS
