@@ -49,6 +49,7 @@ import adminEmailWebhookRoutes from "./routes/admin/adminEmailWebhookRoutes.js"
 import supportRoutes from "./routes/support/supportRoutes.js"
 import aiChatRoutes from "./routes/aiChat.js"
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
+import shippingPackagesRoutes from "./routes/shippingPackages.js"
 import notificationRoutes from "./routes/notifications.js"
 
 import instagramRoutes from "./routes/instagramRoutes.js"
@@ -715,6 +716,8 @@ app.use(
   "/api/shipping",
   shippingRoutes
 )
+
+app.use("/api/shipping-packages", shippingPackagesRoutes)
 
 /* ================= ORDER WORKFLOW ================= */
 

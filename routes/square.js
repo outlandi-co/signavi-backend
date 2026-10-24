@@ -1,5 +1,12 @@
 
 import express from "express"
+import mongoose from "mongoose"
+import {
+  claimSquarePaymentCreationAttempt
+} from "../utils/claimSquarePaymentCreationAttempt.js"
+import {
+  prepareSquarePaymentCreation
+} from "../utils/prepareSquarePaymentCreation.js"
 import { SquareClient, SquareEnvironment } from "square"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
@@ -354,6 +361,72 @@ router.post("/create-payment/:id", async (req, res) => {
     // STEP 8 - CREATE SQUARE PAYMENT LINK
     // =================================================
 
+    // Dedicated database-backed integration test gate.
+    // Never authorizes Square creation.
+    if (
+      process.env.NODE_ENV === "test" &&
+      process.env.SQUARE_RESERVATION_INTEGRATION_TEST === "true" &&
+      mongoose.connection.db?.databaseName ===
+        "signavi_reservation_isolated_test"
+    ) {
+      const preparation =
+        await prepareSquarePaymentCreation({
+          orderId: record._id,
+          environment: squareMode,
+          amountCents: cents
+        })
+
+      let claimed = false
+
+      if (preparation.prepared) {
+        const attempt = await claimSquarePaymentCreationAttempt({
+          orderId: record._id,
+          environment: squareMode,
+          amountCents: cents,
+          owner: preparation.owner
+        })
+
+        claimed = attempt.claimed === true
+      }
+
+      return res.status(423).json({
+        success: false,
+        message: claimed
+          ? "Payment attempt claimed; Square execution disabled."
+          : "Payment creation already reserved or unavailable.",
+        reason: claimed
+          ? "square_execution_not_authorized"
+          : preparation.prepared
+            ? "payment_attempt_claim_rejected"
+            : preparation.reason,
+        squareRequestAuthorized: false
+      })
+    }
+    // Block legacy Square creation in the isolated
+    // Smart Shipping V3 development database.
+    if (
+      mongoose.connection.db?.databaseName ===
+      "signavi_shipping_v3_dev"
+    ) {
+      return res.status(423).json({
+        success: false,
+        message:
+          "Legacy Square creation is disabled in " +
+          "the isolated Smart Shipping V3 database."
+      })
+    }
+
+    // Smart Shipping V3 storefront safety boundary.
+    // Do not create a payment link without verified,
+    // durable ownership and reconciliation handling.
+    // No environment variable authorizes bypassing this guard.
+    return res.status(423).json({
+      success: false,
+      message:
+        "New storefront payment links are disabled pending durable payment execution.",
+      reason: "payment_execution_not_authorized",
+      squareRequestAuthorized: false
+    })
     const response =
       await client.checkout.paymentLinks.create({
         idempotencyKey:

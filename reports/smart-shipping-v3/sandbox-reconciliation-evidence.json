@@ -1,0 +1,31 @@
+{
+    "reportType":  "smart_shipping_v3_sandbox_reconciliation",
+    "environment":  "sandbox",
+    "database":  "signavi_shipping_v3_dev",
+    "orderId":  "6adb60ab0856ccfc26aa57cf",
+    "expectedAmountCents":  100,
+    "currency":  "USD",
+    "latestConfirmedCommit":  "0473ab2",
+    "persistedState":  {
+                           "status":  "reconciliation_required",
+                           "classification":  "square_lookup_required",
+                           "lockPresent":  true,
+                           "lockOwnerMatchesRequest":  true,
+                           "paymentLinkRecorded":  false,
+                           "creationAttemptClaimed":  true
+                       },
+    "squareEvidence":  {
+                           "paymentLinkSearch":  "no_matching_reference_found",
+                           "orderSearch":  "no_matching_reference_found",
+                           "matchingOneDollarPayments":  0,
+                           "paymentSearchCompleted":  true
+                       },
+    "conclusion":  "external_creation_outcome_unknown",
+    "restrictions":  {
+                         "automaticRetryAuthorized":  false,
+                         "resetCreationClaimAuthorized":  false,
+                         "releaseOriginalLockAuthorized":  false,
+                         "productionPaymentCreationApproved":  false
+                     },
+    "note":  "Historical evidence summary; not an authoritative live reconciliation decision."
+}
