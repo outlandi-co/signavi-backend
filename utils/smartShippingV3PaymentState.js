@@ -103,6 +103,7 @@ export const markV3PaymentCompleted = async ({
           environment: "sandbox",
           status: "reconciliation_required",
           requestOwner: owner,
+          squareCreationAttemptClaimedAt: { $type: "date" },
           squarePaymentLinkId: "",
           squareOrderId: ""
         },
