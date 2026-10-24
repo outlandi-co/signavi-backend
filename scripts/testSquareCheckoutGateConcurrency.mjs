@@ -4,6 +4,7 @@ import { runInNewContext } from "node:vm"
 import mongoose from "mongoose"
 import { MongoMemoryServer } from "mongodb-memory-server"
 import Reservation from "../models/SquarePaymentCreationReservation.js"
+import { claimSquarePaymentCreationAttempt } from "../utils/claimSquarePaymentCreationAttempt.js"
 import {
   prepareSquarePaymentCreation
 } from "../utils/prepareSquarePaymentCreation.js"
@@ -63,6 +64,7 @@ try {
         },
         mongoose,
         prepareSquarePaymentCreation,
+        claimSquarePaymentCreationAttempt,
         record: { _id: orderId },
         squareMode: "sandbox",
         cents: amountCents,
@@ -124,6 +126,7 @@ try {
     "reconciliation_required"
   )
   assert.equal(persisted[0].amountCents, 100)
+  assert.ok(persisted[0].creationAttemptClaimedAt)
 
   console.log("12 CONCURRENT CHECKOUT GATE ATTEMPTS")
   console.log("1 DURABLE RESERVATION: PASS")

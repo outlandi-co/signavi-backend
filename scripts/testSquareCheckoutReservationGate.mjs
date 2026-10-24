@@ -25,7 +25,7 @@ const evaluate = async ({
   environment = "test",
   flag = "true",
   database = "signavi_reservation_isolated_test",
-  prepared = true
+  prepared = true, claimApproved = true
 } = {}) => {
   let calls = 0
   let statusCode = null
@@ -57,6 +57,7 @@ const evaluate = async ({
               reason: "payment_creation_already_reserved"
             }
       },
+      claimSquarePaymentCreationAttempt: async () => ({ claimed: claimApproved }),
       record: { _id: "synthetic-order-id" },
       squareMode: "sandbox",
       cents: 100,

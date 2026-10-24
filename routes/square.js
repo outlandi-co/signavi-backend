@@ -2,6 +2,9 @@
 import express from "express"
 import mongoose from "mongoose"
 import {
+  claimSquarePaymentCreationAttempt
+} from "../utils/claimSquarePaymentCreationAttempt.js"
+import {
   prepareSquarePaymentCreation
 } from "../utils/prepareSquarePaymentCreation.js"
 import { SquareClient, SquareEnvironment } from "square"
@@ -373,14 +376,29 @@ router.post("/create-payment/:id", async (req, res) => {
           amountCents: cents
         })
 
+      let claimed = false
+
+      if (preparation.prepared) {
+        const attempt = await claimSquarePaymentCreationAttempt({
+          orderId: record._id,
+          environment: squareMode,
+          amountCents: cents,
+          owner: preparation.owner
+        })
+
+        claimed = attempt.claimed === true
+      }
+
       return res.status(423).json({
         success: false,
-        message: preparation.prepared
-          ? "Payment reserved; Square execution disabled."
+        message: claimed
+          ? "Payment attempt claimed; Square execution disabled."
           : "Payment creation already reserved or unavailable.",
-        reason: preparation.prepared
+        reason: claimed
           ? "square_execution_not_authorized"
-          : preparation.reason,
+          : preparation.prepared
+            ? "payment_attempt_claim_rejected"
+            : preparation.reason,
         squareRequestAuthorized: false
       })
     }
