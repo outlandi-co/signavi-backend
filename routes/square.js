@@ -1,5 +1,6 @@
 
 import express from "express"
+import mongoose from "mongoose"
 import { SquareClient, SquareEnvironment } from "square"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
@@ -353,6 +354,20 @@ router.post("/create-payment/:id", async (req, res) => {
     // =================================================
     // STEP 8 - CREATE SQUARE PAYMENT LINK
     // =================================================
+
+    // Block legacy Square creation in the isolated
+    // Smart Shipping V3 development database.
+    if (
+      mongoose.connection.db?.databaseName ===
+      "signavi_shipping_v3_dev"
+    ) {
+      return res.status(423).json({
+        success: false,
+        message:
+          "Legacy Square creation is disabled in " +
+          "the isolated Smart Shipping V3 database."
+      })
+    }
 
     const response =
       await client.checkout.paymentLinks.create({
