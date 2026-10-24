@@ -416,6 +416,17 @@ router.post("/create-payment/:id", async (req, res) => {
       })
     }
 
+    // Smart Shipping V3 storefront safety boundary.
+    // Do not create a payment link without verified,
+    // durable ownership and reconciliation handling.
+    // No environment variable authorizes bypassing this guard.
+    return res.status(423).json({
+      success: false,
+      message:
+        "New storefront payment links are disabled pending durable payment execution.",
+      reason: "payment_execution_not_authorized",
+      squareRequestAuthorized: false
+    })
     const response =
       await client.checkout.paymentLinks.create({
         idempotencyKey:
