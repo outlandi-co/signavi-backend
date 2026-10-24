@@ -149,6 +149,40 @@ try {
 
   assert.equal(raceExitCode, 0, "Controlled recovery race test failed.")
   console.log("ISOLATED CONTROLLED RECOVERY RACE: PASS")
+  console.log("TRANSACTION CONFLICT TEST: START")
+
+  const conflictExitCode = await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["scripts/testSmartShippingV3TransactionConflict.mjs"],
+      {
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          NODE_ENV: "test",
+          SQUARE_ENVIRONMENT: "sandbox",
+          MONGO_URI: uri,
+          DOTENV_CONFIG_PATH: "__signavi_v3_isolated_no_env__.txt",
+          DOTENV_CONFIG_QUIET: "true"
+        },
+        stdio: "inherit"
+      }
+    )
+
+    child.once("error", reject)
+    child.once("exit", (code, signal) => {
+      if (signal) {
+        reject(new Error(`Transaction conflict test terminated: ${signal}`))
+      } else {
+        resolve(code)
+      }
+    })
+  })
+
+  assert.equal(conflictExitCode, 0, "Transaction conflict test failed.")
+  console.log("ISOLATED TRANSACTION CONFLICT: PASS")
   console.log("REMOTE DATABASE: NOT USED")
 } finally {
   await replica.stop()
