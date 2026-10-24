@@ -48,6 +48,38 @@ try {
     "Isolated V3 workflow test failed."
   )
   console.log("ISOLATED FULL WORKFLOW: PASS")
+  console.log("PROCESS RESTART TEST: START")
+
+  const restartExitCode = await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["scripts/testSmartShippingV3ProcessRestart.mjs"],
+      {
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          TEMP: process.env.TEMP,
+          TMP: process.env.TMP,
+          NODE_ENV: "test",
+          SQUARE_ENVIRONMENT: "sandbox",
+          MONGO_URI: uri,
+          DOTENV_CONFIG_PATH: "__signavi_v3_isolated_no_env__.txt",
+          DOTENV_CONFIG_QUIET: "true"
+        },
+        stdio: "inherit"
+      }
+    )
+
+    child.once("error", reject)
+
+    child.once("exit", (code, signal) => {
+      if (signal) reject(new Error(`Restart test terminated: ${signal}`))
+      else resolve(code)
+    })
+  })
+
+  assert.equal(restartExitCode, 0, "Process restart test failed.")
+  console.log("ISOLATED PROCESS RESTART: PASS")
   console.log("REMOTE DATABASE: NOT USED")
 } finally {
   await replica.stop()
