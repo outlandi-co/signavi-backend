@@ -1,6 +1,9 @@
 
 import express from "express"
 import mongoose from "mongoose"
+import {
+  prepareSquarePaymentCreation
+} from "../utils/prepareSquarePaymentCreation.js"
 import { SquareClient, SquareEnvironment } from "square"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
@@ -355,6 +358,32 @@ router.post("/create-payment/:id", async (req, res) => {
     // STEP 8 - CREATE SQUARE PAYMENT LINK
     // =================================================
 
+    // Dedicated database-backed integration test gate.
+    // Never authorizes Square creation.
+    if (
+      process.env.NODE_ENV === "test" &&
+      process.env.SQUARE_RESERVATION_INTEGRATION_TEST === "true" &&
+      mongoose.connection.db?.databaseName ===
+        "signavi_reservation_isolated_test"
+    ) {
+      const preparation =
+        await prepareSquarePaymentCreation({
+          orderId: record._id,
+          environment: squareMode,
+          amountCents: cents
+        })
+
+      return res.status(423).json({
+        success: false,
+        message: preparation.prepared
+          ? "Payment reserved; Square execution disabled."
+          : "Payment creation already reserved or unavailable.",
+        reason: preparation.prepared
+          ? "square_execution_not_authorized"
+          : preparation.reason,
+        squareRequestAuthorized: false
+      })
+    }
     // Block legacy Square creation in the isolated
     // Smart Shipping V3 development database.
     if (
