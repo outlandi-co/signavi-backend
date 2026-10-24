@@ -35,6 +35,10 @@ const schema = new mongoose.Schema({
     ],
     default: "reserved"
   },
+  creationAttemptClaimedAt: {
+    type: Date,
+    default: null
+  },
   squarePaymentLinkId: {
     type: String,
     default: ""
