@@ -1,5 +1,11 @@
 import mongoose from "mongoose"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import {
+  createV3SquareSafeCheckoutReference
+} from "./smartShippingV3CheckoutReference.js"
+import {
+  assertV3PreclaimSquareReference
+} from "./smartShippingV3PreclaimReferenceGuard.js"
 
 import {
   runV3OwnedPaymentTransition
@@ -28,6 +34,16 @@ export const claimV3SquareCreationAttempt = async ({
     throw new Error("Invalid V3 creation-attempt claim.")
   }
 
+  const id = String(orderId).toLowerCase()
+
+  const expectedReference =
+    createV3SquareSafeCheckoutReference({ orderId: id })
+
+  assertV3PreclaimSquareReference({
+    orderId: id,
+    checkoutReferenceId: expectedReference
+  })
+
   return runV3OwnedPaymentTransition({
     orderId,
     owner,
@@ -39,6 +55,7 @@ export const claimV3SquareCreationAttempt = async ({
           status: "reconciliation_required",
           requestOwner: owner,
           idempotencyKey,
+          checkoutReferenceId: expectedReference,
           squarePaymentLinkId: "",
           squareOrderId: "",
           paymentUrl: "",

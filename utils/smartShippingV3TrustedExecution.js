@@ -1,6 +1,9 @@
 import mongoose from "mongoose"
 
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import {
+  assertV3PreclaimSquareReference
+} from "./smartShippingV3PreclaimReferenceGuard.js"
 
 import {
   createV3TrustedSandboxSdk
@@ -81,6 +84,13 @@ const runTrustedExecution = async ({
   if (!operation) {
     throw new Error("V3 unclaimed reservation not found.")
   }
+
+  // Fail before SDK construction and before consuming
+  // the durable Square creation claim.
+  assertV3PreclaimSquareReference({
+    orderId: id,
+    checkoutReferenceId: operation.checkoutReferenceId
+  })
 
   const sdk = sdkFactory()
 

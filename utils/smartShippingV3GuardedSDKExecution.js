@@ -4,6 +4,9 @@ import {
 import {
   buildV3SquarePaymentLinkRequest
 } from "./smartShippingV3SquarePaymentLinkRequest.js"
+import {
+  assertV3PreclaimSquareReference
+} from "./smartShippingV3PreclaimReferenceGuard.js"
 
 import {
   classifyV3SquareCreationOutcome
@@ -73,6 +76,16 @@ export const executeV3GuardedSandboxCreation = async ({
     throw new Error("Durable creation claim rejected.")
   }
 
+  // Revalidate the exact reference returned by the
+  // durable claim. No Square call may use legacy identity.
+  //
+  // A rejected claimed operation remains consumed.
+  // Never reset or retry it.
+  assertV3PreclaimSquareReference({
+    orderId,
+    checkoutReferenceId: claim.checkoutReferenceId
+  })
+
   // Build only from trusted claim data.
   // If construction fails, the consumed claim is NOT reset.
   const request = buildV3SquarePaymentLinkRequest({
@@ -81,7 +94,8 @@ export const executeV3GuardedSandboxCreation = async ({
     idempotencyKey: claim.idempotencyKey,
     checkoutReferenceId: claim.checkoutReferenceId,
     locationId: expectedLocationId,
-    redirectUrl: `https://signavi.store/success/${orderId}`
+    redirectUrl: `https://signavi.store/success/${orderId}`,
+    referenceFormat: "square_safe"
   })
 
   try {

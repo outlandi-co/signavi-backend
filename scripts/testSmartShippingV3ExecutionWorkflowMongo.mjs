@@ -11,7 +11,7 @@ import {
 } from "../utils/smartShippingV3CheckoutLock.js"
 
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 import {
@@ -48,7 +48,7 @@ const originalFlags = {
 
 const id = new mongoose.Types.ObjectId()
 const orderId = String(id)
-const reference = createV3CheckoutReference({ orderId })
+const reference = createV3SquareSafeCheckoutReference({ orderId })
 const key = `signavi-v3-sandbox-${crypto.randomUUID()}`
 
 const linkId = `mock-link-${crypto.randomUUID()}`
