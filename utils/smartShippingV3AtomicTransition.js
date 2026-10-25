@@ -30,7 +30,8 @@ export const runV3OwnedPaymentTransition = async ({
       const lockResult = await locks.updateOne(
         {
           _id: new mongoose.Types.ObjectId(orderId),
-          owner
+          owner,
+          expiresAt: { $gt: new Date() }
         },
         {
           $inc: { ownershipChecks: 1 }
