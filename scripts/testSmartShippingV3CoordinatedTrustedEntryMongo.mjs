@@ -84,6 +84,25 @@ try {
 
   console.log("TRUSTED MONGODB RESERVATION: PASS")
 
+  // A second coordinator must not acquire or reserve
+  // the same checkout while the first lock is held.
+  await assert.rejects(
+    acquireAndReserveV3Checkout({ orderId }),
+    /checkout lock unavailable/
+  )
+
+  const reservedOperation = await PaymentOperation.collection.findOne({
+    orderId: id
+  })
+
+  assert.equal(reservedOperation.status, "reconciliation_required")
+  assert.equal(reservedOperation.requestOwner, lock.owner)
+  assert.ok(reservedOperation.squareCreationAttemptClaimedAt == null)
+  assert.equal(createCalls, 0)
+
+  console.log("DUPLICATE COORDINATION BLOCKED: PASS")
+  console.log("CREATION CLAIM STILL UNUSED: PASS")
+
   const sdk = {
     merchantId: "mock-merchant",
     locationId: "mock-location",
