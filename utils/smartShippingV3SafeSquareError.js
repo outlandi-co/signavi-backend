@@ -4,6 +4,14 @@ import { SquareError, SquareTimeoutError } from "square"
 // Never serialize raw errors, response bodies,
 // access tokens, URLs or transport headers.
 
+const allowedCodes = new Set([
+  "INVALID_VALUE",
+  "MISSING_REQUIRED_PARAMETER",
+  "BAD_REQUEST",
+  "UNAUTHORIZED",
+  "FORBIDDEN"
+])
+
 const allowedCategories = new Set([
   "API_ERROR",
   "AUTHENTICATION_ERROR",
@@ -42,7 +50,7 @@ export const classifyV3SafeSquareError = error => {
       type: "square_api_error",
       statusCode,
       category,
-      code: null,
+      code: allowedCodes.has(first?.code) ? first.code : null,
       outcomeKnown: false
     })
   }

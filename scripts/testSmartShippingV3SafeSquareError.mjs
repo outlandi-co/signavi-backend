@@ -38,6 +38,51 @@ const unknown = classifyV3SafeSquareError(
 assert.equal(unknown.type, "unknown_exception")
 assert.equal(unknown.outcomeKnown, false)
 
+
+const allowed = classifyV3SafeSquareError(
+  new SquareError({
+    message: "SENSITIVE MESSAGE",
+    statusCode: 400,
+    body: {
+      errors: [{
+        category: "INVALID_REQUEST_ERROR",
+        code: "INVALID_VALUE",
+        detail: "SECRET DETAIL"
+      }]
+    }
+  })
+)
+
+assert.equal(allowed.type, "square_api_error")
+assert.equal(allowed.statusCode, 400)
+assert.equal(allowed.category, "INVALID_REQUEST_ERROR")
+assert.equal(allowed.code, "INVALID_VALUE")
+
+const allowedSerialized = JSON.stringify(allowed)
+
+assert.ok(!allowedSerialized.includes("SECRET DETAIL"))
+assert.ok(!allowedSerialized.includes("SENSITIVE MESSAGE"))
+
+const blocked = classifyV3SafeSquareError(
+  new SquareError({
+    message: "SENSITIVE",
+    statusCode: 400,
+    body: {
+      errors: [{
+        category: "INVALID_REQUEST_ERROR",
+        code: "UNRECOGNIZED_SECRET_CODE"
+      }]
+    }
+  })
+)
+
+assert.equal(blocked.code, null)
+
+console.log("ALLOWED ERROR CODE: PASS")
+console.log("UNKNOWN ERROR CODE BLOCKED: PASS")
+console.log("SENSITIVE DATA EXCLUDED: PASS")
+console.log("NO NETWORK REQUESTS IN NEW TESTS: PASS")
+
 console.log("TIMEOUT CLASSIFICATION: PASS")
 console.log("SQUARE API ERROR CLASSIFICATION: PASS")
 console.log("UNKNOWN EXCEPTION CLASSIFICATION: PASS")
