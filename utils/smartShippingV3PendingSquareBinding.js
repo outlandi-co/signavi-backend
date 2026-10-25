@@ -1,7 +1,7 @@
 import mongoose from "mongoose"
 import {
-  createV3CheckoutReference
-} from "./smartShippingV3CheckoutReference.js"
+  classifyV3CheckoutReference
+} from "./smartShippingV3ReferenceIdentity.js"
 
 // Pure consistency inspection of supplied records.
 //
@@ -58,11 +58,12 @@ export const inspectV3PendingSquareBinding = ({
     return deny("order_not_payable")
   }
 
-  const reference = createV3CheckoutReference({
-    orderId: orderId.toLowerCase()
-  })
+  const reference = operation.checkoutReferenceId
 
-  if (operation.checkoutReferenceId !== reference) {
+  if (classifyV3CheckoutReference({
+    orderId: orderId.toLowerCase(),
+    referenceId: reference
+  }) === null) {
     return deny("checkout_reference_mismatch")
   }
 

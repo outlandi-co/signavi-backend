@@ -1,6 +1,6 @@
 import {
-  createV3CheckoutReference
-} from "./smartShippingV3CheckoutReference.js"
+  classifyV3CheckoutReference
+} from "./smartShippingV3ReferenceIdentity.js"
 
 // A pure pre-persistence consistency check.
 //
@@ -19,8 +19,11 @@ export const verifyV3OrderPaymentBinding = ({
   }
 
   const orderId = String(order._id ?? "")
-  const expectedReference = createV3CheckoutReference({
-    orderId
+  const expectedReference = operation.checkoutReferenceId
+
+  const referenceFormat = classifyV3CheckoutReference({
+    orderId,
+    referenceId: expectedReference
   })
 
   if (
@@ -41,7 +44,7 @@ export const verifyV3OrderPaymentBinding = ({
   if (
     prepared.orderId !== orderId ||
     String(operation.orderId) !== orderId ||
-    operation.checkoutReferenceId !== expectedReference ||
+    referenceFormat === null ||
     operation.environment !== "sandbox" ||
     operation.status !== "pending" ||
     !Number.isSafeInteger(prepared.totalCents) ||

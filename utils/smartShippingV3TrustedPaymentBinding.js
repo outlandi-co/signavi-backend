@@ -2,8 +2,8 @@ import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
-  createV3CheckoutReference
-} from "./smartShippingV3CheckoutReference.js"
+  classifyV3CheckoutReference
+} from "./smartShippingV3ReferenceIdentity.js"
 
 // Read-only V3 consistency inspection.
 //
@@ -119,11 +119,12 @@ export const inspectV3TrustedPaymentBinding = async ({
     return result("checkout_reference_binding_required")
   }
 
-  const canonicalReference = createV3CheckoutReference({
-    orderId: id
+  const referenceFormat = classifyV3CheckoutReference({
+    orderId: id,
+    referenceId: operation.checkoutReferenceId
   })
 
-  if (operation.checkoutReferenceId !== canonicalReference) {
+  if (referenceFormat === null) {
     return result("checkout_reference_mismatch")
   }
 
