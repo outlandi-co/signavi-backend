@@ -7,7 +7,7 @@ import {
 } from "../utils/smartShippingV3SquarePaymentLinkRequest.js"
 
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 // Offline preparation only.
@@ -54,7 +54,7 @@ console.log("SAFE SANDBOX CONFIGURATION: PASS")
 
 const orderId = crypto.randomBytes(12).toString("hex")
 
-const referenceId = createV3CheckoutReference({
+const referenceId = createV3SquareSafeCheckoutReference({
   orderId
 })
 
@@ -67,11 +67,14 @@ const request = buildV3SquarePaymentLinkRequest({
   idempotencyKey,
   checkoutReferenceId: referenceId,
   locationId: process.env.SQUARE_SANDBOX_LOCATION_ID,
-  redirectUrl: `https://signavi.store/success/${orderId}`
+  redirectUrl: `https://signavi.store/success/${orderId}`,
+  referenceFormat: "square_safe"
 })
 
 assert.equal(request.idempotencyKey, idempotencyKey)
 assert.equal(request.order.referenceId, referenceId)
+assert.equal(referenceId.length, 35)
+assert.ok(referenceId.length <= 40)
 assert.equal(
   request.order.locationId,
   process.env.SQUARE_SANDBOX_LOCATION_ID
