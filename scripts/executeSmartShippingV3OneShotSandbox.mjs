@@ -78,7 +78,7 @@ try {
 
   if (
     !order ||
-    order.paymentStatus !== "pending" ||
+    !["unpaid", "pending"].includes(order.paymentStatus) ||
     order.squareExpectedAmountCents !== 100 ||
     order.squarePaymentLinkId ||
     operations.length !== 1 ||
