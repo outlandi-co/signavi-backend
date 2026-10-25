@@ -20,7 +20,7 @@ import {
   createV3SignedQuote
 } from "../utils/smartShippingV3QuoteSigning.js"
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 const dbName = "signavi_shipping_v3_dev"
@@ -117,7 +117,7 @@ try {
   assert.equal(result.squareRequestAuthorized, false)
   assert.equal(
     result.checkoutReferenceId,
-    createV3CheckoutReference({ orderId: good.id })
+    createV3SquareSafeCheckoutReference({ orderId: good.id })
   )
 
   const savedOrder = await Order.findById(good.id).lean()
@@ -304,7 +304,7 @@ try {
   assert.equal(concurrentOperation.status, "pending")
   assert.equal(
     concurrentOperation.checkoutReferenceId,
-    createV3CheckoutReference({ orderId: concurrent.id })
+    createV3SquareSafeCheckoutReference({ orderId: concurrent.id })
   )
 
   assert.equal(

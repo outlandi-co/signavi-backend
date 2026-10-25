@@ -6,7 +6,8 @@ import {
   prepareV3PaymentOperation
 } from "../utils/smartShippingV3PaymentOperation.js"
 import {
-  createV3CheckoutReference
+  createV3CheckoutReference,
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 const dbName = "signavi_shipping_v3_dev"
@@ -30,9 +31,12 @@ try {
 
   console.log("ISOLATED V3 DATABASE: PASS")
 
-  const expectedReference = createV3CheckoutReference({
+  const expectedReference = createV3SquareSafeCheckoutReference({
     orderId
   })
+
+  assert.equal(expectedReference.length, 35)
+  assert.ok(expectedReference.length <= 40)
 
   const attempts = await Promise.all(
     Array.from({ length: 10 }, () =>

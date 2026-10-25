@@ -2,8 +2,11 @@ import crypto from "node:crypto"
 import mongoose from "mongoose"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "./smartShippingV3CheckoutReference.js"
+import {
+  classifyV3CheckoutReference
+} from "./smartShippingV3ReferenceIdentity.js"
 
 export const prepareV3PaymentOperation = async ({
   orderId,
@@ -18,9 +21,10 @@ export const prepareV3PaymentOperation = async ({
   }
 
   const id = String(orderId).toLowerCase()
-  const checkoutReferenceId = createV3CheckoutReference({
-    orderId: id
-  })
+  // Only brand-new operations receive the Square-safe format.
+  // Never regenerate the identity of an existing operation.
+  const newCheckoutReferenceId =
+    createV3SquareSafeCheckoutReference({ orderId: id })
 
   let operation = await PaymentOperation.findOne({
     orderId: id
@@ -34,7 +38,7 @@ export const prepareV3PaymentOperation = async ({
         amountCents,
         environment: "sandbox",
         status: "pending",
-        checkoutReferenceId
+        checkoutReferenceId: newCheckoutReferenceId
       })
     } catch (error) {
       if (error?.code !== 11000) throw error
@@ -50,7 +54,10 @@ export const prepareV3PaymentOperation = async ({
   if (
     operation.amountCents !== amountCents ||
     operation.environment !== "sandbox" ||
-    operation.checkoutReferenceId !== checkoutReferenceId
+    classifyV3CheckoutReference({
+      orderId: id,
+      referenceId: operation.checkoutReferenceId
+    }) === null
   ) {
     throw new Error(
       "V3 payment amount or environment mismatch."
@@ -65,7 +72,7 @@ export const prepareV3PaymentOperation = async ({
 
   return {
     orderId: id,
-    checkoutReferenceId,
+    checkoutReferenceId: operation.checkoutReferenceId,
     amountCents: operation.amountCents,
     idempotencyKey: operation.idempotencyKey,
     status: operation.status
