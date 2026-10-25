@@ -1,6 +1,8 @@
+import { assertV3SquareSafeReference } from "./smartShippingV3ReferenceIdentity.js"
 import mongoose from "mongoose"
 import {
-  createV3CheckoutReference
+  createV3CheckoutReference,
+  createV3SquareSafeCheckoutReference
 } from "./smartShippingV3CheckoutReference.js"
 
 // Pure request construction only.
@@ -17,15 +19,31 @@ export const buildV3SquarePaymentLinkRequest = ({
   idempotencyKey,
   checkoutReferenceId,
   locationId,
-  redirectUrl
+  redirectUrl,
+  referenceFormat = "legacy"
 }) => {
   if (!mongoose.isValidObjectId(orderId)) {
     throw new Error("Invalid V3 Square order ID.")
   }
 
-  const canonicalReference = createV3CheckoutReference({
-    orderId
-  })
+  if (!["legacy", "square_safe"].includes(referenceFormat)) {
+    throw new Error("Invalid V3 checkout reference format.")
+  }
+
+  const canonicalReference =
+    referenceFormat === "square_safe"
+      ? createV3SquareSafeCheckoutReference({ orderId })
+      : createV3CheckoutReference({ orderId })
+
+  if (referenceFormat === "square_safe") {
+    if (canonicalReference.length > 40) {
+      throw new Error("Square reference exceeds 40 characters.")
+    }
+    assertV3SquareSafeReference({
+      orderId,
+      referenceId: checkoutReferenceId
+    })
+  }
 
   if (
     !Number.isSafeInteger(amountCents) ||
