@@ -13,7 +13,9 @@ import {
 
 const coordinateAndExecute = async ({
   orderId,
-  execute
+  execute,
+  expectedCheckoutReferenceId = null,
+  expectedIdempotencyKey = null
 }) => {
   // Once coordination begins, a lock or reservation may
   // persist. Never automatically release, reset, or retry.
@@ -34,6 +36,18 @@ const coordinateAndExecute = async ({
     throw new Error("V3 one-shot reservation invalid.")
   }
 
+  // Compare against the payment identity captured
+  // from the pending operation before coordination.
+  // Never execute after an identity mismatch.
+  if (
+    (expectedCheckoutReferenceId !== null &&
+      reservation.checkoutReferenceId !== expectedCheckoutReferenceId) ||
+    (expectedIdempotencyKey !== null &&
+      reservation.idempotencyKey !== expectedIdempotencyKey)
+  ) {
+    throw new Error("V3 one-shot payment identity mismatch.")
+  }
+
   return execute({
     orderId,
     owner: reservation.owner
@@ -43,11 +57,26 @@ const coordinateAndExecute = async ({
 // Real entry point: trusted SDK only.
 // Never accepts caller-provided SDK objects.
 export const runV3OneShotTrustedExecution = ({
-  orderId
-}) => coordinateAndExecute({
   orderId,
-  execute: runV3TrustedSandboxExecution
-})
+  expectedCheckoutReferenceId,
+  expectedIdempotencyKey
+}) => {
+  if (
+    typeof expectedCheckoutReferenceId !== "string" ||
+    !expectedCheckoutReferenceId ||
+    typeof expectedIdempotencyKey !== "string" ||
+    !expectedIdempotencyKey
+  ) {
+    throw new Error("V3 one-shot payment identity required.")
+  }
+
+  return coordinateAndExecute({
+    orderId,
+    execute: runV3TrustedSandboxExecution,
+    expectedCheckoutReferenceId,
+    expectedIdempotencyKey
+  })
+}
 
 // Mock-only integration-test entry point.
 // Never expose this through an HTTP route.
