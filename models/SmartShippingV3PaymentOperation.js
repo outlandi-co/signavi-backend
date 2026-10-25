@@ -60,6 +60,35 @@ const schema = new mongoose.Schema({
   lastError: {
     type: String,
     default: ""
+  },
+  squareDiagnostic: {
+    type: new mongoose.Schema({
+      type: {
+        type: String,
+        default: ""
+      },
+      httpStatus: {
+        type: Number,
+        default: null
+      },
+      category: {
+        type: String,
+        default: ""
+      },
+      code: {
+        type: String,
+        default: ""
+      },
+      field: {
+        type: String,
+        default: ""
+      },
+      outcomeKnown: {
+        type: Boolean,
+        default: false
+      }
+    }, { _id: false, strict: "throw" }),
+    default: null
   }
 }, {
   timestamps: true,
