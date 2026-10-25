@@ -129,12 +129,24 @@ const runTrustedExecution = async ({
         owner,
         diagnostic: result.diagnostic
       })
-    } catch {
-      // A failed diagnostic write must never release the
-      // creation claim or trigger another Square request.
+    } catch (error) {
+      // Report only a fixed category. Never expose raw
+      // database errors or sensitive Square information.
+      const diagnosticFailureReason =
+        error?.name === "ValidationError" ||
+        error?.name === "CastError" ||
+        error?.name === "StrictModeError"
+          ? "validation_failure"
+          : error?.message ===
+              "Diagnostic persistence rejected by ownership or state guard."
+            ? "guard_rejected"
+            : "database_failure"
+
+      // Never release the creation claim or retry Square.
       return {
         ...result,
-        diagnosticPersisted: false
+        diagnosticPersisted: false,
+        diagnosticFailureReason
       }
     }
 

@@ -127,6 +127,10 @@ const runCase = async ({
     assert.equal(result.safeToRetryCreation, false)
     assert.equal(result.paymentCreated, "unknown")
     assert.equal(result.diagnosticPersisted, expectPersisted)
+    assert.equal(
+      result.diagnosticFailureReason,
+      expectPersisted ? undefined : "guard_rejected"
+    )
     assert.equal(createCalls, 1)
     assert.equal(lookupCalls, 0)
 
