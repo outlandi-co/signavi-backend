@@ -21,45 +21,50 @@ const allowedCategories = new Set([
   "REFUND_ERROR"
 ])
 
-export const classifyV3SafeSquareError = error => {
-  if (error instanceof SquareTimeoutError) {
-    return Object.freeze({
-      type: "timeout",
-      statusCode: null,
-      category: null,
-      code: null,
-      outcomeKnown: false
-    })
-  }
-
-  if (error instanceof SquareError) {
-    const first = error.errors?.[0]
-
-    const category = allowedCategories.has(first?.category)
-      ? first.category
-      : null
-
-    const statusCode =
-      Number.isInteger(error.statusCode) &&
-      error.statusCode >= 400 &&
-      error.statusCode <= 599
-        ? error.statusCode
-        : null
-
-    return Object.freeze({
-      type: "square_api_error",
-      statusCode,
-      category,
-      code: allowedCodes.has(first?.code) ? first.code : null,
-      outcomeKnown: false
-    })
-  }
-
-  return Object.freeze({
-    type: "unknown_exception",
-    statusCode: null,
+const emptyDiagnostic = (type, statusCode = null) =>
+  Object.freeze({
+    type,
+    statusCode,
     category: null,
     code: null,
+    outcomeKnown: false
+  })
+
+export const classifyV3SafeSquareError = error => {
+  if (error instanceof SquareTimeoutError) {
+    return emptyDiagnostic("timeout")
+  }
+
+  if (!(error instanceof SquareError)) {
+    return emptyDiagnostic("unknown_exception")
+  }
+
+  const statusCode =
+    Number.isInteger(error.statusCode) &&
+    error.statusCode >= 400 &&
+    error.statusCode <= 599
+      ? error.statusCode
+      : null
+
+  const errors = Array.isArray(error.errors)
+    ? error.errors.slice(0, 10)
+    : []
+
+  const recognized = errors.find(item =>
+    item &&
+    allowedCategories.has(item.category) &&
+    allowedCodes.has(item.code)
+  )
+
+  const categorized = recognized || errors.find(item =>
+    item && allowedCategories.has(item.category)
+  )
+
+  return Object.freeze({
+    type: "square_api_error",
+    statusCode,
+    category: categorized?.category ?? null,
+    code: recognized?.code ?? null,
     outcomeKnown: false
   })
 }

@@ -83,6 +83,43 @@ console.log("UNKNOWN ERROR CODE BLOCKED: PASS")
 console.log("SENSITIVE DATA EXCLUDED: PASS")
 console.log("NO NETWORK REQUESTS IN NEW TESTS: PASS")
 
+
+const multipleErrors = new SquareError({
+  message: "PRIVATE ERROR MESSAGE",
+  statusCode: 400,
+  body: {
+    errors: [
+      {
+        category: "INVALID_REQUEST_ERROR",
+        code: "UNRECOGNIZED_CODE",
+        detail: "PRIVATE FIRST DETAIL"
+      },
+      {
+        category: "INVALID_REQUEST_ERROR",
+        code: "INVALID_VALUE",
+        detail: "PRIVATE SECOND DETAIL"
+      }
+    ]
+  }
+})
+
+const multiResult = classifyV3SafeSquareError(multipleErrors)
+
+assert.equal(multiResult.type, "square_api_error")
+assert.equal(multiResult.statusCode, 400)
+assert.equal(multiResult.category, "INVALID_REQUEST_ERROR")
+assert.equal(multiResult.code, "INVALID_VALUE")
+assert.equal(multiResult.outcomeKnown, false)
+
+const multiSerialized = JSON.stringify(multiResult)
+
+assert.ok(!multiSerialized.includes("PRIVATE ERROR MESSAGE"))
+assert.ok(!multiSerialized.includes("PRIVATE FIRST DETAIL"))
+assert.ok(!multiSerialized.includes("PRIVATE SECOND DETAIL"))
+
+console.log("SECOND ERROR CODE DETECTED: PASS")
+console.log("MULTI-ERROR SENSITIVE DATA EXCLUDED: PASS")
+
 console.log("TIMEOUT CLASSIFICATION: PASS")
 console.log("SQUARE API ERROR CLASSIFICATION: PASS")
 console.log("UNKNOWN EXCEPTION CLASSIFICATION: PASS")
