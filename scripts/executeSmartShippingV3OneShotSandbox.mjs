@@ -10,12 +10,8 @@ import {
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 import {
-  acquireAndReserveV3Checkout
-} from "../utils/smartShippingV3AcquireAndReserve.js"
-
-import {
-  runV3TrustedSandboxExecution
-} from "../utils/smartShippingV3TrustedExecution.js"
+  runV3OneShotTrustedExecution
+} from "../utils/smartShippingV3OneShotOrchestration.js"
 
 // REAL SQUARE-CAPABLE LAUNCHER.
 // Do not execute without separate explicit authorization.
@@ -115,26 +111,13 @@ try {
   // Reservation may survive interruption.
   reservationStarted = true
 
-  const reservation = await acquireAndReserveV3Checkout({
-    orderId: ORDER_ID
-  })
-
-  if (
-    reservation.requestReserved !== true ||
-    reservation.squareRequestAuthorized !== false ||
-    reservation.paymentCreated !== false ||
-    reservation.expiresAt <= new Date() ||
-    reservation.checkoutReferenceId !== reference ||
-    reservation.idempotencyKey !== operation.idempotencyKey
-  ) {
-    throw new Error("reservation_validation_failed")
-  }
-
-  // Exactly one trusted execution invocation.
-  // The trusted executor controls the durable creation claim.
-  const result = await runV3TrustedSandboxExecution({
+  // Coordinated reservation and one trusted execution.
+  // The helper independently verifies the payment identity.
+  // Never retry after a failure or uncertain Square outcome.
+  const result = await runV3OneShotTrustedExecution({
     orderId: ORDER_ID,
-    owner: reservation.owner
+    expectedCheckoutReferenceId: reference,
+    expectedIdempotencyKey: operation.idempotencyKey
   })
 
   console.log("EXECUTION RESULT:", result?.status ?? "unknown")
