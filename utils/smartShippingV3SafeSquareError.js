@@ -6,6 +6,11 @@ import { SquareError, SquareTimeoutError } from "square"
 
 const allowedCodes = new Set([
   "INVALID_VALUE",
+  "INVALID_ARRAY_VALUE",
+  "INVALID_ENUM_VALUE",
+  "INVALID_FORM_VALUE",
+  "INVALID_CONTENT_TYPE",
+  "INVALID_LOCATION",
   "MISSING_REQUIRED_PARAMETER",
   "BAD_REQUEST",
   "UNAUTHORIZED",

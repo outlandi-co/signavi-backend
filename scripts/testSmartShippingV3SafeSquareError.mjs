@@ -120,6 +120,36 @@ assert.ok(!multiSerialized.includes("PRIVATE SECOND DETAIL"))
 console.log("SECOND ERROR CODE DETECTED: PASS")
 console.log("MULTI-ERROR SENSITIVE DATA EXCLUDED: PASS")
 
+
+for (const code of [
+  "INVALID_ARRAY_VALUE",
+  "INVALID_ENUM_VALUE",
+  "INVALID_FORM_VALUE",
+  "INVALID_CONTENT_TYPE",
+  "INVALID_LOCATION"
+]) {
+  const error = new SquareError({
+    statusCode: 400,
+    body: {
+      errors: [{
+        category: "INVALID_REQUEST_ERROR",
+        code,
+        detail: "PRIVATE VALIDATION DETAIL"
+      }]
+    }
+  })
+
+  const diagnostic = classifyV3SafeSquareError(error)
+
+  assert.equal(diagnostic.type, "square_api_error")
+  assert.equal(diagnostic.statusCode, 400)
+  assert.equal(diagnostic.code, code)
+  assert.equal(diagnostic.outcomeKnown, false)
+  assert.ok(!JSON.stringify(diagnostic).includes("PRIVATE"))
+}
+
+console.log("EXTENDED SQUARE ERROR CODES: PASS")
+
 console.log("TIMEOUT CLASSIFICATION: PASS")
 console.log("SQUARE API ERROR CLASSIFICATION: PASS")
 console.log("UNKNOWN EXCEPTION CLASSIFICATION: PASS")
