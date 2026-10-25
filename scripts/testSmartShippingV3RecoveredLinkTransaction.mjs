@@ -13,6 +13,7 @@ const ids = [
   new mongoose.Types.ObjectId(),
   new mongoose.Types.ObjectId(),
   new mongoose.Types.ObjectId(),
+  new mongoose.Types.ObjectId(),
   new mongoose.Types.ObjectId()
 ]
 const owner = `recovery-test-${ids[0]}`
@@ -348,6 +349,58 @@ try {
   console.log("LOCK FENCE ROLLED BACK: PASS")
   console.log("PAYMENT OPERATION UNCHANGED: PASS")
   console.log("CUSTOMER REMAINS UNPAID: PASS")
+  // Fifth synthetic fixture: simulate TTL deletion of an expired lock.
+  const missingLockId = ids[4]
+  const removedLock = await locks.deleteOne({
+    _id: missingLockId
+  })
+  assert.equal(removedLock.deletedCount, 1)
+
+  const beforeMissingLock = await operations.findOne({
+    orderId: missingLockId
+  })
+  const beforeMissingOrder = await orders.findOne({
+    _id: missingLockId
+  })
+
+  await assert.rejects(
+    recordV3RecoveredLinkTransaction({
+      orderId: String(missingLockId),
+      owner,
+      expectedPaymentLinkId: linkId,
+      verified
+    }),
+    /ownership or expiry mismatch/
+  )
+
+  const afterMissingLock = await operations.findOne({
+    orderId: missingLockId
+  })
+  const afterMissingOrder = await orders.findOne({
+    _id: missingLockId
+  })
+  const recreatedLock = await locks.findOne({
+    _id: missingLockId
+  })
+
+  assert.equal(beforeMissingLock.status, "reconciliation_required")
+  assert.equal(afterMissingLock.status, "reconciliation_required")
+  assert.equal(afterMissingLock.squarePaymentLinkId, "")
+  assert.equal(afterMissingLock.squareOrderId, "")
+  assert.equal(afterMissingLock.paymentUrl, "")
+  assert.equal(
+    afterMissingLock.squareCreationAttemptClaimedAt.getTime(),
+    claim.getTime()
+  )
+  assert.equal(afterMissingLock.requestOwner, owner)
+  assert.equal(beforeMissingOrder.paymentStatus, "unpaid")
+  assert.equal(afterMissingOrder.paymentStatus, "unpaid")
+  assert.equal(afterMissingOrder.v3RecoveryVerificationChecks, undefined)
+  assert.equal(recreatedLock, null)
+
+  console.log("MISSING EXPIRED LOCK REJECTED: PASS")
+  console.log("NO REPLACEMENT LOCK CREATED: PASS")
+  console.log("UNPAID ORDER AND CLAIM PRESERVED: PASS")
   console.log("NO SQUARE REQUESTS")
   console.log("NO PROTECTED-ORDER ACCESS")
 } finally {
