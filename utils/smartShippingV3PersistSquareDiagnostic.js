@@ -54,6 +54,17 @@ export const sanitizeV3PersistedSquareDiagnostic = diagnostic => {
 
   const apiError = diagnostic.type === "square_api_error"
 
+  const recognizedCode =
+    apiError && codes.has(diagnostic.code)
+
+  const codeStatus = !apiError
+    ? null
+    : recognizedCode
+      ? "recognized"
+      : diagnostic.codeStatus === "unrecognized"
+        ? "unrecognized"
+        : "missing"
+
   return Object.freeze({
     type: diagnostic.type,
     httpStatus:
@@ -63,6 +74,7 @@ export const sanitizeV3PersistedSquareDiagnostic = diagnostic => {
       diagnostic.statusCode <= 599
         ? diagnostic.statusCode
         : null,
+    codeStatus,
     category:
       apiError && categories.has(diagnostic.category)
         ? diagnostic.category

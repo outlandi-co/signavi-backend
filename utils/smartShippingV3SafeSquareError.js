@@ -79,9 +79,20 @@ export const classifyV3SafeSquareError = error => {
     item && allowedCategories.has(item.category)
   )
 
+  const codeStatus = recognized
+    ? "recognized"
+    : errors.some(item =>
+        item &&
+        typeof item.code === "string" &&
+        item.code.length > 0
+      )
+      ? "unrecognized"
+      : "missing"
+
   return Object.freeze({
     type: "square_api_error",
     statusCode,
+    codeStatus,
     category: categorized?.category ?? null,
     code: recognized?.code ?? null,
     field:

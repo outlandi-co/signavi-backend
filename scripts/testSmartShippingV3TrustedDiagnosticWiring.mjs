@@ -246,6 +246,7 @@ try {
     type: "unknown_exception",
     httpStatus: null,
     category: "",
+    codeStatus: null,
     code: "",
     field: "",
     outcomeKnown: false

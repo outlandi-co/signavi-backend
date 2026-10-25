@@ -75,6 +75,11 @@ const schema = new mongoose.Schema({
         type: String,
         default: ""
       },
+      codeStatus: {
+        type: String,
+        enum: ["recognized", "unrecognized", "missing", null],
+        default: null
+      },
       code: {
         type: String,
         default: ""
