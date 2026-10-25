@@ -55,6 +55,20 @@ export const classifyV3SafeSquareError = error => {
     ? error.errors.slice(0, 10)
     : []
 
+  const allowedFields = new Set([
+    "order.location_id",
+    "order.reference_id",
+    "order.line_items",
+    "order.line_items[0].name",
+    "order.line_items[0].quantity",
+    "order.line_items[0].base_price_money",
+    "order.line_items[0].base_price_money.amount",
+    "order.line_items[0].base_price_money.currency",
+    "checkout_options.redirect_url",
+    "checkout_options.ask_for_shipping_address",
+    "idempotency_key"
+  ])
+
   const recognized = errors.find(item =>
     item &&
     allowedCategories.has(item.category) &&
@@ -70,6 +84,10 @@ export const classifyV3SafeSquareError = error => {
     statusCode,
     category: categorized?.category ?? null,
     code: recognized?.code ?? null,
+    field:
+      recognized && allowedFields.has(recognized.field)
+        ? recognized.field
+        : null,
     outcomeKnown: false
   })
 }

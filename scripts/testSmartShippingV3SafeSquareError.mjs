@@ -148,6 +148,37 @@ for (const code of [
   assert.ok(!JSON.stringify(diagnostic).includes("PRIVATE"))
 }
 
+
+for (const [field, expected] of [
+  ["order.location_id", "order.location_id"],
+  ["checkout_options.redirect_url", "checkout_options.redirect_url"],
+  ["order.line_items[0].base_price_money.amount",
+    "order.line_items[0].base_price_money.amount"],
+  ["customer.email", null],
+  ["order.location_id;PRIVATE", null],
+  ["PRIVATE_SECRET", null]
+]) {
+  const result = classifyV3SafeSquareError(
+    new SquareError({
+      statusCode: 400,
+      body: {
+        errors: [{
+          category: "INVALID_REQUEST_ERROR",
+          code: "INVALID_VALUE",
+          field,
+          detail: "PRIVATE FIELD DETAIL"
+        }]
+      }
+    })
+  )
+
+  assert.equal(result.field, expected)
+  assert.equal(result.outcomeKnown, false)
+  assert.ok(!JSON.stringify(result).includes("PRIVATE"))
+}
+
+console.log("SAFE SQUARE ERROR FIELDS: PASS")
+
 console.log("EXTENDED SQUARE ERROR CODES: PASS")
 
 console.log("TIMEOUT CLASSIFICATION: PASS")
