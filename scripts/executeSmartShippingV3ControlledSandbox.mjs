@@ -4,20 +4,31 @@ import mongoose from "mongoose"
 
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
+  assertV3PreclaimSquareReference
+} from "../utils/smartShippingV3PreclaimReferenceGuard.js"
+import {
   runV3TrustedSandboxExecution
 } from "../utils/smartShippingV3TrustedExecution.js"
 
-const ORDER_ID = "6add74398f0468ad2c712f5c"
 const DB_NAME = "signavi_shipping_v3_dev"
 
-const execute = process.argv.slice(2).includes("--execute")
+const PROTECTED_ORDER_IDS = new Set([
+  "6add74398f0468ad2c712f5c",
+  "6add3bf7d5de8ba32e8c736b",
+  "6add4314594254dc4df63b61"
+])
+
+const ORDER_ID = process.argv[3]
 
 let connected = false
 
 try {
   if (
-    process.argv.length !== 3 ||
-    process.argv[2] !== "--execute"
+    process.argv.length !== 4 ||
+    process.argv[2] !== "--execute" ||
+    !mongoose.isValidObjectId(ORDER_ID) ||
+    String(ORDER_ID) !== String(ORDER_ID).toLowerCase() ||
+    PROTECTED_ORDER_IDS.has(ORDER_ID)
   ) {
     throw new Error("Explicit --execute argument required.")
   }
@@ -71,6 +82,12 @@ try {
   assert.ok(operation.requestOwner)
   assert.ok(operation.idempotencyKey)
   assert.ok(operation.checkoutReferenceId)
+
+  assertV3PreclaimSquareReference({
+    orderId: ORDER_ID,
+    checkoutReferenceId: operation.checkoutReferenceId
+  })
+
   assert.ok(operation.squareCreationAttemptClaimedAt == null)
   assert.equal(operation.squarePaymentLinkId, "")
   assert.equal(operation.squareOrderId, "")
@@ -130,7 +147,7 @@ try {
   const reason = error?.message
 
   const safeReasons = new Map([
-    ["Explicit --execute argument required.", "missing_execute_argument"],
+    ["Explicit --execute argument required.", "missing_or_protected_order"],
     ["Development/test mode required.", "environment_blocked"],
     ["Exact-order authorization required.", "authorization_blocked"],
     ["Checkout owner lock missing.", "checkout_lock_missing"]
