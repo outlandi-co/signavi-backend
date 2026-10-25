@@ -18,6 +18,10 @@ import {
   runV3SandboxExecutionWorkflow
 } from "./smartShippingV3ExecutionWorkflow.js"
 
+import {
+  persistV3SquareDiagnostic
+} from "./smartShippingV3PersistSquareDiagnostic.js"
+
 // Internal server-only execution entry point.
 //
 // Requires an already-reserved operation and its lock
@@ -80,7 +84,7 @@ const runTrustedExecution = async ({
 
   const sdk = sdkFactory()
 
-  return runV3SandboxExecutionWorkflow({
+  const result = await runV3SandboxExecutionWorkflow({
     orderId: id,
     owner,
     sdk,
@@ -102,6 +106,35 @@ const runTrustedExecution = async ({
         paymentUrl: data.paymentUrl
       })
   })
+
+  // Persist only the sanitized diagnostic returned by the
+  // guarded execution workflow. Never retry Square creation.
+  if (
+    result?.status === "reconciliation_required" &&
+    result?.diagnostic
+  ) {
+    try {
+      await persistV3SquareDiagnostic({
+        orderId: id,
+        owner,
+        diagnostic: result.diagnostic
+      })
+    } catch {
+      // A failed diagnostic write must never release the
+      // creation claim or trigger another Square request.
+      return {
+        ...result,
+        diagnosticPersisted: false
+      }
+    }
+
+    return {
+      ...result,
+      diagnosticPersisted: true
+    }
+  }
+
+  return result
 }
 
 // Production-facing entry: always constructs the trusted SDK.
