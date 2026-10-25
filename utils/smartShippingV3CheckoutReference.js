@@ -40,3 +40,22 @@ export const verifyV3CheckoutReference = ({
     orderId
   })
 }
+
+// A Square-compatible reference for FUTURE V3 operations.
+// Existing stored references and idempotency keys remain unchanged.
+export const createV3SquareSafeCheckoutReference = ({ orderId }) => {
+  const legacy = createV3CheckoutReference({ orderId })
+  const prefix = "signavi-v3-sandbox-"
+
+  if (!legacy.startsWith(prefix)) {
+    throw new Error("Unexpected legacy reference format.")
+  }
+
+  const reference = `signavi-v3-${legacy.slice(prefix.length)}`
+
+  if (reference.length > 40) {
+    throw new Error("Square checkout reference exceeds 40 characters.")
+  }
+
+  return reference
+}
