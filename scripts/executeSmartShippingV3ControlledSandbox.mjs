@@ -98,7 +98,8 @@ try {
     .collection("smart_shipping_v3_checkout_locks")
     .findOne({
       _id: orderId,
-      owner: operation.requestOwner
+      owner: operation.requestOwner,
+      expiresAt: { $gt: new Date() }
     })
 
   assert.ok(lock, "Checkout owner lock missing.")
