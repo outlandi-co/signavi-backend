@@ -6,7 +6,7 @@ import { SquareError, SquareTimeoutError } from "square"
 
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 import {
   runV3TrustedSandboxExecutionForTests
@@ -53,7 +53,7 @@ const runCase = async ({
     await PaymentOperation.create({
       orderId,
       checkoutReferenceId:
-        createV3CheckoutReference({ orderId: id }),
+        createV3SquareSafeCheckoutReference({ orderId: id }),
       idempotencyKey,
       amountCents: 100,
       environment: "sandbox",
@@ -78,6 +78,7 @@ const runCase = async ({
     await locks.insertOne({
       _id: orderId,
       owner,
+      expiresAt: new Date(Date.now() + 2 * 60 * 1000),
       ownershipChecks: 0
     })
 
