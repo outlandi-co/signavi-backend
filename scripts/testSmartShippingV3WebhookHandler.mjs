@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import crypto from "node:crypto"
+import express from "express"
 import vm from "node:vm"
 import { readFileSync } from "node:fs"
 
@@ -317,6 +318,7 @@ const setup = ({
   return {
     deliver,
     local,
+    get handler() { return handler },
     get paidUpdates() { return paidUpdates },
     get squareLookups() { return squareLookups },
     get invoiceUpdates() { return invoiceUpdates }
@@ -537,4 +539,85 @@ console.log("DATABASE METHODS: MOCKED")
 console.log("SQUARE RESPONSES: MOCKED")
 console.log("NO REAL HTTP REQUESTS")
 console.log("NO DATABASE CONNECTION")
+
+// Exercise the actual Express request transport with synthetic credentials.
+// Square API responses and database methods remain mocked in setup().
+{
+  const test = setup()
+  const app = express()
+
+  app.post(
+    "/webhook",
+    express.raw({ type: "application/json" }),
+    test.handler
+  )
+
+  const server = await new Promise((resolve, reject) => {
+    const s = app.listen(0, "127.0.0.1", () => resolve(s))
+    s.once("error", reject)
+  })
+
+  try {
+    const address = server.address()
+    assert.ok(address && typeof address !== "string")
+
+    const url = `http://127.0.0.1:${address.port}/webhook`
+
+    const deliverHttp = async (validSignature = true) => {
+      const event = {
+        type: "payment.updated",
+        data: {
+          object: {
+            payment: {
+              id: "synthetic-payment",
+              status: "COMPLETED"
+            }
+          }
+        }
+      }
+
+      const body = JSON.stringify(event)
+
+      const signature = crypto
+        .createHmac("sha256", signatureKey)
+        .update(notificationUrl, "utf8")
+        .update(Buffer.from(body))
+        .digest("base64")
+
+      const response = await globalThis.fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-square-hmacsha256-signature":
+            validSignature ? signature : "invalid-signature"
+        },
+        body,
+        signal: AbortSignal.timeout(5000)
+      })
+
+      return response.status
+    }
+
+    assert.equal(await deliverHttp(false), 401)
+    assert.equal(test.paidUpdates, 0)
+    assert.equal(test.squareLookups, 0)
+    console.log("EXPRESS INVALID SIGNATURE: REJECTED")
+
+    assert.equal(await deliverHttp(true), 200)
+    assert.equal(test.paidUpdates, 1)
+    assert.equal(test.local.paymentStatus, "paid")
+    console.log("EXPRESS SIGNED PAYMENT: PASS")
+
+    assert.equal(await deliverHttp(true), 200)
+    assert.equal(test.paidUpdates, 1)
+    assert.equal(test.local.timeline.length, 1)
+    console.log("EXPRESS DUPLICATE DELIVERY: NO SECOND WRITE")
+
+    console.log("LOCAL EXPRESS HTTP WEBHOOK TESTS: PASS")
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close(error => error ? reject(error) : resolve())
+    })
+  }
+}
 console.log("NO PAYMENT CREATION")
