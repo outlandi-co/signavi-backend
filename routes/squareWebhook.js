@@ -1,3 +1,10 @@
+import SmartShippingV3PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import {
+  parseV3WebhookOrderReference
+} from "../utils/smartShippingV3WebhookReference.js"
+import {
+  verifyV3WebhookPaymentBinding
+} from "../utils/smartShippingV3WebhookPaymentBinding.js"
 
 import express from "express"
 import crypto from "node:crypto"
@@ -192,6 +199,25 @@ const resolveOrder = async (squareOrder) => {
   })
 
   if (bySquareId) {
+    // A Square-order match cannot override a V3 reference mismatch.
+    const v3Reference = parseV3WebhookOrderReference({
+      referenceId: squareOrder?.reference_id
+    })
+
+    const hasV3Prefix =
+      typeof squareOrder?.reference_id === "string" &&
+      squareOrder.reference_id.startsWith("signavi-v3-")
+
+    if (
+      hasV3Prefix &&
+      (
+        !v3Reference ||
+        String(bySquareId._id) !== v3Reference.orderId
+      )
+    ) {
+      return null
+    }
+
     if (
       id &&
       String(bySquareId._id) !== id &&
@@ -201,6 +227,16 @@ const resolveOrder = async (squareOrder) => {
     }
 
     return bySquareId
+  }
+
+  // Canonical V3 references are correlation identifiers only.
+  // Payment authorization happens later in the webhook.
+  const v3Reference = parseV3WebhookOrderReference({
+    referenceId: squareOrder?.reference_id
+  })
+
+  if (v3Reference) {
+    return Order.findById(v3Reference.orderId)
   }
 
   if (!id) {
@@ -698,6 +734,53 @@ router.post("/webhook", async (req, res) => {
     }
 
     // =================================================
+    // V3 Sandbox payment binding: fail closed.
+    // An operation marked "completed" means the Square link was
+    // recorded; customer payment still requires verified Square data.
+    const v3Reference = parseV3WebhookOrderReference({
+      referenceId: squareOrder.reference_id
+    })
+
+    const hasV3Prefix =
+      typeof squareOrder.reference_id === "string" &&
+      squareOrder.reference_id.startsWith("signavi-v3-")
+
+    const v3Operation = squareMode === "sandbox"
+      ? await SmartShippingV3PaymentOperation.findOne({
+          orderId: order._id
+        }).lean()
+      : null
+
+    if (hasV3Prefix || v3Operation) {
+      if (
+        squareMode !== "sandbox" ||
+        !v3Reference ||
+        !v3Operation ||
+        v3Reference.orderId !== String(order._id)
+      ) {
+        console.warn("V3 webhook requires manual reconciliation")
+        return res.sendStatus(200)
+      }
+
+      try {
+        const v3Binding = verifyV3WebhookPaymentBinding({
+          order,
+          operation: v3Operation,
+          payment,
+          squareOrder,
+          expectedLocationId: locationId
+        })
+
+        // Exact verified payment replay: no second update.
+        if (v3Binding.exactPaidReplay) {
+          console.log("V3 exact completed payment replay:", payment.id)
+          return res.sendStatus(200)
+        }
+      } catch {
+        console.warn("V3 webhook payment binding rejected")
+        return res.sendStatus(200)
+      }
+    }
     // STEP 10 - VERIFY STORED ENVIRONMENT
     // =================================================
 

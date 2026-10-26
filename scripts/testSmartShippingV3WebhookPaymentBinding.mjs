@@ -92,6 +92,59 @@ for (const [name, mutate] of rejects) {
   console.log(`${name.toUpperCase()}: REJECTED`)
 }
 
+const replayFixture = () => {
+  const f = fixture()
+  f.order.status = "paid"
+  f.order.paymentStatus = "paid"
+  f.order.squarePaymentId = f.payment.id
+  f.order.squareOrderId = f.squareOrder.id
+  return f
+}
+
+const replay = verifyV3WebhookPaymentBinding(replayFixture())
+
+assert.equal(replay.bindingVerified, true)
+assert.equal(replay.exactPaidReplay, true)
+assert.equal(replay.databaseWriteAuthorized, false)
+assert.equal(replay.paymentCreationAuthorized, false)
+
+console.log("EXACT PAID PAYMENT REPLAY: PASS")
+
+const replayRejects = [
+  ["different saved payment", f => {
+    f.order.squarePaymentId = "another-payment"
+  }],
+  ["different saved Square order", f => {
+    f.order.squareOrderId = "another-square-order"
+  }],
+  ["different paid status", f => {
+    f.order.status = "completed"
+  }],
+  ["different replay amount", f => {
+    f.payment.amount_money.amount = 200
+  }],
+  ["different replay location", f => {
+    f.payment.location_id = "different-location"
+  }],
+  ["different replay reference", f => {
+    f.squareOrder.reference_id = "different-reference"
+  }]
+]
+
+for (const [name, mutate] of replayRejects) {
+  const f = replayFixture()
+  mutate(f)
+
+  assert.throws(
+    () => verifyV3WebhookPaymentBinding(f),
+    /binding rejected/,
+    name
+  )
+
+  console.log(`REPLAY ${name.toUpperCase()}: REJECTED`)
+}
+
+console.log("ALL 6 INVALID PAID REPLAYS: REJECTED")
 console.log("ALL 16 NEGATIVE V3 PAYMENT BINDINGS: PASS")
 console.log("NO DATABASE CONNECTION OR WRITES")
 console.log("NO REAL SQUARE REQUESTS")
