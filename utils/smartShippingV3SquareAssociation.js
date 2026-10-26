@@ -4,7 +4,8 @@ import {
 
 const allowedHosts = new Set([
   "square.link",
-  "checkout.square.site"
+  "checkout.square.site",
+  "sandbox.square.link"
 ])
 
 const nonempty = value =>
