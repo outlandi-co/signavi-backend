@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { randomBytes } from "node:crypto"
 
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 import {
@@ -56,7 +56,7 @@ const run = (options = {}) => execute({
       amountCents: 5528,
       idempotencyKey: "signavi-v3-sandbox-once-test",
       checkoutReferenceId:
-        createV3CheckoutReference({ orderId }),
+        createV3SquareSafeCheckoutReference({ orderId }),
       claimedAt: new Date().toISOString(),
       squareRequestAuthorized: false,
       paymentCreated: false
@@ -68,7 +68,7 @@ const run = (options = {}) => execute({
 
     assert.equal(request.order.locationId, locationId)
     assert.equal(request.order.referenceId,
-      createV3CheckoutReference({ orderId }))
+      createV3SquareSafeCheckoutReference({ orderId }))
     assert.equal(
       request.order.lineItems[0].basePriceMoney.amount,
       5528n
