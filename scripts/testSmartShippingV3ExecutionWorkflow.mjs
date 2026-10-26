@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import crypto from "node:crypto"
 
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 import {
@@ -31,7 +31,7 @@ process.env.SMART_SHIPPING_V3_ENABLED = "true"
 process.env.SMART_SHIPPING_V3_SQUARE_CREATE_ENABLED = "true"
 
 const orderId = crypto.randomBytes(12).toString("hex")
-const reference = createV3CheckoutReference({ orderId })
+const reference = createV3SquareSafeCheckoutReference({ orderId })
 
 let createCalls = 0
 let recordCalls = 0
