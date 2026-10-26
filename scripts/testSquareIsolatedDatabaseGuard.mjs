@@ -71,11 +71,16 @@ for (const database of [
 ]) {
   const result = check(database)
 
-  assert.equal(result.statusCode, null)
-  assert.equal(result.response, null)
+  assert.equal(result.statusCode, 423)
+  assert.equal(result.response.success, false)
+  assert.equal(
+    result.response.reason,
+    "payment_execution_not_authorized"
+  )
+  assert.equal(result.response.squareRequestAuthorized, false)
 }
 
-console.log("OTHER DATABASES: GUARD DOES NOT BLOCK")
+console.log("OTHER DATABASES: GLOBAL PAYMENT LOCK BLOCKS")
 console.log("ACTUAL ROUTE GUARD SOURCE: VERIFIED")
 console.log("NO DATABASE OR SQUARE REQUESTS")
 console.log("ISOLATED DATABASE GUARD TEST PASSED")
