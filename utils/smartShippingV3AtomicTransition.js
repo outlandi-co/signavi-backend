@@ -3,13 +3,15 @@ import mongoose from "mongoose"
 export const runV3OwnedPaymentTransition = async ({
   orderId,
   owner,
-  transition
+  transition,
+  lockMustBeExpired = false
 }) => {
   if (
     !mongoose.isValidObjectId(orderId) ||
     typeof owner !== "string" ||
     !owner.trim() ||
-    typeof transition !== "function"
+    typeof transition !== "function" ||
+    typeof lockMustBeExpired !== "boolean"
   ) {
     throw new Error("Invalid V3 owned payment transition.")
   }
@@ -31,7 +33,7 @@ export const runV3OwnedPaymentTransition = async ({
         {
           _id: new mongoose.Types.ObjectId(orderId),
           owner,
-          expiresAt: { $gt: new Date() }
+          expiresAt: lockMustBeExpired ? { $lte: new Date() } : { $gt: new Date() }
         },
         {
           $inc: { ownershipChecks: 1 }
@@ -40,6 +42,25 @@ export const runV3OwnedPaymentTransition = async ({
       )
 
       if (lockResult.matchedCount !== 1) {
+        if (lockMustBeExpired) {
+          // Distinguish an active owned lock from a missing
+          // or incorrectly owned lock within this session.
+          // Neither condition permits a state transition.
+          const ownedLock = await locks.findOne(
+            {
+              _id: new mongoose.Types.ObjectId(orderId),
+              owner
+            },
+            { session }
+          )
+
+          if (ownedLock) {
+            throw new Error(
+              "V3 recovery requires an expired owned lock."
+            )
+          }
+        }
+
         throw new Error(
           "V3 checkout lock ownership required."
         )

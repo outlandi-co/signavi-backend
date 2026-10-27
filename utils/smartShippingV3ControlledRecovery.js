@@ -47,6 +47,7 @@ export const recoverV3ExpiredUnstartedCheckout = async ({
   return runV3OwnedPaymentTransition({
     orderId: String(id),
     owner,
+    lockMustBeExpired: true,
 
     transition: async session => {
       const locks = mongoose.connection.collection(

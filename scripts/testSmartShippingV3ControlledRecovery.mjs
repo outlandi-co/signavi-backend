@@ -150,9 +150,7 @@ try {
   console.log("INCORRECT OWNER BLOCKED: PASS")
 
   // Case 4: Started payment cannot be recovered.
-  const started = await createCase({
-    expired: true
-  })
+  const started = await createCase()
 
   const paymentStart = await markV3PaymentRequestStarted({
     orderId: started.id,
@@ -166,6 +164,25 @@ try {
     "reconciliation_required"
   )
 
+  // Simulate lock expiration AFTER payment creation was claimed.
+  // Recovery must preserve the started payment operation.
+  const expiredStartedLock = await mongoose.connection
+    .collection("smart_shipping_v3_checkout_locks")
+    .updateOne(
+      {
+        _id: started.id,
+        owner: started.lock.owner
+      },
+      {
+        $set: {
+          expiresAt: new Date(Date.now() - 60000)
+        }
+      }
+    )
+
+  assert.equal(expiredStartedLock.matchedCount, 1)
+
+  console.log("STARTED PAYMENT LOCK EXPIRED: PASS")
   const startedBefore = await readState(started.id)
 
   await assert.rejects(
