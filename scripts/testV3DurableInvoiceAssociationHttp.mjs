@@ -670,6 +670,131 @@ try {
     )
   }
 
+  // Inject a failure after the association insert is staged
+  // inside the transaction. MongoDB must roll it back.
+  const rollbackOrderId = new mongoose.Types.ObjectId()
+  const rollbackInvoiceId = new mongoose.Types.ObjectId()
+
+  const rollbackOrder = await new Order({
+    _id: rollbackOrderId,
+    source: "store",
+    status: "payment_required",
+    paymentStatus: "unpaid",
+    customerName: "V3 HTTP Rollback Test",
+    email: "v3-rollback@example.invalid",
+    address: {
+      street: "123 Test Street",
+      city: "Test City",
+      state: "CA",
+      zip: "90001",
+      country: "US"
+    },
+    subtotal: 39.98,
+    tax: 3.30,
+    finalPrice: 43.28,
+    items: [{
+      productId: new mongoose.Types.ObjectId(),
+      quantity: 2,
+      finalPrice: 19.99,
+      variant: { color: "black", size: "L" }
+    }]
+  }).save()
+
+  await Invoice.collection.insertOne({
+    _id: rollbackInvoiceId,
+    customerName: "V3 HTTP Rollback Test",
+    customerEmail: "v3-rollback@example.invalid",
+    status: "draft",
+    paymentStatus: "unpaid",
+    total: 55.28,
+    finalProof: { approved: false }
+  })
+
+  const rollbackQuote = createV3SignedQuote({
+    cartFingerprint: createV3OrderFingerprint(rollbackOrder),
+    shippingAmountCents: 1200,
+    parcelRateIds: ["test_rate_1", "test_rate_2"],
+    carrier: "USPS",
+    serviceToken: "usps_ground_advantage"
+  })
+
+  const rollbackUrl = url
+    .replace(String(orderId), String(rollbackOrderId))
+    .replace(String(invoiceId), String(rollbackInvoiceId))
+
+  const originalCreate = Association.create
+  let injected = false
+  let rollbackResponse
+
+  Association.create = async function (...args) {
+    const result = await originalCreate.apply(this, args)
+
+    injected = true
+    throw new Error("V3_HTTP_INJECTED_ROLLBACK")
+  }
+
+  try {
+    rollbackResponse = await fetch(rollbackUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminToken}`,
+        "x-signavi-guest-checkout-token":
+          createGuestCheckoutToken(rollbackOrder)
+      },
+      body: JSON.stringify({
+        v3ShippingQuote: rollbackQuote
+      })
+    })
+  } finally {
+    Association.create = originalCreate
+  }
+
+  assert.equal(injected, true)
+
+  const rollbackBody = await rollbackResponse.json()
+
+  assert.equal(rollbackResponse.status, 503)
+  assert.equal(
+    rollbackBody.code,
+    "V3_INVOICE_ASSOCIATION_REQUIRES_REVIEW"
+  )
+  assert.equal(rollbackBody.paymentCreated, false)
+  assert.equal(rollbackBody.squareRequestAuthorized, false)
+
+  assert.equal(
+    await Association.countDocuments({
+      orderId: rollbackOrderId
+    }),
+    0
+  )
+
+  assert.equal(
+    await Ownership.countDocuments({
+      environment: "sandbox",
+      purchaseKey: `order:${rollbackOrderId}`
+    }),
+    0
+  )
+
+  assert.equal(
+    await Operation.countDocuments({
+      orderId: rollbackOrderId
+    }),
+    0
+  )
+
+  const retainedLock = await mongoose.connection.db
+    .collection("smart_shipping_v3_checkout_locks")
+    .findOne({ _id: rollbackOrderId })
+
+  assert.ok(retainedLock)
+  assert.ok(retainedLock.owner)
+
+  console.log("HTTP INJECTED TRANSACTION FAILURE: OBSERVED")
+  console.log("HTTP TRANSACTION ROLLBACK: PASS")
+  console.log("HTTP FAILED TRANSACTION LOCK RETAINED: PASS")
+
   console.log("NO SQUARE REQUESTS")
   console.log("ALL DURABLE INVOICE HTTP TESTS PASSED")
 
