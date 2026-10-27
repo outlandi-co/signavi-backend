@@ -3,6 +3,12 @@ import assert from "node:assert/strict"
 import mongoose from "mongoose"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
+  claimV3SquareCreationAttempt
+} from "../utils/smartShippingV3ClaimCreationAttempt.js"
+import {
+  createV3SquareSafeCheckoutReference
+} from "../utils/smartShippingV3CheckoutReference.js"
+import {
   coordinateV3PaymentPreparation
 } from "../utils/smartShippingV3PaymentCoordinator.js"
 import {
@@ -49,6 +55,40 @@ try {
 
   assert.equal(prepared.success, true)
 
+  // Supply the modern preclaim reference in this legacy test fixture.
+  // This is test-only persistence, not Square authorization.
+  const reference = createV3SquareSafeCheckoutReference({
+    orderId: String(orderId)
+  })
+
+  assert.match(
+    prepared.operation.idempotencyKey,
+    /^signavi-v3-sandbox-/
+  )
+
+  const existingReference =
+    prepared.operation.checkoutReferenceId || ""
+
+  assert.ok(
+    existingReference === "" || existingReference === reference,
+    "Unexpected prepared checkout reference"
+  )
+
+  if (existingReference === "") {
+    const referenceUpdate = await PaymentOperation.collection.updateOne(
+      {
+        orderId,
+        status: "pending",
+        checkoutReferenceId: ""
+      },
+      {
+        $set: { checkoutReferenceId: reference }
+      }
+    )
+
+    assert.equal(referenceUpdate.matchedCount, 1)
+  }
+
   const args = {
     orderId,
     owner: prepared.lock.owner,
@@ -83,7 +123,55 @@ try {
   console.log("INTERRUPTED SQUARE REQUEST: PASS")
   console.log("UNCERTAIN OPERATION REQUIRES LOOKUP: PASS")
 
-  // Simulated Square identifiers only. No external request.
+  // Completion must fail before a durable creation-attempt claim.
+  await assert.rejects(
+    markV3PaymentCompleted({
+      ...args,
+      paymentUrl: "https://sandbox.square.test/payment",
+      squarePaymentLinkId: "test-reconciliation-link",
+      squareOrderId: "test-reconciliation-order"
+    }),
+    /rejected/
+  )
+
+  const preclaimOperation = await PaymentOperation.findOne({
+    orderId
+  }).lean()
+
+  assert.equal(preclaimOperation.status, "reconciliation_required")
+  assert.equal(
+    preclaimOperation.squareCreationAttemptClaimedAt ?? null,
+    null
+  )
+
+  console.log("UNCLAIMED COMPLETION: BLOCKED")
+
+  // Persist the one-time claim using the existing production helper.
+  // The claim does not authorize a Square call.
+  const claim = await claimV3SquareCreationAttempt({
+    orderId,
+    owner: args.owner,
+    idempotencyKey: args.idempotencyKey
+  })
+
+  assert.equal(claim.claimed, true)
+  assert.equal(claim.squareRequestAuthorized, false)
+  assert.equal(claim.paymentCreated, false)
+
+  const claimedOperation = await PaymentOperation.findOne({
+    orderId
+  }).lean()
+
+  assert.ok(
+    claimedOperation.squareCreationAttemptClaimedAt instanceof Date
+  )
+
+  console.log("DURABLE CREATION CLAIM: PASS")
+  console.log("SQUARE CREATION AUTHORIZATION: FALSE")
+
+  // These identifiers are simulated only.
+  // This test checks the legacy transition and read-only classification,
+  // not provider verification or permission to create a Square link.
   await markV3PaymentCompleted({
     ...args,
     paymentUrl: "https://sandbox.square.test/payment",
