@@ -1,4 +1,11 @@
 import crypto from "node:crypto"
+import {
+  applyV3PreparedPayment,
+  verifyV3AppliedPayment
+} from "./smartShippingV3ApplyPayment.js"
+import {
+  verifyV3OrderPaymentBinding
+} from "./smartShippingV3OrderPaymentBinding.js"
 import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import Invoice from "../models/Invoice.js"
@@ -26,7 +33,8 @@ export const prepareV3AtomicPurchaseIsolated = async ({
   documentId,
   guestToken,
   signedQuote,
-  simulateFailureAfterClaim = false
+  simulateFailureAfterClaim = false,
+  simulateFailureAfterBinding = false
 } = {}) => {
   if (
     process.env.NODE_ENV !== "test" ||
@@ -169,6 +177,78 @@ export const prepareV3AtomicPurchaseIsolated = async ({
           createV3SquareSafeCheckoutReference({ orderId })
       }], { session })
 
+      // Reject conflicting existing payment ownership.
+      if (
+        order.squareEnvironment &&
+        order.squareEnvironment !== "sandbox"
+      ) {
+        throw new Error("V3 order Square environment mismatch.")
+      }
+
+      if (
+        order.squareExpectedAmountCents != null &&
+        order.squareExpectedAmountCents !== prepared.totalCents
+      ) {
+        throw new Error("V3 saved payment amount mismatch.")
+      }
+
+      const binding = verifyV3OrderPaymentBinding({
+        order,
+        prepared,
+        operation: operation[0]
+      })
+
+      applyV3PreparedPayment(order, prepared)
+
+      order.squareEnvironment = "sandbox"
+      order.squareExpectedAmountCents = prepared.totalCents
+
+      if (!verifyV3AppliedPayment(order, prepared)) {
+        throw new Error("V3 prepared order verification failed.")
+      }
+
+      await order.save({ session })
+
+      // Failure injection proves that even a saved order
+      // is rolled back along with claim and operation.
+      if (simulateFailureAfterBinding === true) {
+        throw new Error("SIMULATED_BINDING_FAILURE")
+      }
+
+      const storedOrder = await Order.findById(orderObjectId)
+        .session(session)
+
+      if (
+        !storedOrder ||
+        !verifyV3AppliedPayment(storedOrder, prepared) ||
+        storedOrder.squareEnvironment !== "sandbox" ||
+        storedOrder.squareExpectedAmountCents !== prepared.totalCents
+      ) {
+        throw new Error("V3 transactional order binding mismatch.")
+      }
+
+      // Confirm the operation remained in its pristine
+      // pre-execution state.
+      const operationUpdate = await Operation.updateOne(
+        {
+          _id: operation[0]._id,
+          orderId: orderObjectId,
+          environment: "sandbox",
+          amountCents: prepared.totalCents,
+          checkoutReferenceId: binding.checkoutReferenceId,
+          status: "pending",
+          requestOwner: "",
+          squarePaymentLinkId: "",
+          squareOrderId: "",
+          paymentUrl: ""
+        },
+        { $currentDate: { updatedAt: true } },
+        { session }
+      )
+
+      if (operationUpdate.matchedCount !== 1) {
+        throw new Error("V3 operation binding changed.")
+      }
       return Object.freeze({
         prepared: true,
         orderId,
@@ -178,7 +258,10 @@ export const prepareV3AtomicPurchaseIsolated = async ({
         paymentOperationId: String(operation[0]._id),
         amountCents: prepared.totalCents,
         squareRequestAuthorized: false,
-        paymentCreated: false
+        paymentCreated: false,
+        orderPaymentBound: true,
+        checkoutReferenceId: binding.checkoutReferenceId,
+        shippingAmountCents: prepared.shippingAmountCents
       })
     }
   })

@@ -177,6 +177,60 @@ try {
 
   console.log("INTERNAL WORKFLOW ATOMIC PREPARATION: PASSED")
 
+  const saved = await Order.findById(standalone.orderId).lean()
+
+  assert.ok(saved)
+  assert.equal(String(saved.currency).toUpperCase(), "USD")
+  assert.equal(Math.round(saved.shipping * 100), 1200)
+  assert.equal(Math.round(saved.finalPrice * 100), 5528)
+  assert.equal(saved.squareEnvironment, "sandbox")
+  assert.equal(saved.squareExpectedAmountCents, 5528)
+  assert.deepEqual(saved.shippingRateIds, [
+    "test_rate_1",
+    "test_rate_2"
+  ])
+
+  assert.equal(result.orderPaymentBound, true)
+
+  console.log("ATOMIC ORDER PAYMENT BINDING: PASSED")
+
+  const rollbackItem = await fixture()
+
+  const beforeRollback = await Order.findById(
+    rollbackItem.orderId
+  ).lean()
+
+  const rollbackLock = await acquireV3CheckoutLock(
+    String(rollbackItem.orderId)
+  )
+
+  assert.ok(rollbackLock)
+
+  await assert.rejects(
+    prepare({
+      lock: rollbackLock,
+      documentType: "order",
+      documentId: rollbackItem.orderId,
+      guestToken: rollbackItem.guestToken,
+      signedQuote: rollbackItem.signedQuote,
+      simulateFailureAfterBinding: true
+    }),
+    /SIMULATED_BINDING_FAILURE/
+  )
+
+  assert.deepEqual(await counts(rollbackItem), {
+    claims: 0,
+    operations: 0
+  })
+
+  const afterRollback = await Order.findById(
+    rollbackItem.orderId
+  ).lean()
+
+  assert.deepEqual(afterRollback, beforeRollback)
+
+  console.log("CLAIM + OPERATION + ORDER ROLLBACK: PASSED")
+
   const linked = await fixture({ linked: true })
 
   await assert.rejects(
