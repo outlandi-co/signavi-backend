@@ -1,3 +1,10 @@
+import mongoose from "mongoose"
+import {
+  acquireV3CheckoutLock
+} from "./smartShippingV3CheckoutLock.js"
+import {
+  prepareV3AtomicPurchaseIsolated
+} from "./prepareV3AtomicPurchaseIsolated.js"
 import Order from "../models/Order.js"
 import {
   prepareV3CheckoutPayment
@@ -58,6 +65,43 @@ export const prepareV3SandboxCheckoutWorkflow = async ({
     throw new Error(
       "V3 checkout authorization or quote invalid."
     )
+  }
+
+  // Explicit isolated-test integration only.
+  // Development and existing checkout behavior remain unchanged.
+  if (
+    process.env.NODE_ENV === "test" &&
+    process.env.SQUARE_ENVIRONMENT === "sandbox" &&
+    mongoose.connection.readyState === 1 &&
+    mongoose.connection.db?.databaseName ===
+      "signavi_reservation_isolated_test"
+  ) {
+    const lock = await acquireV3CheckoutLock(prepared.orderId)
+
+    if (!lock) {
+      return Object.freeze({
+        success: false,
+        reason: "checkout_in_progress",
+        squareRequestAuthorized: false
+      })
+    }
+
+    // Verify the current order again inside the owned transaction.
+    // A failed or uncertain preparation retains its lock.
+    const atomic = await prepareV3AtomicPurchaseIsolated({
+      lock,
+      documentType: "order",
+      documentId: prepared.orderId,
+      guestToken,
+      signedQuote
+    })
+
+    return Object.freeze({
+      success: true,
+      ...atomic,
+      squareRequestAuthorized: false,
+      paymentCreated: false
+    })
   }
 
   const coordinated = await coordinateV3PaymentPreparation({
