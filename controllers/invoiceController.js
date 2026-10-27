@@ -287,11 +287,8 @@ const publicInvoice = (invoice) => ({
   status: invoice.status,
   paymentStatus: invoice.paymentStatus,
 
-  paymentUrl:
-    isProofApproved(invoice) &&
-    invoice.paymentStatus === "unpaid"
-      ? invoice.paymentUrl
-      : "",
+  // Hide legacy payment URLs until durable invoice execution is enabled.
+  paymentUrl: "",
 
   finalProof: {
     imageUrl: invoice.finalProof?.imageUrl || "",
@@ -357,20 +354,15 @@ const createSquarePaymentLinkForInvoice = async (
   }
 
 
-if (invoice.paymentUrl) {
-  if (invoice.squareEnvironment !== squareMode) {
-    throw Object.assign(
-      new Error(
-        "Existing invoice payment link belongs to another or unknown Square environment. Deactivate the existing link in Square before creating a replacement."
-      ),
-      { status: 409 }
-    )
-  }
-
-  return invoice.paymentUrl
-}
-
-
+  // Smart Shipping V3 safety gate.
+  // No configuration setting can bypass this guard.
+  // Replace only with verified durable payment execution.
+  throw Object.assign(
+    new Error(
+      "Invoice payment-link creation is disabled pending durable payment execution."
+    ),
+    { status: 423 }
+  )
   const amount = Math.round(
     Number(invoice.total || 0) * 100
   )
@@ -387,15 +379,6 @@ if (invoice.paymentUrl) {
     )
   }
 
-  // Smart Shipping V3 safety gate.
-  // No configuration setting can bypass this guard.
-  // Replace only with verified durable payment execution.
-  throw Object.assign(
-    new Error(
-      "Invoice payment-link creation is disabled pending durable payment execution."
-    ),
-    { status: 423 }
-  )
   const response =
     await squareClient.checkout.paymentLinks.create({
       idempotencyKey: crypto.randomUUID(),
