@@ -292,6 +292,116 @@ try {
   )
 
   console.log("INVOICE HTTP DUPLICATE BLOCKED: 409 PASS")
+  // A separate order with canonical payment ownership must
+  // not acquire an invoice/order association through HTTP.
+  const conflictOrderId = new mongoose.Types.ObjectId()
+  const conflictInvoiceId = new mongoose.Types.ObjectId()
+
+  const conflictOrder = await new Order({
+    _id: conflictOrderId,
+    source: "store",
+    status: "payment_required",
+    paymentStatus: "unpaid",
+    customerName: "V3 HTTP Ownership Conflict",
+    email: "v3-conflict@example.invalid",
+    address: {
+      street: "123 Test Street",
+      city: "Test City",
+      state: "CA",
+      zip: "90001",
+      country: "US"
+    },
+    subtotal: 39.98,
+    tax: 3.30,
+    finalPrice: 43.28,
+    items: [{
+      productId: new mongoose.Types.ObjectId(),
+      quantity: 2,
+      finalPrice: 19.99,
+      variant: { color: "black", size: "L" }
+    }]
+  }).save()
+
+  await Invoice.collection.insertOne({
+    _id: conflictInvoiceId,
+    customerName: "V3 HTTP Ownership Conflict",
+    customerEmail: "v3-conflict@example.invalid",
+    status: "draft",
+    paymentStatus: "unpaid",
+    total: 55.28,
+    finalProof: { approved: false }
+  })
+
+  const conflictGuestToken = createGuestCheckoutToken(conflictOrder)
+
+  const conflictQuote = createV3SignedQuote({
+    cartFingerprint: createV3OrderFingerprint(conflictOrder),
+    shippingAmountCents: 1200,
+    parcelRateIds: ["test_rate_1", "test_rate_2"],
+    carrier: "USPS",
+    serviceToken: "usps_ground_advantage"
+  })
+
+  await Ownership.create({
+    environment: "sandbox",
+    purchaseKey: `order:${conflictOrderId}`,
+    claimedByDocumentType: "order",
+    claimedByDocumentId: conflictOrderId,
+    status: "reconciliation_required"
+  })
+
+  const conflictUrl = url
+    .replace(String(orderId), String(conflictOrderId))
+    .replace(String(invoiceId), String(conflictInvoiceId))
+
+  const conflictResponse = await fetch(conflictUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${adminToken}`,
+      "x-signavi-guest-checkout-token": conflictGuestToken
+    },
+    body: JSON.stringify({
+      v3ShippingQuote: conflictQuote
+    })
+  })
+
+  const conflictBody = await conflictResponse.json()
+
+  // The current test-only router conservatively reports
+  // transaction conflicts as 503 requiring review.
+  assert.equal(conflictResponse.status, 503)
+  assert.equal(
+    conflictBody.code,
+    "V3_INVOICE_ASSOCIATION_REQUIRES_REVIEW"
+  )
+  assert.equal(conflictBody.paymentCreated, false)
+  assert.equal(conflictBody.squareRequestAuthorized, false)
+
+  assert.equal(
+    await Association.countDocuments({
+      orderId: conflictOrderId
+    }),
+    0
+  )
+
+  assert.equal(
+    await Operation.countDocuments({
+      orderId: conflictOrderId
+    }),
+    0
+  )
+
+  assert.equal(
+    await Ownership.countDocuments({
+      environment: "sandbox",
+      purchaseKey: `order:${conflictOrderId}`
+    }),
+    1
+  )
+
+  console.log("HTTP EXISTING PAYMENT OWNERSHIP: BLOCKED")
+  console.log("HTTP OWNERSHIP CONFLICT: NO DUPLICATE RECORDS")
   console.log("NO SQUARE REQUESTS")
   console.log("ALL DURABLE INVOICE HTTP TESTS PASSED")
 
