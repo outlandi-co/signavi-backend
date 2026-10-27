@@ -852,6 +852,77 @@ try {
   console.log("HTTP RETAINED LOCK OWNER: UNCHANGED")
   console.log("HTTP FAILED RETRY: NO PAYMENT RECORDS")
 
+  // Simulate expiration without deleting the retained lock.
+  const lockCollection = mongoose.connection.db.collection(
+    "smart_shipping_v3_checkout_locks"
+  )
+
+  const expireResult = await lockCollection.updateOne(
+    {
+      _id: rollbackOrderId,
+      owner: retainedLock.owner
+    },
+    {
+      $set: {
+        expiresAt: new Date(Date.now() - 60_000)
+      }
+    }
+  )
+
+  assert.equal(expireResult.matchedCount, 1)
+
+  const expiredResponse = await fetch(rollbackUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${adminToken}`,
+      "x-signavi-guest-checkout-token":
+        createGuestCheckoutToken(rollbackOrder)
+    },
+    body: JSON.stringify({
+      v3ShippingQuote: rollbackQuote
+    })
+  })
+
+  const expiredBody = await expiredResponse.json()
+
+  assert.equal(expiredResponse.status, 409)
+  assert.equal(
+    expiredBody.code,
+    "V3_CHECKOUT_LOCK_UNAVAILABLE"
+  )
+  assert.equal(expiredBody.squareRequestAuthorized, false)
+
+  const expiredLock = await lockCollection.findOne({
+    _id: rollbackOrderId
+  })
+
+  assert.ok(expiredLock)
+  assert.equal(expiredLock.owner, retainedLock.owner)
+  assert.ok(expiredLock.expiresAt.getTime() < Date.now())
+
+  assert.equal(
+    await Association.countDocuments({ orderId: rollbackOrderId }),
+    0
+  )
+
+  assert.equal(
+    await Ownership.countDocuments({
+      environment: "sandbox",
+      purchaseKey: `order:${rollbackOrderId}`
+    }),
+    0
+  )
+
+  assert.equal(
+    await Operation.countDocuments({ orderId: rollbackOrderId }),
+    0
+  )
+
+  console.log("HTTP EXPIRED RETAINED LOCK: BLOCKED")
+  console.log("HTTP EXPIRED LOCK OWNER: UNCHANGED")
+  console.log("HTTP EXPIRED RETRY: NO PAYMENT RECORDS")
+
   console.log("NO SQUARE REQUESTS")
   console.log("ALL DURABLE INVOICE HTTP TESTS PASSED")
 
