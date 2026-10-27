@@ -402,6 +402,130 @@ try {
 
   console.log("HTTP EXISTING PAYMENT OWNERSHIP: BLOCKED")
   console.log("HTTP OWNERSHIP CONFLICT: NO DUPLICATE RECORDS")
+  // Existing payment operation must block invoice linking.
+  const operationOrderId = new mongoose.Types.ObjectId()
+  const operationInvoiceId = new mongoose.Types.ObjectId()
+
+  const operationOrder = await new Order({
+    _id: operationOrderId,
+    source: "store",
+    status: "payment_required",
+    paymentStatus: "unpaid",
+    customerName: "V3 HTTP Operation Conflict",
+    email: "v3-operation@example.invalid",
+    address: {
+      street: "123 Test Street",
+      city: "Test City",
+      state: "CA",
+      zip: "90001",
+      country: "US"
+    },
+    subtotal: 39.98,
+    tax: 3.30,
+    finalPrice: 43.28,
+    items: [{
+      productId: new mongoose.Types.ObjectId(),
+      quantity: 2,
+      finalPrice: 19.99,
+      variant: { color: "black", size: "L" }
+    }]
+  }).save()
+
+  await Invoice.collection.insertOne({
+    _id: operationInvoiceId,
+    customerName: "V3 HTTP Operation Conflict",
+    customerEmail: "v3-operation@example.invalid",
+    status: "draft",
+    paymentStatus: "unpaid",
+    total: 55.28,
+    finalProof: { approved: false }
+  })
+
+  const operationGuestToken =
+    createGuestCheckoutToken(operationOrder)
+
+  const operationQuote = createV3SignedQuote({
+    cartFingerprint: createV3OrderFingerprint(operationOrder),
+    shippingAmountCents: 1200,
+    parcelRateIds: ["test_rate_1", "test_rate_2"],
+    carrier: "USPS",
+    serviceToken: "usps_ground_advantage"
+  })
+
+  const existingOperation = await Operation.create({
+    orderId: operationOrderId,
+    checkoutReferenceId: `existing-${operationOrderId}`,
+    idempotencyKey: `existing-operation-${operationOrderId}`,
+    amountCents: 5528,
+    environment: "sandbox",
+    status: "reconciliation_required"
+  })
+
+  const operationUrl = url
+    .replace(String(orderId), String(operationOrderId))
+    .replace(String(invoiceId), String(operationInvoiceId))
+
+  const operationResponse = await fetch(operationUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${adminToken}`,
+      "x-signavi-guest-checkout-token": operationGuestToken
+    },
+    body: JSON.stringify({
+      v3ShippingQuote: operationQuote
+    })
+  })
+
+  const operationBody = await operationResponse.json()
+
+  assert.equal(operationResponse.status, 503)
+  assert.equal(
+    operationBody.code,
+    "V3_INVOICE_ASSOCIATION_REQUIRES_REVIEW"
+  )
+  assert.equal(operationBody.paymentCreated, false)
+  assert.equal(operationBody.squareRequestAuthorized, false)
+
+  assert.equal(
+    await Association.countDocuments({
+      orderId: operationOrderId
+    }),
+    0
+  )
+
+  assert.equal(
+    await Ownership.countDocuments({
+      environment: "sandbox",
+      purchaseKey: `order:${operationOrderId}`
+    }),
+    0
+  )
+
+  const retainedOperation = await Operation.findById(
+    existingOperation._id
+  ).lean()
+
+  assert.ok(retainedOperation)
+  assert.equal(
+    retainedOperation.status,
+    "reconciliation_required"
+  )
+  assert.equal(
+    retainedOperation.idempotencyKey,
+    existingOperation.idempotencyKey
+  )
+
+  assert.equal(
+    await Operation.countDocuments({
+      orderId: operationOrderId
+    }),
+    1
+  )
+
+  console.log("HTTP EXISTING PAYMENT OPERATION: BLOCKED")
+  console.log("HTTP PAYMENT OPERATION PRESERVED: PASS")
+
   console.log("NO SQUARE REQUESTS")
   console.log("ALL DURABLE INVOICE HTTP TESTS PASSED")
 
