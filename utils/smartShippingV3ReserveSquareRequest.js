@@ -35,6 +35,23 @@ export const reserveV3SquareRequest = async ({
     orderId: id,
     owner,
     transition: async session => {
+      // Block checkout reservation when an invoice association exists.
+      const existingAssociation = await mongoose.connection
+        .collection("invoice_order_associations_v3_test")
+        .findOne(
+          {
+            orderId: new mongoose.Types.ObjectId(id),
+            environment: "sandbox"
+          },
+          { projection: { _id: 1 }, session }
+        )
+
+      if (existingAssociation) {
+        throw new Error(
+          "V3 Square reservation blocked: invoice association exists."
+        )
+      }
+
       const order = await Order.findById(id)
         .session(session)
 
