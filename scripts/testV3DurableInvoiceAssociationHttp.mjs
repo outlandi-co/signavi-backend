@@ -194,6 +194,50 @@ try {
 
   console.log("INVOICE HTTP DISABLED FLAG: 503 PASS")
 
+  // Test-only router must be disabled outside NODE_ENV=test.
+  process.env.NODE_ENV = "production"
+
+  try {
+    const production = await request()
+
+    assert.equal(production.status, 503)
+    assert.equal(
+      production.body.code,
+      "V3_INVOICE_ASSOCIATION_DISABLED"
+    )
+
+    console.log("INVOICE HTTP PRODUCTION MODE: 503 PASS")
+  } finally {
+    process.env.NODE_ENV = "test"
+  }
+
+  // Malformed identifiers must fail before lock acquisition.
+  const invalidUrl = url.replace(
+    `/orders/${orderId}/`,
+    "/orders/invalid-id/"
+  )
+
+  const invalidResponse = await fetch(invalidUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${adminToken}`,
+      "x-signavi-guest-checkout-token": guestToken
+    },
+    body: JSON.stringify({
+      v3ShippingQuote: signedQuote
+    })
+  })
+
+  const invalidBody = await invalidResponse.json()
+
+  assert.equal(invalidResponse.status, 400)
+  assert.equal(
+    invalidBody.code,
+    "INVALID_ASSOCIATION_IDENTIFIERS"
+  )
+
+  console.log("INVOICE HTTP INVALID IDENTIFIERS: 400 PASS")
   const missing = await request({ credentials: false })
   assert.equal(missing.status, 400)
   console.log("INVOICE HTTP MISSING CREDENTIALS: 400 PASS")
