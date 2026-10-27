@@ -1,4 +1,7 @@
 import mongoose from "mongoose"
+import {
+  prepareV3CheckoutPayment
+} from "./smartShippingV3PaymentPreparation.js"
 import Order from "../models/Order.js"
 import Invoice from "../models/Invoice.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
@@ -24,7 +27,8 @@ import {
 export const linkV3InvoiceOrderIsolated = async ({
   lock,
   invoiceId,
-  prepared
+  guestToken,
+  signedQuote
 } = {}) => {
   if (
     process.env.NODE_ENV !== "test" ||
@@ -41,7 +45,11 @@ export const linkV3InvoiceOrderIsolated = async ({
     !mongoose.isObjectIdOrHexString(lock.orderId) ||
     typeof lock.owner !== "string" ||
     !lock.owner.trim() ||
-    !mongoose.isObjectIdOrHexString(invoiceId)
+    !mongoose.isObjectIdOrHexString(invoiceId) ||
+    typeof guestToken !== "string" ||
+    !guestToken.trim() ||
+    typeof signedQuote !== "string" ||
+    !signedQuote.trim()
   ) {
     throw new Error("Invalid V3 linking inputs.")
   }
@@ -67,6 +75,20 @@ export const linkV3InvoiceOrderIsolated = async ({
 
       const invoice = await Invoice.findById(invoiceObjectId)
         .session(session)
+
+      // Derive the amount from the freshly loaded order
+      // and cryptographically verified checkout credentials.
+      const prepared = prepareV3CheckoutPayment({
+        order,
+        guestToken,
+        signedQuote
+      })
+
+      if (!prepared) {
+        throw new Error(
+          "V3 linking rejected: checkout authorization or quote invalid."
+        )
+      }
 
       const match = validateInvoiceOrderCheckoutMatch({
         invoice,

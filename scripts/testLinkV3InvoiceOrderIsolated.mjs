@@ -5,13 +5,12 @@ import { MongoMemoryReplSet } from "mongodb-memory-server"
 
 process.env.NODE_ENV = "test"
 process.env.SQUARE_ENVIRONMENT = "sandbox"
+process.env.SHIPPING_QUOTE_SECRET = crypto.randomBytes(32).toString("hex")
+process.env.SHIPPING_V3_QUOTE_SECRET = crypto.randomBytes(48).toString("hex")
 delete process.env.MONGO_URI
 
 const replica = await MongoMemoryReplSet.create({
-  replSet: {
-    count: 1,
-    storageEngine: "wiredTiger"
-  }
+  replSet: { count: 1, storageEngine: "wiredTiger" }
 })
 
 try {
@@ -35,6 +34,15 @@ try {
   const { default: Association } = await import(
     "../models/InvoiceOrderAssociationV3.js"
   )
+  const { createGuestCheckoutToken } = await import(
+    "../utils/guestCheckoutToken.js"
+  )
+  const { createV3OrderFingerprint } = await import(
+    "../utils/smartShippingV3OrderFingerprint.js"
+  )
+  const { createV3SignedQuote } = await import(
+    "../utils/smartShippingV3QuoteSigning.js"
+  )
   const { acquireV3CheckoutLock } = await import(
     "../utils/smartShippingV3CheckoutLock.js"
   )
@@ -46,25 +54,35 @@ try {
 
   const makeFixture = async ({
     invoiceEmail = "customer@example.com",
-    invoiceTotal = 150
+    invoiceTotal = 55.28
   } = {}) => {
     const orderId = new mongoose.Types.ObjectId()
     const invoiceId = new mongoose.Types.ObjectId()
 
-    // Raw inserts avoid unrelated schema hooks.
-    await Order.collection.insertOne({
+    // Match the existing V3 signed-checkout fixture.
+    await new Order({
       _id: orderId,
+      source: "store",
+      status: "payment_required",
+      paymentStatus: "unpaid",
       customerName: "Test Customer",
       email: "customer@example.com",
-      source: "store",
-      status: "pending",
-      paymentStatus: "unpaid",
-      currency: "usd",
-      subtotal: 120,
-      tax: 10,
-      squareEnvironment: null,
-      squarePaymentLinkId: ""
-    })
+      address: {
+        street: "123 Test Street",
+        city: "Test City",
+        state: "CA",
+        zip: "90001",
+        country: "US"
+      },
+      subtotal: 39.98,
+      tax: 3.30,
+      items: [{
+        productId: new mongoose.Types.ObjectId(),
+        quantity: 2,
+        finalPrice: 19.99,
+        variant: { color: "black", size: "L" }
+      }]
+    }).save()
 
     await Invoice.collection.insertOne({
       _id: invoiceId,
@@ -76,163 +94,132 @@ try {
       finalProof: { approved: false }
     })
 
-    const lock = await acquireV3CheckoutLock(
-      String(orderId)
-    )
+    const order = await Order.findById(orderId)
+    assert.ok(order)
 
+    const guestToken = createGuestCheckoutToken(order)
+
+    const signedQuote = createV3SignedQuote({
+      cartFingerprint: createV3OrderFingerprint(order),
+      shippingAmountCents: 1200,
+      parcelRateIds: ["test_rate_1", "test_rate_2"],
+      carrier: "USPS",
+      serviceToken: "usps_ground_advantage"
+    })
+
+    const lock = await acquireV3CheckoutLock(String(orderId))
     assert.ok(lock)
 
-    return {
-      orderId,
-      invoiceId,
-      lock,
-      prepared: {
-        orderId: String(orderId),
-        subtotalCents: 12000,
-        taxCents: 1000,
-        shippingAmountCents: 2000,
-        totalCents: 15000
-      }
-    }
+    return { orderId, invoiceId, lock, guestToken, signedQuote }
   }
 
-  const invoke = fixture => link({
+  const invoke = (fixture, changes = {}) => link({
     lock: fixture.lock,
     invoiceId: fixture.invoiceId,
-    prepared: fixture.prepared
+    guestToken: fixture.guestToken,
+    signedQuote: fixture.signedQuote,
+    ...changes
   })
 
-  // TEST 1: Successful isolated association.
+  const countLinks = fixture =>
+    Association.countDocuments({ orderId: fixture.orderId })
+
+  // Valid credentials and matching invoice amount.
   const valid = await makeFixture()
-  const linked = await invoke(valid)
+  const result = await invoke(valid)
 
-  assert.equal(linked.linked, true)
-  assert.equal(linked.amountCents, 15000)
-  assert.equal(linked.squareRequestAuthorized, false)
-  assert.equal(linked.paymentCreated, false)
+  assert.equal(result.linked, true)
+  assert.equal(result.amountCents, 5528)
+  assert.equal(result.squareRequestAuthorized, false)
+  assert.equal(result.paymentCreated, false)
+  assert.equal(await countLinks(valid), 1)
 
-  assert.equal(
-    await Association.countDocuments({
-      invoiceId: valid.invoiceId,
-      orderId: valid.orderId
-    }),
-    1
-  )
+  console.log("SIGNED CHECKOUT ASSOCIATION: PASSED")
 
-  console.log("VALID INVOICE/ORDER: LINKED")
-
-  // TEST 2: Duplicate association must not succeed.
   await assert.rejects(
     invoke(valid),
     error => error?.code === 11000
   )
-
-  assert.equal(
-    await Association.countDocuments({
-      orderId: valid.orderId
-    }),
-    1
-  )
+  assert.equal(await countLinks(valid), 1)
 
   console.log("DUPLICATE ASSOCIATION: BLOCKED")
 
-  // TEST 3: Different customer email.
+  const wrongGuest = await makeFixture()
+  await assert.rejects(
+    invoke(wrongGuest, { guestToken: "invalid-guest-token" }),
+    /checkout authorization or quote invalid/
+  )
+  assert.equal(await countLinks(wrongGuest), 0)
+
+  console.log("INVALID GUEST TOKEN: BLOCKED")
+
+  const wrongQuote = await makeFixture()
+  await assert.rejects(
+    invoke(wrongQuote, {
+      signedQuote: wrongQuote.signedQuote + "tampered"
+    }),
+    /checkout authorization or quote invalid/
+  )
+  assert.equal(await countLinks(wrongQuote), 0)
+
+  console.log("TAMPERED SHIPPING QUOTE: BLOCKED")
+
   const wrongCustomer = await makeFixture({
     invoiceEmail: "wrong@example.com"
   })
-
   await assert.rejects(
     invoke(wrongCustomer),
     /customer_email_mismatch/
   )
-
-  assert.equal(
-    await Association.countDocuments({
-      orderId: wrongCustomer.orderId
-    }),
-    0
-  )
+  assert.equal(await countLinks(wrongCustomer), 0)
 
   console.log("CUSTOMER MISMATCH: BLOCKED")
 
-  // TEST 4: Different payment amount.
-  const wrongAmount = await makeFixture({
-    invoiceTotal: 151
-  })
-
+  const wrongAmount = await makeFixture({ invoiceTotal: 56.28 })
   await assert.rejects(
     invoke(wrongAmount),
     /checkout_amount_mismatch/
   )
-
-  assert.equal(
-    await Association.countDocuments({
-      orderId: wrongAmount.orderId
-    }),
-    0
-  )
+  assert.equal(await countLinks(wrongAmount), 0)
 
   console.log("AMOUNT MISMATCH: BLOCKED")
 
-  // TEST 5: Existing pending payment operation.
   const existingOperation = await makeFixture()
-
   await Operation.collection.insertOne({
     orderId: existingOperation.orderId,
     environment: "sandbox",
     status: "pending",
-    amountCents: 15000,
-    idempotencyKey:
-      `signavi-v3-sandbox-${crypto.randomUUID()}`
+    amountCents: 5528,
+    idempotencyKey: `signavi-v3-sandbox-${crypto.randomUUID()}`
   })
-
   await assert.rejects(
     invoke(existingOperation),
     /order_payment_operation_exists/
   )
-
-  assert.equal(
-    await Association.countDocuments({
-      orderId: existingOperation.orderId
-    }),
-    0
-  )
+  assert.equal(await countLinks(existingOperation), 0)
 
   console.log("EXISTING PAYMENT OPERATION: BLOCKED")
 
-  // TEST 6: Existing invoice payment reservation.
   const existingReservation = await makeFixture()
-
   await Reservation.collection.insertOne({
     documentType: "invoice",
     documentId: existingReservation.invoiceId,
     environment: "sandbox",
-    amountCents: 15000,
+    amountCents: 5528,
     owner: "isolated-test-owner",
-    idempotencyKey:
-      `signavi-v3-sandbox-${crypto.randomUUID()}`,
+    idempotencyKey: `signavi-v3-sandbox-${crypto.randomUUID()}`,
     status: "reconciliation_required",
     attemptClaimedAt: null
   })
-
   await assert.rejects(
     invoke(existingReservation),
     /invoice_payment_reservation_exists/
   )
-
-  assert.equal(
-    await Association.countDocuments({
-      orderId: existingReservation.orderId
-    }),
-    0
-  )
+  assert.equal(await countLinks(existingReservation), 0)
 
   console.log("EXISTING INVOICE RESERVATION: BLOCKED")
-
-  console.log("TRANSACTIONAL ASSOCIATION: VERIFIED")
-  console.log("ISOLATED DATABASE: VERIFIED")
-  console.log("SQUARE REQUESTS: NONE")
-  console.log("LINKING INTEGRATION TEST PASSED")
+  console.log("TRUSTED LINKING INTEGRATION TEST PASSED")
+  console.log("NO SQUARE REQUESTS")
 } finally {
   await mongoose.disconnect()
   await replica.stop()
