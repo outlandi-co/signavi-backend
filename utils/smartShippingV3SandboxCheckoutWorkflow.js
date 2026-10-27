@@ -74,7 +74,8 @@ export const prepareV3SandboxCheckoutWorkflow = async ({
     process.env.SQUARE_ENVIRONMENT === "sandbox" &&
     mongoose.connection.readyState === 1 &&
     mongoose.connection.db?.databaseName ===
-      "signavi_reservation_isolated_test"
+      "signavi_reservation_isolated_test" &&
+    process.env.SMART_SHIPPING_V3_DURABLE_WORKFLOW_TEST_ENABLED !== "true"
   ) {
     const lock = await acquireV3CheckoutLock(prepared.orderId)
 
@@ -104,6 +105,69 @@ export const prepareV3SandboxCheckoutWorkflow = async ({
     })
   }
 
+  // Experimental durable path: isolated test execution only.
+  // Do not use this path for production or Square execution.
+  //
+  // The original coordinator remains unchanged below.
+  const durableWorkflowTestEnabled =
+    process.env.NODE_ENV === "test" &&
+    process.env.SQUARE_ENVIRONMENT === "sandbox" &&
+    process.env.SMART_SHIPPING_V3_ENABLED === "true" &&
+    process.env.SMART_SHIPPING_V3_SANDBOX_PREPARE_ENABLED === "true" &&
+    process.env.SMART_SHIPPING_V3_DURABLE_PREPARE_ENABLED === "true" &&
+    process.env.SMART_SHIPPING_V3_DURABLE_WORKFLOW_TEST_ENABLED === "true" &&
+    mongoose.connection.readyState === 1 &&
+    mongoose.connection.db?.databaseName ===
+      "signavi_reservation_isolated_test"
+
+  if (
+    process.env.SMART_SHIPPING_V3_DURABLE_WORKFLOW_TEST_ENABLED === "true" &&
+    !durableWorkflowTestEnabled
+  ) {
+    throw new Error(
+      "Durable workflow test requires isolated sandbox prerequisites."
+    )
+  }
+
+  if (durableWorkflowTestEnabled) {
+    const {
+      prepareV3AtomicSandboxCheckout
+    } = await import("./prepareV3AtomicSandboxCheckout.js")
+
+    const durableLock = await acquireV3CheckoutLock(
+      prepared.orderId
+    )
+
+    if (!durableLock) {
+      return Object.freeze({
+        success: false,
+        reason: "checkout_in_progress",
+        squareRequestAuthorized: false,
+        paymentCreated: false
+      })
+    }
+
+    // Retain the lock after success or an uncertain failure.
+    // Reconciliation, not automatic release, owns recovery.
+    const durable = await prepareV3AtomicSandboxCheckout({
+      lock: durableLock,
+      guestToken,
+      signedQuote
+    })
+
+    if (!durable?.success) {
+      throw new Error(
+        "Durable sandbox checkout preparation rejected."
+      )
+    }
+
+    return Object.freeze({
+      ...durable,
+      success: true,
+      squareRequestAuthorized: false,
+      paymentCreated: false
+    })
+  }
   const coordinated = await coordinateV3PaymentPreparation({
     orderId: prepared.orderId,
     amountCents: prepared.totalCents
