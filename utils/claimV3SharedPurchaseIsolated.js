@@ -1,6 +1,8 @@
 import mongoose from "mongoose"
 import PurchaseReservation from "../models/SharedSquarePurchaseReservation.js"
 import Association from "../models/InvoiceOrderAssociationV3.js"
+import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import DocumentReservation from "../models/SharedSquarePaymentReservation.js"
 
 // Test-only shared purchase claim.
 // Does not authorize Square or invoke a payment route.
@@ -44,6 +46,60 @@ export const claimV3SharedPurchaseIsolated = async ({
     if (!association) {
       throw new Error("Invoice purchase association missing.")
     }
+  }
+
+  const orderObjectId = new mongoose.Types.ObjectId(orderKey)
+
+  // Fail closed if either payment path already owns
+  // a payment identity. No existing records are deleted.
+  const operation = await PaymentOperation.findOne({
+    orderId: orderObjectId
+  }).lean()
+
+  if (operation) {
+    return Object.freeze({
+      claimed: false,
+      reason: "order_payment_operation_exists",
+      squareRequestAuthorized: false,
+      paymentCreated: false
+    })
+  }
+
+  const association = await Association.findOne({
+    orderId: orderObjectId,
+    environment: "sandbox"
+  }).lean()
+
+  const invoiceId = documentType === "invoice"
+    ? new mongoose.Types.ObjectId(documentKey)
+    : association?.invoiceId
+
+  const reservations = [{
+    documentType: "order",
+    documentId: orderObjectId,
+    environment: "sandbox"
+  }]
+
+  if (invoiceId) {
+    reservations.push({
+      documentType: "invoice",
+      documentId: invoiceId,
+      environment: "sandbox"
+    })
+  }
+
+  const existingReservation =
+    await DocumentReservation.findOne({
+      $or: reservations
+    }).lean()
+
+  if (existingReservation) {
+    return Object.freeze({
+      claimed: false,
+      reason: "document_payment_reservation_exists",
+      squareRequestAuthorized: false,
+      paymentCreated: false
+    })
   }
 
   const purchaseKey = `order:${orderKey}`
