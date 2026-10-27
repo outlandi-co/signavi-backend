@@ -526,6 +526,150 @@ try {
   console.log("HTTP EXISTING PAYMENT OPERATION: BLOCKED")
   console.log("HTTP PAYMENT OPERATION PRESERVED: PASS")
 
+  // Validate the actual SharedSquarePaymentReservation model.
+  const { default: PaymentReservation } = await import(
+    "../models/SharedSquarePaymentReservation.js"
+  )
+
+  await PaymentReservation.init()
+
+  for (const documentType of ["order", "invoice"]) {
+    const reservedOrderId = new mongoose.Types.ObjectId()
+    const reservedInvoiceId = new mongoose.Types.ObjectId()
+
+    const reservedOrder = await new Order({
+      _id: reservedOrderId,
+      source: "store",
+      status: "payment_required",
+      paymentStatus: "unpaid",
+      customerName: "V3 HTTP Reservation Test",
+      email: "v3-reservation@example.invalid",
+      address: {
+        street: "123 Test Street",
+        city: "Test City",
+        state: "CA",
+        zip: "90001",
+        country: "US"
+      },
+      subtotal: 39.98,
+      tax: 3.30,
+      finalPrice: 43.28,
+      items: [{
+        productId: new mongoose.Types.ObjectId(),
+        quantity: 2,
+        finalPrice: 19.99,
+        variant: { color: "black", size: "L" }
+      }]
+    }).save()
+
+    await Invoice.collection.insertOne({
+      _id: reservedInvoiceId,
+      customerName: "V3 HTTP Reservation Test",
+      customerEmail: "v3-reservation@example.invalid",
+      status: "draft",
+      paymentStatus: "unpaid",
+      total: 55.28,
+      finalProof: { approved: false }
+    })
+
+    const reservationDocumentId =
+      documentType === "order"
+        ? reservedOrderId
+        : reservedInvoiceId
+
+    const originalReservation = await PaymentReservation.create({
+      documentType,
+      documentId: reservationDocumentId,
+      environment: "sandbox",
+      amountCents: 5528,
+      owner: `http-regression-${documentType}`,
+      idempotencyKey:
+        `http-regression-${documentType}-${reservationDocumentId}`,
+      status: "reconciliation_required",
+      attemptClaimedAt: null
+    })
+
+    const reservedQuote = createV3SignedQuote({
+      cartFingerprint: createV3OrderFingerprint(reservedOrder),
+      shippingAmountCents: 1200,
+      parcelRateIds: ["test_rate_1", "test_rate_2"],
+      carrier: "USPS",
+      serviceToken: "usps_ground_advantage"
+    })
+
+    const reservedUrl = url
+      .replace(String(orderId), String(reservedOrderId))
+      .replace(String(invoiceId), String(reservedInvoiceId))
+
+    const response = await fetch(reservedUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminToken}`,
+        "x-signavi-guest-checkout-token":
+          createGuestCheckoutToken(reservedOrder)
+      },
+      body: JSON.stringify({
+        v3ShippingQuote: reservedQuote
+      })
+    })
+
+    const responseBody = await response.json()
+
+    assert.equal(response.status, 503)
+    assert.equal(
+      responseBody.code,
+      "V3_INVOICE_ASSOCIATION_REQUIRES_REVIEW"
+    )
+    assert.equal(responseBody.paymentCreated, false)
+    assert.equal(responseBody.squareRequestAuthorized, false)
+
+    assert.equal(
+      await Association.countDocuments({ orderId: reservedOrderId }),
+      0
+    )
+
+    assert.equal(
+      await Ownership.countDocuments({
+        environment: "sandbox",
+        purchaseKey: `order:${reservedOrderId}`
+      }),
+      0
+    )
+
+    assert.equal(
+      await Operation.countDocuments({ orderId: reservedOrderId }),
+      0
+    )
+
+    const retained = await PaymentReservation.findById(
+      originalReservation._id
+    ).lean()
+
+    assert.ok(retained)
+    assert.equal(retained.status, "reconciliation_required")
+    assert.equal(
+      retained.idempotencyKey,
+      originalReservation.idempotencyKey
+    )
+
+    assert.equal(
+      await PaymentReservation.countDocuments({
+        documentType,
+        documentId: reservationDocumentId,
+        environment: "sandbox"
+      }),
+      1
+    )
+
+    console.log(
+      `HTTP ${documentType.toUpperCase()} PAYMENT RESERVATION: BLOCKED`
+    )
+    console.log(
+      `HTTP ${documentType.toUpperCase()} RESERVATION PRESERVED: PASS`
+    )
+  }
+
   console.log("NO SQUARE REQUESTS")
   console.log("ALL DURABLE INVOICE HTTP TESTS PASSED")
 
