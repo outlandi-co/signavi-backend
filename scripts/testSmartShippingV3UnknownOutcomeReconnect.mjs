@@ -7,7 +7,7 @@ import Order from "../models/Order.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 
 import { acquireV3CheckoutLock } from "../utils/smartShippingV3CheckoutLock.js"
-import { createV3CheckoutReference } from "../utils/smartShippingV3CheckoutReference.js"
+import { createV3SquareSafeCheckoutReference } from "../utils/smartShippingV3CheckoutReference.js"
 import { reserveV3SquareRequest } from "../utils/smartShippingV3ReserveSquareRequest.js"
 import { claimV3SquareCreationAttempt } from "../utils/smartShippingV3ClaimCreationAttempt.js"
 import { classifyV3SquareCreationOutcome } from "../utils/smartShippingV3CreationOutcome.js"
@@ -24,7 +24,7 @@ if (
 
 const id = new mongoose.Types.ObjectId()
 const orderId = String(id)
-const reference = createV3CheckoutReference({ orderId })
+const reference = createV3SquareSafeCheckoutReference({ orderId })
 const key = `signavi-v3-sandbox-${crypto.randomUUID()}`
 
 let connected = false
