@@ -795,6 +795,63 @@ try {
   console.log("HTTP TRANSACTION ROLLBACK: PASS")
   console.log("HTTP FAILED TRANSACTION LOCK RETAINED: PASS")
 
+  // The failed transaction's retained lock must prevent
+  // another HTTP request from starting the workflow.
+  const retryResponse = await fetch(rollbackUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${adminToken}`,
+      "x-signavi-guest-checkout-token":
+        createGuestCheckoutToken(rollbackOrder)
+    },
+    body: JSON.stringify({
+      v3ShippingQuote: rollbackQuote
+    })
+  })
+
+  const retryBody = await retryResponse.json()
+
+  assert.equal(retryResponse.status, 409)
+  assert.equal(
+    retryBody.code,
+    "V3_CHECKOUT_LOCK_UNAVAILABLE"
+  )
+  assert.equal(retryBody.squareRequestAuthorized, false)
+
+  const lockAfterRetry = await mongoose.connection.db
+    .collection("smart_shipping_v3_checkout_locks")
+    .findOne({ _id: rollbackOrderId })
+
+  assert.ok(lockAfterRetry)
+  assert.equal(lockAfterRetry.owner, retainedLock.owner)
+
+  assert.equal(
+    await Association.countDocuments({
+      orderId: rollbackOrderId
+    }),
+    0
+  )
+
+  assert.equal(
+    await Ownership.countDocuments({
+      environment: "sandbox",
+      purchaseKey: `order:${rollbackOrderId}`
+    }),
+    0
+  )
+
+  assert.equal(
+    await Operation.countDocuments({
+      orderId: rollbackOrderId
+    }),
+    0
+  )
+
+  console.log("HTTP FAILED TRANSACTION RETRY: BLOCKED")
+  console.log("HTTP RETAINED LOCK OWNER: UNCHANGED")
+  console.log("HTTP FAILED RETRY: NO PAYMENT RECORDS")
+
   console.log("NO SQUARE REQUESTS")
   console.log("ALL DURABLE INVOICE HTTP TESTS PASSED")
 
