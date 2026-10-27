@@ -446,6 +446,58 @@ try {
 
   console.log("INVALID CHECKOUT LOCK OWNER: BLOCKED")
   console.log("EXISTING PAYMENT EVIDENCE REGRESSION PASSED")
+  // An invoice-associated order cannot become a standalone checkout.
+  const { default: DurableAssociation } = await import(
+    "../models/SmartShippingV3InvoiceOrderAssociation.js"
+  )
+
+  await DurableAssociation.init()
+
+  const associated = await fixture({ linked: false })
+  const associatedBefore = await Order.findById(
+    associated.orderId
+  ).lean()
+
+  await DurableAssociation.create({
+    environment: "sandbox",
+    invoiceId: new mongoose.Types.ObjectId(),
+    orderId: associated.orderId,
+    purchaseKey: `order:${associated.orderId}`,
+    amountCents: 5528
+  })
+
+  await assert.rejects(
+    prepare({
+      lock: associated.lock,
+      guestToken: associated.guestToken,
+      signedQuote: associated.signedQuote
+    }),
+    /Existing durable invoice\/order association requires review/
+  )
+
+  assert.equal(
+    await Ownership.countDocuments({
+      environment: "sandbox",
+      purchaseKey: `order:${associated.orderId}`
+    }),
+    0
+  )
+
+  assert.equal(
+    await Operation.countDocuments({
+      orderId: associated.orderId
+    }),
+    0
+  )
+
+  const associatedAfter = await Order.findById(
+    associated.orderId
+  ).lean()
+
+  assert.deepEqual(associatedAfter, associatedBefore)
+
+  console.log("ASSOCIATED INVOICE STANDALONE CHECKOUT: BLOCKED")
+  console.log("ASSOCIATION REJECTION LEFT NO PAYMENT RECORDS: PASSED")
   console.log("DURABLE ATOMIC SANDBOX CHECKOUT TEST PASSED")
   console.log("NO SQUARE REQUESTS")
   }

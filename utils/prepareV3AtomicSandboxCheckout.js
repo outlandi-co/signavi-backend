@@ -5,6 +5,7 @@ import Order from "../models/Order.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import PaymentReservation from "../models/SharedSquarePaymentReservation.js"
 import Ownership from "../models/SmartShippingV3PurchaseOwnership.js"
+import Association from "../models/SmartShippingV3InvoiceOrderAssociation.js"
 
 import {
   runV3OwnedPaymentTransition
@@ -120,6 +121,16 @@ export const prepareV3AtomicSandboxCheckout = async ({
         throw new Error("Existing payment reservation requires review.")
       }
 
+      const existingAssociation = await Association.findOne({
+        environment: "sandbox",
+        orderId: orderObjectId
+      }).session(session).lean()
+
+      if (existingAssociation) {
+        throw new Error(
+          "Existing durable invoice/order association requires review."
+        )
+      }
       const existingOwnership = await Ownership.findOne({
         environment: "sandbox",
         purchaseKey
