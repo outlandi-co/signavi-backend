@@ -1,8 +1,50 @@
 import express from "express"
 import Notification from "../models/Notification.js"
+import SmartShippingV3PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 
 const router = express.Router()
 
+/* ================= V3 RECONCILIATION MONITOR ================= */
+/*
+ * Read-only administrator endpoint.
+ * Authentication and admin authorization are enforced
+ * by the /api/notifications mount in server.js.
+ */
+router.get("/v3/reconciliation", async (_req, res) => {
+  try {
+    const filter = { status: "reconciliation_required" }
+
+    const [total, operations] = await Promise.all([
+      SmartShippingV3PaymentOperation.countDocuments(filter),
+      SmartShippingV3PaymentOperation.find(filter)
+        .select("orderId status updatedAt")
+        .sort({ updatedAt: -1 })
+        .limit(25)
+        .lean()
+    ])
+
+    return res.json({
+      success: true,
+      data: {
+        totalRequiringReconciliation: total,
+        operations: operations.map(operation => ({
+          orderId: String(operation.orderId),
+          status: operation.status,
+          updatedAt: operation.updatedAt
+        }))
+      }
+    })
+  } catch (error) {
+    console.error(
+      "V3 reconciliation monitor query failed"
+    )
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to load reconciliation summary"
+    })
+  }
+})
 /* ================= GET NOTIFICATIONS ================= */
 
 router.get("/", async (req, res) => {
