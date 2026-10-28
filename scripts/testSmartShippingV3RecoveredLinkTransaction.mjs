@@ -42,7 +42,7 @@ const orderFor = (id, paid = false) => ({
   _id: id,
   status: "payment_required",
   paymentStatus: paid ? "paid" : "unpaid",
-  currency: "USD",
+  currency: "usd",
   squareEnvironment: "sandbox",
   squareExpectedAmountCents: 100,
   squarePaymentLinkId: "",

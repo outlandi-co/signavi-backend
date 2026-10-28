@@ -36,7 +36,10 @@ export const recordV3RecoveredLinkTransaction = async ({
     throw new Error("Invalid V3 recovery transaction inputs.")
   }
 
-  if (String(orderId) === "6addc6f674d8362634569095") {
+  if ([
+    "6addc6f674d8362634569095",
+    "6ae10e8c9a2fa3d170f56486"
+  ].includes(String(orderId))) {
     throw new Error("Protected original order cannot be used in tests.")
   }
 
@@ -105,7 +108,7 @@ export const recordV3RecoveredLinkTransaction = async ({
         {
           _id: id,
           squareEnvironment: "sandbox",
-          currency: "USD",
+          currency: "usd",
           squareExpectedAmountCents: operation.amountCents,
           paymentStatus: { $ne: "paid" },
           status: { $in: ["payment_required", "pending"] },

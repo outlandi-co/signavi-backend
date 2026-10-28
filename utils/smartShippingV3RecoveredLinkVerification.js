@@ -25,7 +25,7 @@ export const verifyV3RecoveredLinkCandidate = async ({
     String(order._id) !== String(operation.orderId) ||
     order.squareEnvironment !== "sandbox" ||
     operation.environment !== "sandbox" ||
-    order.currency !== "USD" ||
+    String(order.currency ?? "").toUpperCase() !== "USD" ||
     order.paymentStatus === "paid" ||
     !["payment_required", "pending"].includes(order.status) ||
     operation.status !== "reconciliation_required" ||

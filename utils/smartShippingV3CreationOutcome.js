@@ -1,5 +1,6 @@
 const allowedHosts = new Set([
   "square.link",
+  "sandbox.square.link",
   "checkout.square.site"
 ])
 

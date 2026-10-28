@@ -28,7 +28,7 @@ const base = () => ({
   order: {
     _id: "507f191e810c19729de860ea",
     squareEnvironment: "sandbox",
-    currency: "USD",
+    currency: "usd",
     status: "payment_required",
     paymentStatus: "unpaid",
     squareExpectedAmountCents: 100,
