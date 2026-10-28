@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { SquareError, SquareTimeoutError } from "square"
 
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 import {
@@ -74,7 +74,7 @@ try {
           idempotencyKey:
             "signavi-v3-sandbox-offline-diagnostic",
           checkoutReferenceId:
-            createV3CheckoutReference({ orderId }),
+            createV3SquareSafeCheckoutReference({ orderId }),
           claimedAt: new Date().toISOString(),
           squareRequestAuthorized: false,
           paymentCreated: false
