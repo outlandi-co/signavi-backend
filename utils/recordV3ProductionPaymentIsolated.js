@@ -78,6 +78,8 @@ export async function recordV3ProductionPaymentIsolated({
     String(operation.orderId) !== id ||
     reservation.purchaseKey !== purchaseKey ||
     reservation.idempotencyKey !== purchaseKey ||
+    reservation.claimedByDocumentType !== "order" ||
+    String(reservation.claimedByDocumentId) !== id ||
     operation.idempotencyKey !== purchaseKey
   ) {
     return hold("CANONICAL_IDENTITY_MISMATCH")
