@@ -8,6 +8,12 @@ const notificationSchema = new mongoose.Schema(
       trim: true,
       lowercase: true
     },
+    dedupeKey: {
+      type: String,
+      default: undefined,
+      immutable: true,
+      trim: true
+    },
 
     title: {
       type: String,
@@ -63,6 +69,15 @@ const notificationSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
+notificationSchema.index(
+  { dedupeKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      dedupeKey: { $type: "string" }
+    }
+  }
+)
 export default mongoose.model(
   "Notification",
   notificationSchema
