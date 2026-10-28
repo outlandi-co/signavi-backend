@@ -1,3 +1,8 @@
+import {
+  getSquareAccessToken,
+  getSquareLocationId
+} from "../utils/getSquareEnvironmentCredentials.js"
+
 
 import crypto from "crypto"
 import sgMail from "@sendgrid/mail"
@@ -56,7 +61,7 @@ const squareEnvironment =
       : null
 
 const squareToken = String(
-  process.env.SQUARE_ACCESS_TOKEN || ""
+  getSquareAccessToken() || ""
 ).trim()
 
 const squareClient = squareEnvironment && squareToken
@@ -322,7 +327,7 @@ const publicInvoice = (invoice) => ({
 const createSquarePaymentLinkForInvoice = async (
   invoice
 ) => {
-  if (!squareClient || !String(process.env.SQUARE_LOCATION_ID || "").trim()) {
+  if (!squareClient || !String(getSquareLocationId() || "").trim()) {
     throw Object.assign(
       new Error(
         "Square payments are not configured for this backend."
@@ -392,7 +397,7 @@ const createSquarePaymentLinkForInvoice = async (
         },
 
         locationId:
-          process.env.SQUARE_LOCATION_ID
+          getSquareLocationId()
       },
 
       checkoutOptions: {

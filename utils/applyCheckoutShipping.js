@@ -1,3 +1,8 @@
+import {
+  getSquareAccessToken,
+  getSquareLocationId
+} from "./getSquareEnvironmentCredentials.js"
+
 
 import { verifyShippingQuote } from "./shippingQuote.js"
 
@@ -71,8 +76,8 @@ const squareEnvironment = String(
 
 const allowTestShipping =
   squareEnvironment === "sandbox" &&
-  Boolean(String(process.env.SQUARE_ACCESS_TOKEN || "").trim()) &&
-  Boolean(String(process.env.SQUARE_LOCATION_ID || "").trim())
+  Boolean(String(getSquareAccessToken() || "").trim()) &&
+  Boolean(String(getSquareLocationId() || "").trim())
 
 const quote = verifyShippingQuote(
   body.shippingQuote,

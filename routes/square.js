@@ -1,3 +1,8 @@
+import {
+  getSquareAccessToken,
+  getSquareLocationId
+} from "../utils/getSquareEnvironmentCredentials.js"
+
 
 import express from "express"
 import mongoose from "mongoose"
@@ -32,11 +37,11 @@ const configuredEnvironment =
       : null
 
 const squareToken = String(
-  process.env.SQUARE_ACCESS_TOKEN || ""
+  getSquareAccessToken() || ""
 ).trim()
 
 const LOCATION_ID = String(
-  process.env.SQUARE_LOCATION_ID || ""
+  getSquareLocationId() || ""
 ).trim()
 
 const CLIENT_URL = String(

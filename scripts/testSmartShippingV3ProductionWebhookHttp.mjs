@@ -245,8 +245,8 @@ const setup = ({
         SQUARE_ENVIRONMENT: "production",
         SQUARE_WEBHOOK_SIGNATURE_KEY: signatureKey,
         SQUARE_WEBHOOK_URL: notificationUrl,
-        SQUARE_ACCESS_TOKEN: "synthetic-test-token",
-        SQUARE_LOCATION_ID: locationId
+        SQUARE_PRODUCTION_ACCESS_TOKEN: "synthetic-test-token",
+        SQUARE_PRODUCTION_LOCATION_ID: locationId
       }
     },
     Buffer,
@@ -258,6 +258,30 @@ const setup = ({
       error() {}
     }
   }
+
+  // Provide the configuration functions normally imported by
+  // squareWebhook.js. The isolated VM intentionally strips imports.
+  // These functions read only this test's synthetic environment.
+  const getTestSquareValue = suffix => {
+    const env = context.process.env
+    const mode = String(env.SQUARE_ENVIRONMENT || "")
+      .trim()
+      .toLowerCase()
+
+    if (mode !== "production" && mode !== "sandbox") {
+      return ""
+    }
+
+    return String(
+      env[`SQUARE_${mode.toUpperCase()}_${suffix}`] || ""
+    ).trim()
+  }
+
+  context.getSquareAccessToken = () =>
+    getTestSquareValue("ACCESS_TOKEN")
+
+  context.getSquareLocationId = () =>
+    getTestSquareValue("LOCATION_ID")
 
   vm.runInNewContext(routeBody, context, {
     filename: "squareWebhook-isolated-test.js",
