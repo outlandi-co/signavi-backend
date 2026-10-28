@@ -689,6 +689,18 @@ router.post("/webhook", async (req, res) => {
     // STEP 8 - CHECK CUSTOM INVOICES FIRST
     // =================================================
 
+    // Production V3 payments must never fall through to
+    // legacy invoice or storefront reconciliation.
+    // Keep payment recording disabled until separately authorized.
+    if (
+      squareMode === "production" &&
+      typeof squareOrder.reference_id === "string" &&
+      squareOrder.reference_id.startsWith("signavi-v3-")
+    ) {
+      console.warn("Production V3 payment reconciliation disabled")
+      return res.sendStatus(200)
+    }
+
     const matchingInvoices = await Invoice.find({
       squareOrderId: squareOrder.id
     }).limit(2)
