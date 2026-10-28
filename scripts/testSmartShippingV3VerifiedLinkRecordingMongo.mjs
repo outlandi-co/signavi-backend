@@ -6,12 +6,13 @@ import mongoose from "mongoose"
 import Order from "../models/Order.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import { acquireV3CheckoutLock } from "../utils/smartShippingV3CheckoutLock.js"
-import { createV3CheckoutReference } from "../utils/smartShippingV3CheckoutReference.js"
+import { createV3SquareSafeCheckoutReference } from "../utils/smartShippingV3CheckoutReference.js"
+import { claimV3SquareCreationAttempt } from "../utils/smartShippingV3ClaimCreationAttempt.js"
 import { reserveV3SquareRequest } from "../utils/smartShippingV3ReserveSquareRequest.js"
 import { markV3PaymentCompleted } from "../utils/smartShippingV3PaymentState.js"
 import { verifyAndRecordV3SquareLink } from "../utils/smartShippingV3VerifiedLinkRecording.js"
 
-const dbName = "signavi_shipping_v3_dev"
+const dbName = "signavi_shipping_v3_recording_tests"
 
 if (
   !["development", "test"].includes(process.env.NODE_ENV) ||
@@ -23,7 +24,7 @@ if (
 
 const id = new mongoose.Types.ObjectId()
 const orderId = String(id)
-const reference = createV3CheckoutReference({ orderId })
+const reference = createV3SquareSafeCheckoutReference({ orderId })
 const key = `signavi-v3-sandbox-${crypto.randomUUID()}`
 const linkId = "mock-square-link-" + orderId.slice(-8)
 const squareOrderId = "mock-square-order-" + orderId.slice(-8)
@@ -76,6 +77,13 @@ try {
   connected = true
   assert.equal(mongoose.connection.db.databaseName, dbName)
 
+  const hello = await mongoose.connection.db.admin().command({
+    hello: 1
+  })
+
+  assert.equal(hello.setName, "signaviV3Sandbox")
+  assert.equal(hello.isWritablePrimary, true)
+
   await Order.collection.insertOne({
     _id: id,
     status: "payment_required",
@@ -109,6 +117,27 @@ try {
 
   assert.equal(reservation.requestReserved, true)
   assert.equal(reservation.squareRequestAuthorized, false)
+
+  // Synthetic, one-time claim in the isolated test database.
+  // This does NOT authorize an actual Square request.
+  const claim = await claimV3SquareCreationAttempt({
+    orderId,
+    owner: lock.owner,
+    idempotencyKey: reservation.idempotencyKey
+  })
+
+  assert.equal(claim.claimed, true)
+  assert.equal(claim.squareRequestAuthorized, false)
+  assert.equal(claim.paymentCreated, false)
+
+  const claimedOperation =
+    await PaymentOperation.collection.findOne({ orderId: id })
+
+  assert.ok(
+    claimedOperation.squareCreationAttemptClaimedAt instanceof Date
+  )
+
+  console.log("DURABLE SYNTHETIC CLAIM RECORDED: PASS")
 
   const recordVerifiedLink = async data => {
     recordCalls++
