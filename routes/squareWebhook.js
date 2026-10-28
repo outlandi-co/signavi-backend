@@ -743,6 +743,8 @@ router.post("/webhook", async (req, res) => {
         console.warn("Production V3 payment binding rejected")
       }
 
+      // Production V3 payment reconciliation remains disabled.
+      // Never fall through to legacy invoice or storefront reconciliation.
       // Mandatory fail-closed boundary until durable production
       // reconciliation and its integration tests are implemented.
       return res.sendStatus(200)

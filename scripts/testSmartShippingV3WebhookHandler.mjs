@@ -235,6 +235,9 @@ const setup = ({
       }
     },
     SmartShippingV3PaymentOperation: PaymentOperation,
+    // Synthetic credentials for the isolated webhook VM.
+    getSquareAccessToken: () => "synthetic-sandbox-token",
+    getSquareLocationId: () => locationId,
     sendReceiptEmail: async () => {
       throw new Error("Receipts disabled in test")
     },
