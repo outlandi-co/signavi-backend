@@ -1,6 +1,7 @@
 import express from "express"
 import Notification from "../models/Notification.js"
 import SmartShippingV3PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import { createV3ReconciliationAlert } from "../utils/createV3ReconciliationAlert.js"
 
 const router = express.Router()
 
@@ -42,6 +43,44 @@ router.get("/v3/reconciliation", async (_req, res) => {
     return res.status(500).json({
       success: false,
       message: "Unable to load reconciliation summary"
+    })
+  }
+})
+/* ================= V3 ADMIN ALERT TRIGGER ================= */
+/*
+ * Explicit administrator action only.
+ * Protected by requireAuth and admin role at the server.js mount.
+ * No payment mutation or Square request.
+ */
+router.post("/v3/reconciliation/alert", async (req, res) => {
+  try {
+    const orderId = req.body?.orderId
+
+    if (typeof orderId !== "string" ||
+        !/^[a-f0-9]{24}$/i.test(orderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid orderId required"
+      })
+    }
+
+    const result = await createV3ReconciliationAlert({
+      orderId: orderId.toLowerCase()
+    })
+
+    return res.status(result.created ? 201 : 200).json({
+      success: true,
+      data: {
+        created: result.created,
+        reason: result.reason ?? null
+      }
+    })
+  } catch (_error) {
+    console.error("V3 reconciliation alert trigger failed")
+
+    return res.status(503).json({
+      success: false,
+      message: "Reconciliation alert unavailable"
     })
   }
 })
