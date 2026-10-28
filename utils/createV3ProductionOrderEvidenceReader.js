@@ -141,9 +141,56 @@ export function createV3ProductionOrderEvidenceReader({
         throw new Error("SQUARE_PAYMENT_NOT_COMPLETED")
       }
 
+      // Normalize SDK camelCase into the field structure
+      // expected by the existing production payment verifier.
+      // Preserve original fields for traceability.
+      const normalizeMoney = money => {
+        if (money == null) return money
+
+        const rawAmount = money.amount
+
+        const amount =
+          typeof rawAmount === "bigint"
+            ? Number(rawAmount)
+            : rawAmount
+
+        if (
+          !Number.isSafeInteger(amount) ||
+          amount < 0
+        ) {
+          throw new Error("SQUARE_MONEY_AMOUNT_INVALID")
+        }
+
+        return {
+          ...money,
+          amount
+        }
+      }
+
+      const verifiedPayment = {
+        ...payment,
+        order_id: payment.order_id ?? payment.orderId,
+        location_id: payment.location_id ?? payment.locationId,
+        amount_money: normalizeMoney(
+          payment.amount_money ?? payment.amountMoney
+        ),
+        receipt_url: payment.receipt_url ?? payment.receiptUrl
+      }
+
+      const verifiedOrder = {
+        ...squareOrder,
+        reference_id:
+          squareOrder.reference_id ?? squareOrder.referenceId,
+        location_id:
+          squareOrder.location_id ?? squareOrder.locationId,
+        total_money: normalizeMoney(
+          squareOrder.total_money ?? squareOrder.totalMoney
+        )
+      }
+
       return Object.freeze({
-        payment: Object.freeze({ ...payment }),
-        squareOrder: Object.freeze({ ...squareOrder })
+        payment: Object.freeze(verifiedPayment),
+        squareOrder: Object.freeze(verifiedOrder)
       })
     }
   })
