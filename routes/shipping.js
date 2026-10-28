@@ -716,10 +716,10 @@ router.post(
     try {
       const token = getShippoKey()
 
-      if (!token.startsWith("shippo_test_")) {
+      if (!token.startsWith("shippo_live_")) {
         return res.status(503).json({
           message:
-            "Calculator requires a Shippo TEST key. No live rates requested."
+            "Calculator requires a Shippo LIVE key."
         })
       }
 
@@ -816,20 +816,20 @@ router.post(
 
       return res.json({
         success: true,
-        testMode: true,
+        testMode: false,
         rates,
         parcelCount: parcels.length,
         messages: shipment.messages || []
       })
     } catch (err) {
       console.error(
-        "Shippo admin test quote failed:",
+        "Shippo admin live quote failed:",
         err.response?.status || err.message
       )
 
       return res.status(502).json({
         message:
-          "Shippo could not quote these packages. Check test carrier availability and the addresses."
+          "Shippo could not quote these packages. Check live carrier availability and the addresses."
       })
     }
   }
