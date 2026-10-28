@@ -24,7 +24,7 @@ const schema = new mongoose.Schema({
   },
   environment: {
     type: String,
-    enum: ["sandbox"],
+    enum: ["sandbox", "production"],
     required: true
   },
   status: {
