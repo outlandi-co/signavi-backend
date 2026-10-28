@@ -6,6 +6,10 @@ import {
   verifyV3WebhookPaymentBinding
 } from "../utils/smartShippingV3WebhookPaymentBinding.js"
 
+import {
+  verifyV3ProductionWebhookPaymentBinding
+} from "../utils/smartShippingV3ProductionWebhookPaymentBinding.js"
+
 import express from "express"
 import crypto from "node:crypto"
 import fetch from "node-fetch"
@@ -684,18 +688,58 @@ router.post("/webhook", async (req, res) => {
     // STEP 8 - CHECK CUSTOM INVOICES FIRST
     // =================================================
 
-    // Production V3 routing boundary.
-    // Until dedicated V3 production reconciliation is connected,
-    // never allow a V3 reference into legacy invoice or order handling.
+    // Production V3 verification boundary.
+    // Verified binding does not authorize marking an order paid.
+    // Do not fall through to legacy invoice or storefront reconciliation.
     if (
       squareMode === "production" &&
       typeof squareOrder.reference_id === "string" &&
       squareOrder.reference_id.startsWith("signavi-v3-")
     ) {
-      console.warn(
-        "Production V3 payment requires dedicated reconciliation:",
-        squareOrder.id
-      )
+      const reference = parseV3WebhookOrderReference({
+        referenceId: squareOrder.reference_id
+      })
+
+      if (!reference) {
+        console.warn("Production V3 invalid checkout reference")
+        return res.sendStatus(200)
+      }
+
+      const v3Order = await resolveOrder(squareOrder)
+
+      if (!v3Order || String(v3Order._id) !== reference.orderId) {
+        console.warn("Production V3 order mismatch")
+        return res.sendStatus(200)
+      }
+
+      const operation = await SmartShippingV3PaymentOperation.findOne({
+        orderId: v3Order._id,
+        environment: "production"
+      }).lean()
+
+      if (!operation) {
+        console.warn("Production V3 operation missing")
+        return res.sendStatus(200)
+      }
+
+      try {
+        const binding = verifyV3ProductionWebhookPaymentBinding({
+          order: v3Order,
+          operation,
+          payment,
+          squareOrder,
+          expectedLocationId: locationId
+        })
+
+        if (binding.bindingVerified) {
+          console.log("Production V3 payment binding verified; reconciliation disabled")
+        }
+      } catch {
+        console.warn("Production V3 payment binding rejected")
+      }
+
+      // Mandatory fail-closed boundary until durable production
+      // reconciliation and its integration tests are implemented.
       return res.sendStatus(200)
     }
 

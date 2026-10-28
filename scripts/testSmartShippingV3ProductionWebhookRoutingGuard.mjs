@@ -7,44 +7,80 @@ const source = fs.readFileSync(
 )
 
 const start = source.indexOf(
-  "// Production V3 routing boundary."
+  "// Production V3 verification boundary."
 )
 
 const invoiceLookup = source.indexOf(
   "const matchingInvoices = await Invoice.find"
 )
 
-assert.ok(start >= 0, "Guard must exist")
-assert.ok(invoiceLookup > start, "Guard must precede invoice lookup")
+assert.ok(start >= 0, "Production verification guard must exist")
+assert.ok(invoiceLookup > start, "Guard must precede invoice routing")
 
 const guard = source.slice(start, invoiceLookup)
 
 assert.match(guard, /squareMode === "production"/)
 assert.match(guard, /startsWith\("signavi-v3-"\)/)
-assert.match(guard, /return res\.sendStatus\(200\)/)
 
-assert.ok(
-  source.includes("verifyV3WebhookPaymentBinding({"),
-  "Existing Sandbox verification must remain present"
+assert.match(
+  guard,
+  /parseV3WebhookOrderReference\(\{/
+)
+
+assert.match(
+  guard,
+  /SmartShippingV3PaymentOperation\.findOne\(\{/
+)
+
+assert.match(
+  guard,
+  /environment: "production"/
+)
+
+assert.match(
+  guard,
+  /verifyV3ProductionWebhookPaymentBinding\(\{/
+)
+
+assert.match(
+  guard,
+  /return res\.sendStatus\(200\)/
 )
 
 assert.ok(
-  source.includes("await reconcileInvoicePayment("),
-  "Existing invoice reconciliation must remain present"
+  guard.lastIndexOf("return res.sendStatus(200)") >
+  guard.indexOf("verifyV3ProductionWebhookPaymentBinding({"),
+  "Production V3 must exit after verification"
 )
 
-assert.ok(
-  source.includes("const order = await resolveOrder(squareOrder)"),
-  "Existing order resolution must remain present"
+assert.doesNotMatch(
+  guard,
+  /findOneAndUpdate|\.save\(|reconcileInvoicePayment/
 )
 
-console.log("PASS: Production V3 guard exists")
-console.log("PASS: Guard precedes invoice reconciliation")
-console.log("PASS: V3 prefix is recognized")
-console.log("PASS: Production V3 fails closed")
-console.log("PASS: Sandbox verifier retained")
-console.log("PASS: Legacy invoice and order paths retained")
+assert.match(
+  guard,
+  /reconciliation disabled/
+)
+
+assert.match(
+  source,
+  /verifyV3WebhookPaymentBinding\(\{/
+)
+
+assert.match(
+  source,
+  /await reconcileInvoicePayment\(/
+)
+
+console.log("PASS: Production verification boundary exists")
+console.log("PASS: Guard executes before invoice routing")
+console.log("PASS: Production operation lookup required")
+console.log("PASS: Production payment binding required")
+console.log("PASS: Production V3 exits before legacy reconciliation")
+console.log("PASS: No payment status writes in production guard")
+console.log("PASS: Sandbox and legacy handling preserved in source")
 console.log("")
-console.log("STATIC ROUTING SAFEGUARDS: PASS")
+console.log("PRODUCTION ROUTING STATIC TEST: PASSED")
 console.log("NO SQUARE REQUESTS")
 console.log("NO DATABASE WRITES")
