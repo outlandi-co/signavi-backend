@@ -1,3 +1,8 @@
+import {
+  getSquareAccessToken,
+  getSquareLocationId
+} from "../utils/getSquareEnvironmentCredentials.js"
+
 import SmartShippingV3PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
   parseV3WebhookOrderReference
@@ -102,7 +107,7 @@ const squareGet = async (endpoint) => {
   }
 
   const token = String(
-    process.env.SQUARE_ACCESS_TOKEN || ""
+    getSquareAccessToken() || ""
   ).trim()
 
   if (!token) {
@@ -629,7 +634,7 @@ router.post("/webhook", async (req, res) => {
     // =================================================
 
     const locationId = String(
-      process.env.SQUARE_LOCATION_ID || ""
+      getSquareLocationId() || ""
     ).trim()
 
     if (
