@@ -167,6 +167,51 @@ export function createV3ProductionOrderEvidenceReader({
         }
       }
 
+
+      // Reject contradictory SDK/webhook aliases before the
+      // existing payment verifier receives normalized evidence.
+      const checkAlias = (record, camel, snake) => {
+        const a = record[camel]
+        const b = record[snake]
+
+        if (
+          a !== undefined &&
+          a !== null &&
+          b !== undefined &&
+          b !== null &&
+          a !== b
+        ) {
+          throw new Error("SQUARE_EVIDENCE_ALIAS_CONFLICT")
+        }
+      }
+
+      const checkMoneyAlias = (record, camel, snake) => {
+        const a = record[camel]
+        const b = record[snake]
+
+        if (a == null || b == null) return
+
+        const left = normalizeMoney(a)
+        const right = normalizeMoney(b)
+
+        if (
+          left.amount !== right.amount ||
+          left.currency !== right.currency
+        ) {
+          throw new Error("SQUARE_MONEY_ALIAS_CONFLICT")
+        }
+      }
+
+      checkAlias(payment, "orderId", "order_id")
+      checkAlias(payment, "locationId", "location_id")
+      checkAlias(payment, "receiptUrl", "receipt_url")
+
+      checkAlias(squareOrder, "referenceId", "reference_id")
+      checkAlias(squareOrder, "locationId", "location_id")
+
+      checkMoneyAlias(payment, "amountMoney", "amount_money")
+      checkMoneyAlias(squareOrder, "totalMoney", "total_money")
+
       const verifiedPayment = {
         ...payment,
         order_id: payment.order_id ?? payment.orderId,

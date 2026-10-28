@@ -266,7 +266,7 @@ try {
       ...squareOrder,
       location_id: "wrong-location"
     }),
-    /rejected/
+    /(?:SQUARE_EVIDENCE_ALIAS_CONFLICT|rejected)/
   )
 
   console.log("PASS: Wrong Square location rejected")
