@@ -684,6 +684,21 @@ router.post("/webhook", async (req, res) => {
     // STEP 8 - CHECK CUSTOM INVOICES FIRST
     // =================================================
 
+    // Production V3 routing boundary.
+    // Until dedicated V3 production reconciliation is connected,
+    // never allow a V3 reference into legacy invoice or order handling.
+    if (
+      squareMode === "production" &&
+      typeof squareOrder.reference_id === "string" &&
+      squareOrder.reference_id.startsWith("signavi-v3-")
+    ) {
+      console.warn(
+        "Production V3 payment requires dedicated reconciliation:",
+        squareOrder.id
+      )
+      return res.sendStatus(200)
+    }
+
     const matchingInvoices = await Invoice.find({
       squareOrderId: squareOrder.id
     }).limit(2)
