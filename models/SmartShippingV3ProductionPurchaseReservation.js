@@ -1,4 +1,4 @@
-﻿import mongoose from "mongoose"
+import mongoose from "mongoose"
 
 const { Schema } = mongoose
 
@@ -57,6 +57,21 @@ const schema = new Schema(
       match: /^signavi-v3-production-[a-z0-9-]+$/
     },
 
+    checkoutClaimOwner: {
+      type: String,
+      default: null
+    },
+
+    checkoutClaimAmountCents: {
+      type: Number,
+      default: null,
+      min: 1,
+      validate: {
+        validator: value =>
+          value == null || Number.isSafeInteger(value),
+        message: "Checkout claim amount must be a safe integer"
+      }
+    },
     attemptClaimedAt: {
       type: Date,
       default: null
