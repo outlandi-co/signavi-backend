@@ -1347,7 +1347,8 @@ router.patch(
           success: false,
           message:
             data?.message ||
-            "Payment checkout failed"
+            "Payment checkout failed",
+          reason: data?.reason || "payment_checkout_failed"
         })
       }
 
