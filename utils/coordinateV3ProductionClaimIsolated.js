@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import {
   verifyV3ProductionPaymentAlignment
 } from "./verifyV3ProductionPaymentAlignment.js"
@@ -40,6 +41,13 @@ export async function coordinateV3ProductionClaimIsolated({
     throw new Error("INVALID_CHECKOUT_CLAIM_INPUT")
   }
   const purchaseKey = `signavi-v3-production-purchase-${id}`
+
+  const squareIdempotencyKey = checkoutRequested
+    ? `sv3p-${createHash("sha256")
+        .update(`square-link:production:${purchaseKey}`)
+        .digest("hex")
+        .slice(0, 40)}`
+    : null
 
   const [reservation, operation] = await Promise.all([
     Reservation.findOne({
@@ -88,6 +96,7 @@ export async function coordinateV3ProductionClaimIsolated({
       idempotencyKey: purchaseKey,
       status: "pending",
       squareCreationAttemptClaimedAt: null,
+      ...(checkoutRequested ? { squareIdempotencyKey: null } : {}),
       squarePaymentLinkId: "",
       squareOrderId: "",
       paymentUrl: ""
@@ -96,7 +105,11 @@ export async function coordinateV3ProductionClaimIsolated({
       $set: {
         status: "reconciliation_required",
         squareCreationAttemptClaimedAt: new Date(),
-        lastError: "Production coordinated claim; Square not called."
+        lastError: "Production coordinated claim; Square not called.",
+        ...(checkoutRequested ? {
+          requestOwner: checkoutOwner,
+          squareIdempotencyKey
+        } : {})
       }
     },
     {
@@ -109,6 +122,18 @@ export async function coordinateV3ProductionClaimIsolated({
     return blocked("OPERATION_ALREADY_CLAIMED")
   }
 
+  if (
+    checkoutRequested &&
+    (
+      operationClaim.squareIdempotencyKey !== squareIdempotencyKey ||
+      operationClaim.requestOwner !== checkoutOwner ||
+      operationClaim.amountCents !== checkoutAmountCents ||
+      operationClaim.status !== "reconciliation_required" ||
+      !operationClaim.squareCreationAttemptClaimedAt
+    )
+  ) {
+    throw new Error("SQUARE_IDENTITY_BINDING_UNCERTAIN")
+  }
   if (typeof afterOperationClaim === "function") {
     // Test-only interruption injection.
     await afterOperationClaim()
