@@ -267,6 +267,8 @@ const buildHandler = ({
       }
     },
     SmartShippingV3PaymentOperation,
+    getSquareAccessToken: () => "synthetic-test-token",
+    getSquareLocationId: () => locationId,
     sendReceiptEmail: async () => {
       throw new Error("Receipts disabled")
     },
