@@ -86,10 +86,17 @@ export async function runV3ProductionCheckoutLinkWorkflow({
   // The same purchase must never blindly create again.
   const hold = async reason => {
     try {
-      await holdUncertain({
+      const confirmation = await holdUncertain({
         ...identity,
         reason
       })
+
+      if (confirmation?.held !== true) {
+        return result(
+          "reconciliation_required",
+          "RECONCILIATION_WRITE_UNCONFIRMED"
+        )
+      }
     } catch {
       return result("reconciliation_required", "RECONCILIATION_WRITE_UNCERTAIN")
     }

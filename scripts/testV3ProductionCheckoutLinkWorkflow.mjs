@@ -44,6 +44,7 @@ function fixture(overrides = {}) {
     },
     holdUncertain: async () => {
       calls.hold++
+      return { held: true }
     },
     ...overrides
   }
@@ -199,7 +200,31 @@ function fixture(overrides = {}) {
   console.log("PASS: incomplete Square link held")
 }
 
-console.log("CHECKOUT LINK WORKFLOW: 9 TESTS PASSED")
+
+{
+  const { args, calls } = fixture()
+
+  args.createLink = async () => {
+    calls.create++
+    throw new Error("Simulated uncertain result")
+  }
+
+  args.holdUncertain = async () => {
+    calls.hold++
+    return { held: false }
+  }
+
+  const outcome = await runV3ProductionCheckoutLinkWorkflow(args)
+
+  assert.equal(outcome.status, "reconciliation_required")
+  assert.equal(outcome.reason, "RECONCILIATION_WRITE_UNCONFIRMED")
+  assert.equal(outcome.retryAuthorized, false)
+  assert.equal(calls.create, 1)
+  assert.equal(calls.hold, 1)
+
+  console.log("PASS: unconfirmed reconciliation hold fails closed")
+}
+console.log("CHECKOUT LINK WORKFLOW: 10 TESTS PASSED")
 console.log("FAKE ADAPTER ONLY")
 console.log("NO REAL SQUARE REQUESTS")
 console.log("NO DATABASE WRITES")
