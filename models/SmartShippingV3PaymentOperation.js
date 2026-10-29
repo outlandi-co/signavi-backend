@@ -61,6 +61,15 @@ const schema = new mongoose.Schema({
     type: String,
     default: ""
   },
+  // Deterministic Square payment-link request identity.
+  // This field does NOT authorize payment execution.
+  // It must be populated by a verified atomic claim.
+  squareIdempotencyKey: {
+    type: String,
+    default: null,
+    immutable: false,
+    match: /^sv3p-[a-f0-9]{40}$/
+  },
   squareDiagnostic: {
     type: new mongoose.Schema({
       type: {
