@@ -1,4 +1,4 @@
-﻿import {
+import {
   verifyV3ProductionPaymentAlignment
 } from "./verifyV3ProductionPaymentAlignment.js"
 
@@ -6,7 +6,7 @@ export async function coordinateV3ProductionClaimIsolated({
   orderId,
   Reservation,
   PaymentOperation,
-  afterOperationClaim
+  afterOperationClaim, checkoutOwner, checkoutAmountCents
 }) {
   if (process.env.NODE_ENV !== "test") {
     throw new Error("ISOLATED_TEST_ONLY")
@@ -27,6 +27,18 @@ export async function coordinateV3ProductionClaimIsolated({
     throw new Error("INVALID_ORDER_ID")
   }
 
+  const checkoutRequested =
+    checkoutOwner !== undefined ||
+    checkoutAmountCents !== undefined
+
+  if (checkoutRequested && (
+    typeof checkoutOwner !== "string" ||
+    !/^[a-zA-Z0-9:_-]{8,128}$/.test(checkoutOwner) ||
+    !Number.isSafeInteger(checkoutAmountCents) ||
+    checkoutAmountCents < 1
+  )) {
+    throw new Error("INVALID_CHECKOUT_CLAIM_INPUT")
+  }
   const purchaseKey = `signavi-v3-production-purchase-${id}`
 
   const [reservation, operation] = await Promise.all([
@@ -60,6 +72,12 @@ export async function coordinateV3ProductionClaimIsolated({
     return blocked(alignment.reason)
   }
 
+  if (
+    checkoutRequested &&
+    operation?.amountCents !== checkoutAmountCents
+  ) {
+    return blocked("CHECKOUT_AMOUNT_MISMATCH")
+  }
   // Operation-first CAS. Once claimed, the operation remains
   // reconciliation_required even if the next step fails.
   const operationClaim = await PaymentOperation.findOneAndUpdate(
@@ -109,7 +127,7 @@ export async function coordinateV3ProductionClaimIsolated({
     {
       $set: {
         status: "claim_pending",
-        attemptClaimedAt: new Date()
+        attemptClaimedAt: new Date(), ...(checkoutRequested ? { checkoutClaimOwner: checkoutOwner, checkoutClaimAmountCents: checkoutAmountCents } : {})
       }
     },
     {
@@ -122,6 +140,15 @@ export async function coordinateV3ProductionClaimIsolated({
     return blocked("RESERVATION_NOT_CLAIMABLE")
   }
 
+  if (
+    checkoutRequested &&
+    (
+      reservationClaim.checkoutClaimOwner !== checkoutOwner ||
+      reservationClaim.checkoutClaimAmountCents !== checkoutAmountCents
+    )
+  ) {
+    throw new Error("CHECKOUT_CLAIM_OWNERSHIP_UNCERTAIN")
+  }
   return Object.freeze({
     coordinated: true,
     blocked: false,
