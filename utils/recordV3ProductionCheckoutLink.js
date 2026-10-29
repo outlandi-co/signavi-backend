@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 const validId = value => /^[0-9a-f]{24}$/.test(String(value || ""))
 
 const blocked = reason => Object.freeze({
@@ -26,6 +27,12 @@ export async function recordV3ProductionCheckoutLink({
 } = {}) {
   const id = String(orderId || "").toLowerCase()
   const key = `signavi-v3-production-purchase-${id}`
+
+  const squareIdempotencyKey =
+    `sv3p-${createHash("sha256")
+      .update(`square-link:production:${key}`)
+      .digest("hex")
+      .slice(0, 40)}`
 
   if (
     !validId(id) ||
@@ -88,6 +95,8 @@ export async function recordV3ProductionCheckoutLink({
         environment: "production",
         orderId: id,
         idempotencyKey: key,
+        squareIdempotencyKey,
+        requestOwner: owner,
         amountCents,
         status: "reconciliation_required",
         squareCreationAttemptClaimedAt: { $ne: null },
@@ -115,6 +124,8 @@ export async function recordV3ProductionCheckoutLink({
     !operation ||
     String(operation.orderId).toLowerCase() !== id ||
     operation.idempotencyKey !== key ||
+    operation.squareIdempotencyKey !== squareIdempotencyKey ||
+    operation.requestOwner !== owner ||
     operation.status !== "reconciliation_required" ||
     operation.squarePaymentLinkId !== paymentLinkId ||
     operation.squareOrderId !== squareOrderId ||

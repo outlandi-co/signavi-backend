@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import assert from "node:assert/strict"
 import {
   recordV3ProductionCheckoutLink
@@ -28,10 +29,17 @@ const reservation = {
   attemptClaimedAt: new Date()
 }
 
+const squareIdempotencyKey =
+  `sv3p-${createHash("sha256")
+    .update(`square-link:production:${key}`)
+    .digest("hex")
+    .slice(0, 40)}`
 let operation = {
   environment: "production",
   orderId,
   idempotencyKey: key,
+  squareIdempotencyKey,
+  requestOwner: owner,
   amountCents: 2500,
   status: "reconciliation_required",
   squareCreationAttemptClaimedAt: new Date(),
@@ -57,6 +65,8 @@ const PaymentOperation = {
     assert.equal(filter.amountCents, 2500)
 
     if (
+      operation.squareIdempotencyKey !== filter.squareIdempotencyKey ||
+      operation.requestOwner !== filter.requestOwner ||
       operation.status !== filter.status ||
       operation.squarePaymentLinkId !== filter.squarePaymentLinkId ||
       operation.squareOrderId !== filter.squareOrderId ||
@@ -71,6 +81,30 @@ const PaymentOperation = {
   }
 }
 
+const originalSquareKey = operation.squareIdempotencyKey
+
+operation.squareIdempotencyKey = `sv3p-${"b".repeat(40)}`
+
+const wrongKey = await recordV3ProductionCheckoutLink({
+  Reservation, PaymentOperation, ...args
+})
+
+assert.equal(wrongKey.recorded, false)
+assert.equal(writes, 0)
+console.log("PASS: wrong persisted Square key blocked")
+
+operation.squareIdempotencyKey = originalSquareKey
+operation.requestOwner = "different-operation-owner"
+
+const wrongOperationOwner = await recordV3ProductionCheckoutLink({
+  Reservation, PaymentOperation, ...args
+})
+
+assert.equal(wrongOperationOwner.recorded, false)
+assert.equal(writes, 0)
+console.log("PASS: wrong operation owner blocked")
+
+operation.requestOwner = owner
 const first = await recordV3ProductionCheckoutLink({
   Reservation, PaymentOperation, ...args
 })

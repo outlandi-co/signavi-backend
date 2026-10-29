@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import assert from "node:assert/strict"
 import mongoose from "mongoose"
 import { MongoMemoryServer } from "mongodb-memory-server"
@@ -88,10 +89,17 @@ try {
     checkoutClaimAmountCents: 2500
   })
 
+const squareKeyFor = purchaseKey =>
+  `sv3p-${createHash("sha256")
+    .update(`square-link:production:${purchaseKey}`)
+    .digest("hex")
+    .slice(0, 40)}`
   const operationData = {
     orderId,
     environment: "production",
     idempotencyKey: key,
+    squareIdempotencyKey: squareKeyFor(key),
+    requestOwner: owner,
     amountCents: 2500,
     status: "reconciliation_required",
     squareCreationAttemptClaimedAt: new Date(),
@@ -190,6 +198,8 @@ try {
     orderId: concurrentOrderId,
     environment: "production",
     idempotencyKey: concurrentKey,
+    squareIdempotencyKey: squareKeyFor(concurrentKey),
+    requestOwner: owner,
     amountCents: 2500,
     status: "reconciliation_required",
     squareCreationAttemptClaimedAt: new Date(),
