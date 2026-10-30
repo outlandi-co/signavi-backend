@@ -102,6 +102,22 @@ test("real orders router keeps V3 production checkout locked", {
       }]
     }).save()
 
+    const {
+      createV3OrderFingerprint
+    } = await import("../utils/smartShippingV3OrderFingerprint.js")
+
+    const {
+      createV3SignedQuote
+    } = await import("../utils/smartShippingV3QuoteSigning.js")
+
+    const signedQuote = createV3SignedQuote({
+      cartFingerprint: createV3OrderFingerprint(order),
+      shippingAmountCents: 1200,
+      parcelRateIds: ["test_rate_1", "test_rate_2"],
+      carrier: "USPS",
+      serviceToken: "usps_ground_advantage"
+    })
+
     const token = createGuestCheckoutToken(order)
     assert.ok(typeof token === "string" && token.length > 0)
 
@@ -407,7 +423,16 @@ test("real orders router keeps V3 production checkout locked", {
 
     console.log("PASS: Correctly signed expired token returns 403")
 
+    const invalidQuote = await checkout(token, {
+      v3ShippingQuote: "invalid-quote"
+    })
+
+    assert.equal(invalidQuote.status, 400)
+    assert.equal(invalidQuote.body.success, false)
+    console.log("PASS: Invalid shipping quote returns 400")
+
     const valid = await checkout(token, {
+      v3ShippingQuote: signedQuote,
       squareRequestAuthorized: true,
       productionEnabled: true,
       totalCents: 1
@@ -425,6 +450,7 @@ test("real orders router keeps V3 production checkout locked", {
 
     const results = await Promise.all(
       Array.from({ length: 12 }, () => checkout(token, {
+        v3ShippingQuote: signedQuote,
         productionEnabled: true,
         squareRequestAuthorized: true
       }))
