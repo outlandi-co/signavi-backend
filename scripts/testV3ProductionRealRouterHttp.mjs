@@ -59,7 +59,8 @@ test("real orders router keeps V3 production checkout locked", {
     const { default: orderRoutes } = await import("../routes/orders.js")
 
     const {
-      createGuestCheckoutToken
+      createGuestCheckoutToken,
+      verifyGuestCheckoutToken
     } = await import("../utils/guestCheckoutToken.js")
 
     const {
@@ -103,6 +104,29 @@ test("real orders router keeps V3 production checkout locked", {
 
     const token = createGuestCheckoutToken(order)
     assert.ok(typeof token === "string" && token.length > 0)
+
+    // Issue a correctly signed token with an old timestamp.
+    // Restore the real clock before any asynchronous HTTP work.
+    const realDateNow = Date.now
+    let expiredToken
+
+    try {
+      Date.now = () =>
+        realDateNow() - (10 * 365 * 24 * 60 * 60 * 1000)
+
+      expiredToken = createGuestCheckoutToken(order)
+    } finally {
+      Date.now = realDateNow
+    }
+
+    assert.ok(typeof expiredToken === "string")
+    assert.notEqual(expiredToken, token)
+    assert.equal(verifyGuestCheckoutToken(order, token), true)
+    assert.equal(
+      verifyGuestCheckoutToken(order, expiredToken),
+      false,
+      "Correctly signed expired token must be rejected"
+    )
 
     const app = express()
     app.use(express.json())
@@ -375,6 +399,13 @@ test("real orders router keeps V3 production checkout locked", {
 
     assert.equal(invalid.status, 403)
     console.log("PASS: Invalid guest token returns 403")
+
+    const expired = await checkout(expiredToken)
+
+    assert.equal(expired.status, 403)
+    assert.equal(expired.body.success, false)
+
+    console.log("PASS: Correctly signed expired token returns 403")
 
     const valid = await checkout(token, {
       squareRequestAuthorized: true,
