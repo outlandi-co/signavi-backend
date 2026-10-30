@@ -1202,6 +1202,51 @@ router.patch(
 
           const gate = denyV3ProductionCheckout()
 
+          // Read-only production inspection.
+          // Guest ownership has already been verified above.
+          // No result from inspection permits Square execution.
+          try {
+            const [
+              { inspectV3ProductionCheckout },
+              { checkV3KnownPaymentHistory },
+              { default: SquareReservation },
+              { default: SharedPaymentReservation },
+              { default: ProductionReservation },
+              { default: PaymentOperation }
+            ] = await Promise.all([
+              import("../utils/inspectV3ProductionCheckout.js"),
+              import("../utils/checkV3KnownPaymentHistory.js"),
+              import("../models/SquarePaymentCreationReservation.js"),
+              import("../models/SharedSquarePaymentReservation.js"),
+              import("../models/SmartShippingV3ProductionPurchaseReservation.js"),
+              import("../models/SmartShippingV3PaymentOperation.js")
+            ])
+
+            await inspectV3ProductionCheckout({
+              order,
+              authorizeRequest: async candidate =>
+                isStorefrontOrder &&
+                String(candidate?._id) === String(order._id) &&
+                verifyGuestCheckoutToken(
+                  candidate,
+                  req.get("x-signavi-guest-checkout-token")
+                ),
+              checkHistoricalPayment: ({ orderId, amountCents }) =>
+                checkV3KnownPaymentHistory({
+                  orderId,
+                  amountCents,
+                  Order,
+                  SquareReservation,
+                  SharedPaymentReservation,
+                  ProductionReservation,
+                  PaymentOperation
+                })
+            })
+          } catch {
+            // Inspection failures must never activate checkout.
+          }
+
+          // Permanent fail-closed response for this integration step.
           return res.status(gate.httpStatus).json(gate.body)
         }
 
