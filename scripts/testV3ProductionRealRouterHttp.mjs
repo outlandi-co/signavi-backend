@@ -47,7 +47,8 @@ test("real orders router keeps V3 production checkout locked", {
       `signavi_v3_real_router_${crypto.randomBytes(6).toString("hex")}`
 
     await mongoose.connect(replica.getUri(dbName), {
-      serverSelectionTimeoutMS: 10000
+      serverSelectionTimeoutMS: 10000,
+      monitorCommands: true
     })
 
     assert.equal(mongoose.connection.name, dbName)
@@ -176,7 +177,69 @@ test("real orders router keeps V3 production checkout locked", {
 
       return state
     }
+    // Initialize every model used by the production inspection
+    // BEFORE starting MongoDB command monitoring.
+    // These imports and index builds use isolated MongoDB only.
+    await Promise.all([
+      import("../models/Product.js"),
+      import("../models/SquarePaymentCreationReservation.js"),
+      import("../models/SharedSquarePaymentReservation.js"),
+      import("../models/SmartShippingV3ProductionPurchaseReservation.js"),
+      import("../models/SmartShippingV3PaymentOperation.js")
+    ])
+
+    const initializedModels = mongoose.modelNames()
+
+    await Promise.all(
+      initializedModels.map(name =>
+        mongoose.model(name).init()
+      )
+    )
+
+    console.log(
+      "PASS: Mongoose models initialized before HTTP write monitoring",
+      initializedModels.length
+    )
     const initialNonOrderState = await getNonOrderState()
+
+    // Monitor actual database write commands during HTTP checkout.
+    // Do not capture order creation or the later explicit paid-order update.
+    const mongoWriteCommands = []
+    const watchedCommands = new Set([
+      "insert",
+      "update",
+      "delete",
+      "findAndModify",
+      "create",
+      "createIndexes",
+      "drop",
+      "dropIndexes",
+      "renameCollection",
+      "dropDatabase",
+      "commitTransaction"
+    ])
+
+    let monitorCheckoutWrites = true
+
+    mongoose.connection.getClient().on("commandStarted", event => {
+      if (
+        monitorCheckoutWrites &&
+        watchedCommands.has(event.commandName)
+      ) {
+        mongoWriteCommands.push({
+          command: event.commandName,
+          collection: String(
+            event.command?.insert ||
+            event.command?.update ||
+            event.command?.delete ||
+            event.command?.findAndModify ||
+            event.command?.create ||
+            event.command?.createIndexes ||
+            ""
+          )
+        })
+      }
+    })
 
     const missing = await checkout(null)
 
@@ -231,6 +294,18 @@ test("real orders router keeps V3 production checkout locked", {
 
     console.log("PASS: No non-order documents added, removed, or modified")
 
+    // All real-router HTTP checkout requests have completed.
+    monitorCheckoutWrites = false
+
+    assert.deepEqual(
+      mongoWriteCommands,
+      [],
+      "Checkout issued a MongoDB write or schema command"
+    )
+
+    console.log(
+      "PASS: Zero MongoDB write/schema commands during checkout"
+    )
     // Test paid-order rejection only after the no-write snapshot.
     await Order.updateOne(
       { _id: orderId },
