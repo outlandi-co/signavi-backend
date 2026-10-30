@@ -1191,6 +1191,28 @@ router.patch(
         isStorefrontOrder &&
         getSmartShippingCheckoutVersion() === "v3"
       ) {
+        // Validate the signed shipping quote before entering
+        // the locked production checkout boundary.
+        // This does not authorize persistence or Square calls.
+        if (
+          String(process.env.SQUARE_ENVIRONMENT || "")
+            .trim()
+            .toLowerCase() !== "sandbox"
+        ) {
+          const verifiedQuote = prepareV3CheckoutPayment({
+            order,
+            guestToken: req.get("x-signavi-guest-checkout-token"),
+            signedQuote: req.body?.v3ShippingQuote
+          })
+
+          if (!verifiedQuote) {
+            return res.status(400).json({
+              success: false,
+              message: "V3 checkout verification failed."
+            })
+          }
+        }
+
         if (
           String(process.env.SQUARE_ENVIRONMENT || "")
             .trim()
