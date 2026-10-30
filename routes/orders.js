@@ -1196,10 +1196,13 @@ router.patch(
             .trim()
             .toLowerCase() !== "sandbox"
         ) {
-          return res.status(503).json({
-            success: false,
-            message: "V3 checkout requires Square Sandbox."
-          })
+          const { denyV3ProductionCheckout } = await import(
+            "../utils/denyV3ProductionCheckout.js"
+          )
+
+          const gate = denyV3ProductionCheckout()
+
+          return res.status(gate.httpStatus).json(gate.body)
         }
 
         const prepared = prepareV3CheckoutPayment({
