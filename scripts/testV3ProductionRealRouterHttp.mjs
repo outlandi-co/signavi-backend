@@ -295,6 +295,40 @@ test("real orders router keeps V3 production checkout locked", {
 
     // Monitor actual database write commands during HTTP checkout.
     // Do not capture order creation or the later explicit paid-order update.
+    // Positive controls must fail synchronously, before network I/O.
+    // The .invalid hostname is reserved for testing, not Square.
+    const blockedTestUrl =
+      "https://checkout-intercept.invalid/blocked"
+
+    assert.throws(
+      () => globalThis.fetch(blockedTestUrl),
+      /TEST_EXTERNAL_HTTP_REQUEST_BLOCKED/
+    )
+
+    assert.throws(
+      () => https.request(blockedTestUrl),
+      /TEST_EXTERNAL_HTTP_REQUEST_BLOCKED/
+    )
+
+    assert.deepEqual(
+      externalAttempts.map(attempt => attempt.transport),
+      ["fetch", "https.request"]
+    )
+
+    assert.ok(
+      externalAttempts.every(
+        attempt =>
+          attempt.hostname === "checkout-intercept.invalid"
+      )
+    )
+
+    console.log(
+      "PASS: Positive controls blocked fetch and HTTPS request"
+    )
+
+    // Reset only the expected positive-control observations.
+    // Checkout requests must produce zero new external attempts.
+    externalAttempts.length = 0
     const mongoWriteCommands = []
     const watchedCommands = new Set([
       "insert",
