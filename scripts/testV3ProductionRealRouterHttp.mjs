@@ -1,6 +1,8 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import crypto from "node:crypto"
+import http from "node:http"
+import https from "node:https"
 
 // Configure the isolated test before importing application modules.
 process.env.NODE_ENV = "test"
@@ -202,6 +204,95 @@ test("real orders router keeps V3 production checkout locked", {
     )
     const initialNonOrderState = await getNonOrderState()
 
+    // Test-only outbound HTTP interception.
+    // Local test-server traffic remains available.
+    // Every attempted external request is counted and blocked.
+    const externalAttempts = []
+
+    const isLocalHost = hostname => {
+      const host = String(hostname || "")
+        .toLowerCase()
+        .replace(/^\[|\]$/g, "")
+
+      return [
+        "127.0.0.1",
+        "::1",
+        "localhost"
+      ].includes(host)
+    }
+
+    const getHost = args => {
+      const input = args[0]
+
+      if (typeof input === "string" || input instanceof URL) {
+        try {
+          return new URL(input).hostname
+        } catch {
+          return ""
+        }
+      }
+
+      if (input && typeof input === "object") {
+        if (input.hostname) return String(input.hostname)
+        if (input.host) return String(input.host).split(":")[0]
+      }
+
+      const options = args.find(
+        item => item &&
+          typeof item === "object" &&
+          !(item instanceof URL) &&
+          (item.hostname || item.host)
+      )
+
+      return String(options?.hostname || options?.host || "")
+        .split(":")[0]
+    }
+
+    const blockExternal = (hostname, transport) => {
+      if (!isLocalHost(hostname)) {
+        externalAttempts.push({
+          hostname: String(hostname || "unknown"),
+          transport
+        })
+
+        throw new Error(
+          "TEST_EXTERNAL_HTTP_REQUEST_BLOCKED"
+        )
+      }
+    }
+
+    const originalFetch = globalThis.fetch
+    const originalHttpRequest = http.request
+    const originalHttpsRequest = https.request
+    const originalHttpGet = http.get
+    const originalHttpsGet = https.get
+
+    globalThis.fetch = (...args) => {
+      const hostname = getHost(args)
+      blockExternal(hostname, "fetch")
+      return originalFetch(...args)
+    }
+
+    http.request = function (...args) {
+      blockExternal(getHost(args), "http.request")
+      return originalHttpRequest.apply(this, args)
+    }
+
+    https.request = function (...args) {
+      blockExternal(getHost(args), "https.request")
+      return originalHttpsRequest.apply(this, args)
+    }
+
+    http.get = function (...args) {
+      blockExternal(getHost(args), "http.get")
+      return originalHttpGet.apply(this, args)
+    }
+
+    https.get = function (...args) {
+      blockExternal(getHost(args), "https.get")
+      return originalHttpsGet.apply(this, args)
+    }
+
     // Monitor actual database write commands during HTTP checkout.
     // Do not capture order creation or the later explicit paid-order update.
     const mongoWriteCommands = []
@@ -301,6 +392,16 @@ test("real orders router keeps V3 production checkout locked", {
       mongoWriteCommands,
       [],
       "Checkout issued a MongoDB write or schema command"
+    )
+
+    assert.deepEqual(
+      externalAttempts,
+      [],
+      "Checkout attempted an external HTTP request"
+    )
+
+    console.log(
+      "PASS: Zero attempted external HTTP requests"
     )
 
     console.log(
