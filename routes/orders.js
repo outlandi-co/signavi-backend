@@ -1191,6 +1191,28 @@ router.patch(
         isStorefrontOrder &&
         getSmartShippingCheckoutVersion() === "v3"
       ) {
+        // Validate the signed shipping quote before entering
+        // the locked production checkout boundary.
+        // This does not authorize persistence or Square calls.
+        if (
+          String(process.env.SQUARE_ENVIRONMENT || "")
+            .trim()
+            .toLowerCase() !== "sandbox"
+        ) {
+          const verifiedQuote = prepareV3CheckoutPayment({
+            order,
+            guestToken: req.get("x-signavi-guest-checkout-token"),
+            signedQuote: req.body?.v3ShippingQuote
+          })
+
+          if (!verifiedQuote) {
+            return res.status(400).json({
+              success: false,
+              message: "V3 checkout verification failed."
+            })
+          }
+        }
+
         if (
           String(process.env.SQUARE_ENVIRONMENT || "")
             .trim()
@@ -1202,52 +1224,13 @@ router.patch(
 
           const gate = denyV3ProductionCheckout()
 
-          // Read-only production inspection.
-          // Guest ownership has already been verified above.
-          // No result from inspection permits Square execution.
-          try {
-            const [
-              { inspectV3ProductionCheckout },
-              { checkV3KnownPaymentHistory },
-              { default: SquareReservation },
-              { default: SharedPaymentReservation },
-              { default: ProductionReservation },
-              { default: PaymentOperation }
-            ] = await Promise.all([
-              import("../utils/inspectV3ProductionCheckout.js"),
-              import("../utils/checkV3KnownPaymentHistory.js"),
-              import("../models/SquarePaymentCreationReservation.js"),
-              import("../models/SharedSquarePaymentReservation.js"),
-              import("../models/SmartShippingV3ProductionPurchaseReservation.js"),
-              import("../models/SmartShippingV3PaymentOperation.js")
-            ])
-
-            await inspectV3ProductionCheckout({
-              order,
-              authorizeRequest: async candidate =>
-                isStorefrontOrder &&
-                String(candidate?._id) === String(order._id) &&
-                verifyGuestCheckoutToken(
-                  candidate,
-                  req.get("x-signavi-guest-checkout-token")
-                ),
-              checkHistoricalPayment: ({ orderId, amountCents }) =>
-                checkV3KnownPaymentHistory({
-                  orderId,
-                  amountCents,
-                  Order,
-                  SquareReservation,
-                  SharedPaymentReservation,
-                  ProductionReservation,
-                  PaymentOperation
-                })
-            })
-          } catch {
-            // Inspection failures must never activate checkout.
-          }
-
-          // Permanent fail-closed response for this integration step.
+          // Production V3 remains locked regardless of NODE_ENV.
+          // No initialization, Square SDK creation, or payment retry.
+          // The trusted coordinator is tested separately until
+          // reconciliation and execution integration are verified.
           return res.status(gate.httpStatus).json(gate.body)
+
+
         }
 
         const prepared = prepareV3CheckoutPayment({
