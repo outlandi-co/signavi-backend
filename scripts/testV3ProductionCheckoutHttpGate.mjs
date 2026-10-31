@@ -47,7 +47,12 @@ test("orders route uses the production-disabled adapter", () => {
 
   assert.match(
     source,
-    /V3_PREVIEW_ONLY/
+    /payment_execution_not_authorized/
+  )
+
+  assert.match(
+    source,
+    /\.status\(423\)/
   )
 
   assert.match(
