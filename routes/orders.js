@@ -1322,13 +1322,16 @@ router.patch(
           }
         }
 
-        return res.status(501).json({
+        return res.status(423).json({
           success: false,
-          code: "V3_PREVIEW_ONLY",
+          code: "V3_CHECKOUT_NOT_ACTIVATED",
+          reason: "payment_execution_not_authorized",
           message:
-            "V3 payment preparation verified. Payment creation disabled.",
+            "Secure checkout is not yet available. No payment was created.",
+          paymentCreated: false,
+          squareRequestAuthorized: false,
+          orderId: prepared.orderId,
           preview: {
-            orderId: prepared.orderId,
             totalCents: prepared.totalCents,
             shippingAmountCents: prepared.shippingAmountCents
           }

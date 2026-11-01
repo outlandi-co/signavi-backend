@@ -18,7 +18,7 @@ router.get("/v3/reconciliation", async (_req, res) => {
     const [total, operations] = await Promise.all([
       SmartShippingV3PaymentOperation.countDocuments(filter),
       SmartShippingV3PaymentOperation.find(filter)
-        .select("orderId status updatedAt")
+        .select("orderId status updatedAt squareDiagnostic")
         .sort({ updatedAt: -1 })
         .limit(25)
         .lean()
@@ -31,7 +31,20 @@ router.get("/v3/reconciliation", async (_req, res) => {
         operations: operations.map(operation => ({
           orderId: String(operation.orderId),
           status: operation.status,
-          updatedAt: operation.updatedAt
+          updatedAt: operation.updatedAt,
+          diagnostic: {
+            recorded: operation.squareDiagnostic != null,
+            outcomeKnown:
+              operation.squareDiagnostic?.outcomeKnown === true,
+            httpStatus:
+              Number.isSafeInteger(
+                operation.squareDiagnostic?.httpStatus
+              ) &&
+              operation.squareDiagnostic.httpStatus >= 400 &&
+              operation.squareDiagnostic.httpStatus <= 599
+                ? operation.squareDiagnostic.httpStatus
+                : null
+          }
         }))
       }
     })
