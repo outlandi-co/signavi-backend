@@ -5,11 +5,22 @@ import {
   createV3ProductionCheckoutActivationCoordinator
 } from "../utils/coordinateV3ProductionCheckoutActivation.js"
 
+const testOnlySharedFence = async ({ orderId, amountCents }) => ({
+  reserved: true,
+  orderId,
+  amountCents,
+  environment: "production",
+  owner: "isolated-test-owner",
+  idempotencyKey: `signavi-production-${orderId}`,
+  squareRequestAuthorized: false,
+  retryAuthorized: false
+})
 const makeDeps = overrides => ({
   Order: { findById() {} },
   Reservation: { create() {} },
   PaymentOperation: { create() {} },
   startSession() {},
+  acquireSharedFence: testOnlySharedFence,
   checkHistoricalPayment: async () => {
     throw new Error("Unexpected history query")
   },
