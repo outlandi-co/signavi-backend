@@ -28,14 +28,16 @@ export function createV3ProductionCheckoutActivationCoordinator({
   Reservation,
   PaymentOperation,
   startSession,
-  checkHistoricalPayment
+  checkHistoricalPayment,
+  acquireSharedFence
 } = {}) {
   const valid =
     typeof Order?.findById === "function" &&
     typeof Reservation?.create === "function" &&
     typeof PaymentOperation?.create === "function" &&
     typeof startSession === "function" &&
-    typeof checkHistoricalPayment === "function"
+    typeof checkHistoricalPayment === "function" &&
+    typeof acquireSharedFence === "function"
 
   return async function coordinate({
     order,
@@ -79,6 +81,34 @@ export function createV3ProductionCheckoutActivationCoordinator({
       history?.noPriorPaymentActivity !== true
     ) {
       return blocked("HISTORICAL_PAYMENT_NOT_CLEARED")
+    }
+
+    // Reserve the cross-workflow payment identity first.
+    // Any uncertain outcome leaves checkout blocked.
+    // Never automatically release or retry this fence.
+    let fence
+
+    try {
+      fence = await acquireSharedFence({
+        orderId: String(order._id).toLowerCase(),
+        amountCents: prepared.totalCents
+      })
+    } catch {
+      return blocked("SHARED_FENCE_OUTCOME_UNCERTAIN")
+    }
+
+    const id = String(order._id).toLowerCase()
+
+    if (
+      fence?.reserved !== true ||
+      fence.orderId !== id ||
+      fence.environment !== "production" ||
+      fence.amountCents !== prepared.totalCents ||
+      typeof fence.owner !== "string" ||
+      !fence.owner ||
+      fence.idempotencyKey !== `signavi-production-${id}`
+    ) {
+      return blocked("SHARED_FENCE_NOT_VERIFIED")
     }
 
     const persisted = await persistV3ProductionCheckoutAtomic({
