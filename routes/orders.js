@@ -16,6 +16,9 @@ import {
   verifyGuestCheckoutToken
 } from "../utils/guestCheckoutToken.js"
 
+import { resolvePreCatalogStorefrontAttempt } from "../utils/resolvePreCatalogStorefrontAttempt.mjs"
+import { verifyStorefrontAttemptIndexReadiness } from "../utils/verifyStorefrontAttemptIndexReadiness.mjs"
+import { isStorefrontAttemptDuplicate } from "../utils/storefrontAttemptConflict.mjs"
 import Product from "../models/Product.js"
 import { calculateCatalogCart } from "../utils/catalogPricing.js"
 import { requireAuth } from "../middleware/auth.js"
@@ -796,8 +799,65 @@ router.get(
 router.post(
   "/",
   async (req, res) => {
+    let storefrontCreationMetadata = null
+
     try {
       const b = req.body || {}
+
+      if (getSmartShippingCheckoutVersion() === "v3") {
+        // The index must already exist. Never create it here.
+        const readiness =
+          await verifyStorefrontAttemptIndexReadiness({
+            listIndexes: () => Order.collection.indexes()
+          })
+
+        if (readiness.ready !== true) {
+          return res.status(503).json({
+            success: false,
+            message: "Storefront order protection is unavailable."
+          })
+        }
+
+        const attempt =
+          await resolvePreCatalogStorefrontAttempt({
+            request: b,
+            attemptKey: req.get(
+              "x-signavi-storefront-attempt-key"
+            ),
+            recoverySecret: req.get(
+              "x-signavi-storefront-recovery-secret"
+            ),
+            findByAttemptKey: key =>
+              Order.findOne({
+                storefrontCreationAttemptKey: key
+              }).lean()
+          })
+
+        if (
+          attempt.state === "denied" ||
+          attempt.state ===
+            "existing-eligible-for-further-authorization"
+        ) {
+          return res.status(409).json({
+            success: false,
+            message:
+              "Purchase attempt cannot be created again. " +
+              "Contact support before retrying."
+          })
+        }
+
+        if (
+          attempt.state !== "requires-atomic-create" ||
+          !attempt.metadata
+        ) {
+          return res.status(503).json({
+            success: false,
+            message: "Purchase attempt could not be prepared."
+          })
+        }
+
+        storefrontCreationMetadata = attempt.metadata
+      }
 
       const email = emailOf(b.email)
 
@@ -905,6 +965,7 @@ router.post(
       const rate = null
 
       const order = await Order.create({
+        ...(storefrontCreationMetadata || {}),
         customerName:
           String(b.customerName || "Customer").trim(),
 
@@ -936,6 +997,16 @@ router.post(
         status: "payment_required",
         paymentStatus: "unpaid",
 
+        // Server-issued only; never copied from req.body.
+        ...(getSmartShippingCheckoutVersion() === "v3"
+          ? {
+              v3FirstAttemptProvenanceVersion:
+                "storefront-v3-origin-v1",
+              v3FirstAttemptProvenanceIssuedAt:
+                new Date()
+            }
+          : {}),
+
         source: "store",
 
         timeline: [{
@@ -953,10 +1024,23 @@ router.post(
       return res.status(201).json({
         success: true,
         data: order,
-        checkoutToken
+        checkoutToken,
+        checkoutVersion: getSmartShippingCheckoutVersion()
       })
 
     } catch (err) {
+      if (
+        storefrontCreationMetadata &&
+        isStorefrontAttemptDuplicate(err)
+      ) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "This purchase attempt already exists. " +
+            "Contact support before retrying."
+        })
+      }
+
       return fail(
         res,
         err,
@@ -1148,10 +1232,37 @@ router.patch(
 
 router.patch(
   "/:id/checkout",
-  async (req, res) => {
+  async (req, res, next) => {
     try {
       const order = await getOrder(req, res)
       if (!order) return
+
+      req.checkoutOrder = order
+
+      const storefront = ["store", "cart_drawer"].includes(
+        String(order.source || "").toLowerCase()
+      )
+
+      if (storefront) return next()
+
+      return requireAuth(req, res, () => {
+        if (req.user?.role !== "admin") {
+          return res.status(403).json({
+            success: false,
+            code: "CHECKOUT_ADMIN_REQUIRED",
+            message: "Administrator access required"
+          })
+        }
+
+        return next()
+      })
+    } catch (error) {
+      return fail(res, error, "Checkout authorization failed")
+    }
+  },
+  async (req, res) => {
+    try {
+      const order = req.checkoutOrder
       // Verify ownership before changing a storefront order.
       const isStorefrontOrder = ["store", "cart_drawer"].includes(
         String(order.source || "").toLowerCase()
@@ -1274,54 +1385,19 @@ router.patch(
           req.get("x-signavi-v3-sandbox-mode") === "prepare"
 
         if (sandboxHttpEnabled) {
-          try {
-            const { prepareV3SandboxCheckoutWorkflow } =
-              await import(
-                "../utils/smartShippingV3SandboxCheckoutWorkflow.js"
-              )
-
-            const result =
-              await prepareV3SandboxCheckoutWorkflow({
-                orderId: String(order._id),
-                guestToken: req.get(
-                  "x-signavi-guest-checkout-token"
-                ),
-                signedQuote: req.body?.v3ShippingQuote
-              })
-
-            if (!result.success) {
-              return res.status(409).json({
-                success: false,
-                code: "V3_SANDBOX_CHECKOUT_IN_PROGRESS",
-                message: "Sandbox checkout preparation already in progress."
-              })
-            }
-
-            return res.status(202).json({
-              success: true,
-              code: "V3_SANDBOX_PREPARED_NO_PAYMENT",
-              paymentCreated: false,
-              squareRequestAuthorized: false,
-              orderId: result.orderId,
-              totalCents: result.amountCents,
-              shippingAmountCents: result.shippingAmountCents
-            })
-          } catch (error) {
-            console.error(
-              "V3 Sandbox checkout preparation failed:",
-              error.message
-            )
-
-            // Retain the lock for explicit state-aware recovery.
-            return res.status(503).json({
-              success: false,
-              code: "V3_SANDBOX_PREPARATION_FAILED",
-              message:
-                "Sandbox preparation failed; checkout state requires review."
-            })
-          }
+          // Development preview only. Validation has already
+          // completed; do not reserve payment operations or
+          // acquire checkout locks without Square execution.
+          return res.status(202).json({
+            success: true,
+            code: "V3_SANDBOX_PREPARED_NO_PAYMENT",
+            paymentCreated: false,
+            squareRequestAuthorized: false,
+            orderId: prepared.orderId,
+            totalCents: prepared.totalCents,
+            shippingAmountCents: prepared.shippingAmountCents
+          })
         }
-
         return res.status(423).json({
           success: false,
           code: "V3_CHECKOUT_NOT_ACTIVATED",

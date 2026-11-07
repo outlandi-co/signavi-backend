@@ -473,6 +473,60 @@ squarePaymentLinkId: {
   trim: true
 },
 
+storefrontCreationAttemptKey: {
+  type: String,
+  default: undefined,
+  lowercase: true,
+  trim: true,
+  immutable: true,
+  match: /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+},
+
+storefrontCreationFingerprint: {
+  type: String,
+  default: undefined,
+  immutable: true,
+  match: /^[a-f0-9]{64}$/i
+},
+
+storefrontRecoveryProofHash: {
+  type: String,
+  default: undefined,
+  immutable: true,
+  match: /^[a-f0-9]{64}$/i
+},
+
+storefrontRecoveryExpiresAt: {
+  type: Date,
+  default: undefined,
+  immutable: true
+},
+
+v3FirstAttemptProvenanceVersion: {
+  type: String,
+  enum: ["storefront-v3-origin-v1"],
+  default: undefined,
+  immutable: true
+},
+
+v3FirstAttemptProvenanceIssuedAt: {
+  type: Date,
+  default: undefined,
+  immutable: true
+},
+
+v3SandboxInitializationOwner: {
+  type: String,
+  default: "",
+  trim: true
+},
+
+v3SandboxInitializationRevision: {
+  type: Number,
+  default: 0,
+  min: 0
+},
+
 squareExpectedAmountCents: {
   type: Number,
   default: null,
