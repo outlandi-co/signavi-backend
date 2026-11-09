@@ -719,10 +719,9 @@ app.use(
   "/api/shipping",
   shippingRoutes
 )
-// V3 storefront shipping quotes are disabled by default.
-// Production cannot activate this endpoint through the flag.
+// V3 storefront shipping quotes require explicit activation.
+// This flag does not authorize Square payment execution.
 if (
-  process.env.NODE_ENV !== "production" &&
   process.env.ENABLE_V3_STOREFRONT_SHIPPING_QUOTES === "true"
 ) {
   app.use(
