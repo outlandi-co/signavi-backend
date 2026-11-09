@@ -62,11 +62,14 @@ export async function resolveV3TrustedCheckoutHandoff({
     url.protocol !== "https:" ||
     url.username ||
     url.password ||
-    !(
-      url.hostname === "square.link" ||
-      url.hostname === "squareup.com" ||
-      url.hostname.endsWith(".squareup.com")
-    )
+    url.port ||
+    url.hash ||
+    url.pathname.length <= 1 ||
+    ![
+      "square.link",
+      "checkout.square.site",
+      "sandbox.square.link"
+    ].includes(url.hostname)
   ) {
     return blocked("UNAPPROVED_PAYMENT_URL")
   }

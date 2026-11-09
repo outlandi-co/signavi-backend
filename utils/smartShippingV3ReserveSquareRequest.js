@@ -121,3 +121,125 @@ export const reserveV3SquareRequest = async ({
     }
   })
 }
+/* ===== ISOLATED V3 SANDBOX SQUARE RESERVATION ===== */
+
+export const reserveV3IsolatedSquareRequest = async ({
+  orderId,
+  owner
+}) => {
+  if (
+    !mongoose.isValidObjectId(orderId) ||
+    typeof owner !== "string" ||
+    !owner.trim()
+  ) {
+    throw new Error("Invalid isolated V3 Square reservation.")
+  }
+
+  const id = String(orderId).toLowerCase()
+
+  const { runV3SandboxAtomicTransition } = await import(
+    "./v3SandboxAtomicTransition.js"
+  )
+
+  return runV3SandboxAtomicTransition({
+    orderId: id,
+    owner,
+
+    transition: async ({ session, connection, models }) => {
+      const { Order, PaymentOperation } = models
+
+      if (
+        Order?.db !== connection ||
+        PaymentOperation?.db !== connection
+      ) {
+        throw new Error("V3_SANDBOX_RESERVATION_MODEL_MISMATCH")
+      }
+
+      const association = await connection
+        .collection("invoice_order_associations_v3_test")
+        .findOne(
+          {
+            orderId: new mongoose.Types.ObjectId(id),
+            environment: "sandbox"
+          },
+          {
+            projection: { _id: 1 },
+            session
+          }
+        )
+
+      if (association) {
+        throw new Error(
+          "V3 Square reservation blocked: invoice association exists."
+        )
+      }
+
+      const order = await Order.findById(id)
+        .session(session)
+
+      const operation = await PaymentOperation.findOne({
+        orderId: id
+      }).session(session)
+
+      const assessment = inspectV3PendingSquareBinding({
+        order,
+        operation
+      })
+
+      if (!assessment.consistent) {
+        throw new Error(
+          `V3 Square reservation rejected: ${assessment.reason}`
+        )
+      }
+
+      const updated = await PaymentOperation.findOneAndUpdate(
+        {
+          _id: operation._id,
+          orderId: id,
+          environment: "sandbox",
+          status: "pending",
+          requestOwner: "",
+          amountCents: assessment.amountCents,
+          checkoutReferenceId:
+            assessment.checkoutReferenceId,
+          idempotencyKey: operation.idempotencyKey,
+          squarePaymentLinkId: "",
+          squareOrderId: "",
+          paymentUrl: ""
+        },
+        {
+          $set: {
+            status: "reconciliation_required",
+            requestOwner: owner,
+            lastError:
+              "Square request reserved; external outcome unknown."
+          }
+        },
+        {
+          session,
+          returnDocument: "after"
+        }
+      )
+
+      if (!updated) {
+        throw new Error(
+          "V3 Square request reservation lost concurrency race."
+        )
+      }
+
+      return Object.freeze({
+        orderId: id,
+        owner,
+        amountCents: assessment.amountCents,
+        checkoutReferenceId:
+          assessment.checkoutReferenceId,
+        idempotencyKey: updated.idempotencyKey,
+        environment: "sandbox",
+        status: "reconciliation_required",
+        requestReserved: true,
+        squareRequestAuthorized: false,
+        paymentCreated: false
+      })
+    }
+  })
+}

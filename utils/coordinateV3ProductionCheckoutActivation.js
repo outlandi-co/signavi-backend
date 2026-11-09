@@ -1,4 +1,8 @@
 import {
+  evaluateV3FirstAttemptEligibility
+} from "./evaluateV3FirstAttemptEligibility.js"
+
+import {
   prepareV3CheckoutPayment
 } from "./smartShippingV3PaymentPreparation.js"
 
@@ -63,6 +67,16 @@ export function createV3ProductionCheckoutActivationCoordinator({
 
     if (!prepared) {
       return blocked("SIGNED_CHECKOUT_NOT_VERIFIED")
+    }
+
+    // Additional rejection gate, never payment authorization.
+    // Check before history queries, shared fences, or writes.
+    const eligibility = evaluateV3FirstAttemptEligibility({
+      order
+    })
+
+    if (eligibility.eligible !== true) {
+      return blocked("FIRST_ATTEMPT_NOT_ELIGIBLE")
     }
 
     let history

@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict"
+import assert from "node:assert/strict"
 import { verifyV3ProductionWebhookPaymentBinding } from "../utils/smartShippingV3ProductionWebhookPaymentBinding.js"
 
 const id = "507f1f77bcf86cd799439011"
@@ -16,7 +16,7 @@ const fixture = () => ({
   operation: {
     orderId: id,
     environment: "production",
-    status: "completed",
+    status: "reconciliation_required",
     requestOwner: "synthetic-owner",
     idempotencyKey: `signavi-v3-production-order-${id}`,
     squarePaymentLinkId: "synthetic-link-id",
@@ -129,6 +129,7 @@ check("Exact paid webhook replay", () => {
 
   f.order.status = "paid"
   f.order.paymentStatus = "paid"
+  f.operation.status = "completed"
   f.order.squarePaymentId = f.payment.id
   f.order.squareOrderId = f.squareOrder.id
 

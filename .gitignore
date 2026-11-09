@@ -3,3 +3,5 @@ node_modules/
 uploads/
 *.zip
 .DS_Store
+# Local environment and backup configurations
+.env*

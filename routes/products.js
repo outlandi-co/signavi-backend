@@ -1,3 +1,12 @@
+import ShippingPackage from "../models/ShippingPackage.js"
+import {
+  normalizeProductShippingCompatibility
+} from "../utils/normalizeProductShippingCompatibility.mjs"
+import {
+  SHIPPING_MODES,
+  validateShippingSelection
+} from "../utils/productShippingMode.mjs"
+
 
 import express from "express"
 import multer from "multer"
@@ -254,6 +263,15 @@ const getStorefrontFromRequest = (req) => {
 
   if (source.includes("signavi.store")) {
     return "signavi_store"
+  }
+
+  // Local SignaVi Studio development.
+  // Explicit storefront query/body selection takes precedence.
+  if (
+    /^http:\/\/(localhost|127\.0\.0\.1):5173(?:\/|$)/.test(origin) ||
+    /^http:\/\/(localhost|127\.0\.0\.1):5173(?:\/|$)/.test(referer)
+  ) {
+    return "signavi_studio"
   }
 
   return "signavi_store"
@@ -590,7 +608,7 @@ const validateMaterialReferences = async (usageLists) => {
 
 /* ================= PRODUCT SHIPPING HELPERS ================= */
 
-const parseProductShipping = (raw) => {
+const parseProductShipping = async (raw, existingShipping = null) => {
   if (raw === undefined) {
     return { provided: false }
   }
@@ -609,33 +627,64 @@ const parseProductShipping = (raw) => {
     return { error: "Shipping must be an object." }
   }
 
+  const selection = validateShippingSelection(data)
+
+  if (!selection.valid) {
+    return { error: selection.error }
+  }
+
+  const mode = selection.mode
+
+  // Actual parcel measurements must be provided by fulfillment
+  // for each custom order. Do not invent or reuse a default parcel.
+  if (mode === SHIPPING_MODES.ORDER) {
+    return {
+      provided: true,
+      value: {
+        mode,
+        packageId: null,
+        weightOz: null,
+        lengthIn: null,
+        widthIn: null,
+        heightIn: null,
+        packagingType: "custom",
+        shipSeparately: false
+      }
+    }
+  }
+
   const shipping = {}
 
-  for (const field of [
-    "weightOz",
-    "lengthIn",
-    "widthIn",
-    "heightIn"
-  ]) {
-    const value = data[field]
+  if (mode === SHIPPING_MODES.PRODUCT) {
+    for (const field of [
+      "weightOz",
+      "lengthIn",
+      "widthIn",
+      "heightIn"
+    ]) {
+      const raw = data[field]
+      const number = Number(raw)
 
-    if (
-      value === undefined ||
-      value === null ||
-      typeof value === "boolean" ||
-      typeof value === "object" ||
-      String(value).trim() === ""
-    ) {
-      return { error: `${field} must be a positive number.` }
+      if (
+        raw === null ||
+        raw === undefined ||
+        typeof raw === "boolean" ||
+        String(raw).trim() === "" ||
+        !Number.isFinite(number) ||
+        number <= 0
+      ) {
+        return { error: `${field} must be a positive number.` }
+      }
+
+      shipping[field] = number
     }
-
-    const number = Number(value)
-
-    if (!Number.isFinite(number) || number <= 0) {
-      return { error: `${field} must be a positive number.` }
-    }
-
-    shipping[field] = number
+  } else {
+    // Saved package dimensions belong to Shipping Fulfillment.
+    // Checkout must verify capacity and weight before quoting.
+    shipping.weightOz = null
+    shipping.lengthIn = null
+    shipping.widthIn = null
+    shipping.heightIn = null
   }
 
   const allowedPackaging = [
@@ -657,10 +706,101 @@ const parseProductShipping = (raw) => {
     return { error: "Invalid separate-shipping setting." }
   }
 
+  shipping.mode = mode
+  shipping.packageId = null
   shipping.packagingType = data.packagingType
   shipping.shipSeparately =
     data.shipSeparately === true ||
     data.shipSeparately === "true"
+
+  // SIGNAVI_SHIPPING_008_COMPATIBILITY
+  // Preserve newer rules when an older editor omits them.
+  const previous = existingShipping &&
+    typeof existingShipping.toObject === "function"
+      ? existingShipping.toObject()
+      : (existingShipping || {});
+
+  const fields = [
+    "compatibilityMode",
+    "requiresProtection",
+    "oversized",
+    "maxUnitsPerPackage"
+  ];
+
+  const hasNewRules = fields.some(field =>
+    Object.prototype.hasOwnProperty.call(data, field) ||
+    (
+      previous[field] !== undefined &&
+      previous[field] !== null
+    )
+  );
+
+  if (hasNewRules) {
+    const compatibilityInput = {
+      shipSeparately: shipping.shipSeparately
+    };
+
+    for (const field of fields) {
+      if (Object.prototype.hasOwnProperty.call(data, field)) {
+        compatibilityInput[field] = data[field];
+      } else if (
+        previous[field] !== undefined &&
+        previous[field] !== null
+      ) {
+        compatibilityInput[field] = previous[field];
+      }
+    }
+
+    // The legacy checkbox can still request separate shipping.
+    // Never let an old client silently downgrade separation.
+    if (
+      previous.shipSeparately === true &&
+      shipping.shipSeparately === false &&
+      !Object.prototype.hasOwnProperty.call(data, "compatibilityMode")
+    ) {
+      compatibilityInput.shipSeparately = true;
+    }
+
+    try {
+      const normalized =
+        normalizeProductShippingCompatibility(compatibilityInput);
+
+      shipping.compatibilityMode = normalized.compatibilityMode;
+      shipping.shipSeparately = normalized.shipSeparately;
+      shipping.requiresProtection = normalized.requiresProtection;
+      shipping.oversized = normalized.oversized;
+      shipping.maxUnitsPerPackage = normalized.maxUnitsPerPackage;
+    } catch (error) {
+      return {
+        error: error?.message || "Invalid shipping compatibility settings."
+      };
+    }
+  }
+
+  if (mode === SHIPPING_MODES.SAVED) {
+    // Admin-only product save route performs this lookup.
+    // Reject deleted, disabled, and nonexistent package IDs.
+    const savedPackage = await ShippingPackage.findOne({
+      _id: selection.packageId,
+      active: true
+    })
+      .select("_id type active")
+      .lean()
+
+    if (!savedPackage) {
+      return {
+        error: "Selected shipping package does not exist or is inactive."
+      }
+    }
+
+    if (savedPackage.type !== shipping.packagingType) {
+      return {
+        error: "Selected package type does not match the product packaging type."
+      }
+    }
+
+    shipping.packageId = savedPackage._id
+  }
 
   return {
     provided: true,
@@ -748,7 +888,7 @@ router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
 
     const productType = normalizeProductType(req.body.productType)
 
-    const shippingResult = parseProductShipping(req.body.shipping)
+    const shippingResult = await parseProductShipping(req.body.shipping)
 
     if (shippingResult.error) {
       return res.status(400).json({
@@ -1162,7 +1302,7 @@ router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) 
     }
 
     if (req.body.shipping !== undefined) {
-      const shippingResult = parseProductShipping(req.body.shipping)
+      const shippingResult = await parseProductShipping(req.body.shipping, product.shipping)
 
       if (shippingResult.error) {
         return res.status(400).json({

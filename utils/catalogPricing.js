@@ -45,7 +45,7 @@ const applyPercent = (cents, percent) =>
     cents - Math.round(cents * (percent / 100))
   )
 
-export function calculateCatalogItem(product, cartItem) {
+export function calculateCatalogItem(product, cartItem, checkoutStorefront = "signavi_store") {
   if (!product || !cartItem) {
     throw new Error("Product and cart item are required.")
   }
@@ -57,12 +57,19 @@ export function calculateCatalogItem(product, cartItem) {
   }
 
   if (
+    checkoutStorefront !== "signavi_store" &&
+    checkoutStorefront !== "signavi_studio"
+  ) {
+    throw new Error("Invalid checkout storefront.")
+  }
+
+  if (
     product.active === false ||
     product.storefrontVisible === false ||
-    text(product.storefront) !== "signavi_store"
+    text(product.storefront) !== checkoutStorefront
   ) {
     throw new Error(
-      `${text(product.name) || "Product"} is not available on Signavi Store.`
+      `${text(product.name) || "Product"} is not available on this storefront.`
     )
   }
 
@@ -314,10 +321,7 @@ export function calculateCatalogItem(product, cartItem) {
   }
 }
 
-export function calculateCatalogCart(
-  products,
-  cartItems
-) {
+export function calculateCatalogCart(products, cartItems, checkoutStorefront = "signavi_store") {
   if (
     !Array.isArray(products) ||
     !Array.isArray(cartItems) ||
@@ -353,10 +357,7 @@ export function calculateCatalogCart(
       )
     }
 
-    const priced = calculateCatalogItem(
-      product,
-      cartItem
-    )
+    const priced = calculateCatalogItem(product, cartItem, checkoutStorefront)
 
     // Check combined quantities across duplicate
     // cart entries for the same color and size.

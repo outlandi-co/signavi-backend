@@ -86,6 +86,8 @@ async function signedFixture() {
     status: "payment_required",
     paymentStatus: "unpaid",
     customerName: "V3 Activation Test",
+    v3FirstAttemptProvenanceVersion: "storefront-v3-origin-v1",
+    v3FirstAttemptProvenanceIssuedAt: new Date(),
     email: "activation-test@example.com",
     address: {
       street: "123 Test Street",
@@ -120,13 +122,24 @@ async function signedFixture() {
   }
 }
 
-function coordinator(historyChecker) {
+const testOnlySharedFence = async ({ orderId, amountCents }) => ({
+  reserved: true,
+  orderId,
+  amountCents,
+  environment: "production",
+  owner: "isolated-test-owner",
+  idempotencyKey: `signavi-production-${orderId}`,
+  squareRequestAuthorized: false,
+  retryAuthorized: false
+})
+function coordinator(historyChecker, fenceChecker = testOnlySharedFence) {
   return createV3ProductionCheckoutActivationCoordinator({
     Order,
     Reservation,
     PaymentOperation,
     startSession: () => mongoose.startSession(),
-    checkHistoricalPayment: historyChecker
+    checkHistoricalPayment: historyChecker,
+    acquireSharedFence: fenceChecker
   })
 }
 
@@ -276,3 +289,129 @@ test("Concurrent activation creates one payment identity", async () => {
     1
   )
 })
+
+test("Shared fence rejection blocks signed checkout", async () => {
+  const fixture = await signedFixture()
+  let fenceCalls = 0
+
+  const run = coordinator(
+    async () => ({
+      verified: true,
+      noPriorPaymentActivity: true
+    }),
+    async () => {
+      fenceCalls++
+      return {
+        reserved: false,
+        reason: "EXISTING_SHARED_RESERVATION"
+      }
+    }
+  )
+
+  const result = await run(fixture)
+
+  assert.equal(fenceCalls, 1)
+  assert.equal(result.ready, false)
+  assert.equal(result.reason, "SHARED_FENCE_NOT_VERIFIED")
+  assert.equal(result.squareRequestAuthorized, false)
+  assert.equal(result.retryAuthorized, false)
+
+  await assertNoPaymentRecords(fixture.id)
+})
+
+test("Uncertain shared fence cannot initialize payment", async () => {
+  const fixture = await signedFixture()
+  let fenceCalls = 0
+
+  const run = coordinator(
+    async () => ({
+      verified: true,
+      noPriorPaymentActivity: true
+    }),
+    async () => {
+      fenceCalls++
+      throw new Error("Test-only reservation timeout")
+    }
+  )
+
+  const result = await run(fixture)
+
+  assert.equal(fenceCalls, 1)
+  assert.equal(result.ready, false)
+  assert.equal(result.reason, "SHARED_FENCE_OUTCOME_UNCERTAIN")
+  assert.equal(result.squareRequestAuthorized, false)
+  assert.equal(result.retryAuthorized, false)
+
+  await assertNoPaymentRecords(fixture.id)
+})
+
+test("Malformed shared fence cannot initialize payment", async () => {
+  const fixture = await signedFixture()
+  let fenceCalls = 0
+
+  const run = coordinator(
+    async () => ({
+      verified: true,
+      noPriorPaymentActivity: true
+    }),
+    async ({ orderId, amountCents }) => {
+      fenceCalls++
+
+      return {
+        reserved: true,
+        orderId,
+        amountCents,
+        environment: "production",
+        owner: "wrong-identity-test",
+        idempotencyKey: "invalid-idempotency-key"
+      }
+    }
+  )
+
+  const result = await run(fixture)
+
+  assert.equal(fenceCalls, 1)
+  assert.equal(result.ready, false)
+  assert.equal(result.reason, "SHARED_FENCE_NOT_VERIFIED")
+  assert.equal(result.squareRequestAuthorized, false)
+  assert.equal(result.retryAuthorized, false)
+
+  await assertNoPaymentRecords(fixture.id)
+})
+
+test("missing first-attempt provenance blocks before history and reservation", async () => {
+  const fixture = await signedFixture();
+  const withoutProvenance = fixture.order.toObject();
+
+  delete withoutProvenance.v3FirstAttemptProvenanceVersion;
+  delete withoutProvenance.v3FirstAttemptProvenanceIssuedAt;
+
+  let historyCalls = 0;
+  let fenceCalls = 0;
+
+  const run = coordinator(
+    async () => {
+      historyCalls++;
+      throw new Error("History must not be queried");
+    },
+    async () => {
+      fenceCalls++;
+      throw new Error("Fence must not be acquired");
+    }
+  );
+
+  const result = await run({
+    order: withoutProvenance,
+    guestToken: fixture.guestToken,
+    signedQuote: fixture.signedQuote
+  });
+
+  assert.equal(result.ready, false);
+  assert.equal(result.reason, "FIRST_ATTEMPT_NOT_ELIGIBLE");
+  assert.equal(result.squareRequestAuthorized, false);
+  assert.equal(result.retryAuthorized, false);
+  assert.equal(historyCalls, 0);
+  assert.equal(fenceCalls, 0);
+
+  await assertNoPaymentRecords(fixture.id);
+});

@@ -153,8 +153,10 @@ try {
 
   // The HTTP flag must be explicitly enabled.
   const disabled = await checkout()
-  assert.equal(disabled.status, 501)
-  assert.equal(disabled.body.code, "V3_PREVIEW_ONLY")
+  assert.equal(disabled.status, 423)
+  assert.equal(disabled.body.code, "V3_CHECKOUT_NOT_ACTIVATED")
+  assert.equal(disabled.body.paymentCreated, false)
+  assert.equal(disabled.body.squareRequestAuthorized, false)
   assert.deepEqual(await readState(), before)
   console.log("HTTP PREPARATION DISABLED BY DEFAULT: PASS")
 
@@ -180,8 +182,10 @@ try {
   console.log("TAMPERED QUOTE BLOCKED: PASS")
 
   const preview = await checkout({ mode: "preview" })
-  assert.equal(preview.status, 501)
-  assert.equal(preview.body.code, "V3_PREVIEW_ONLY")
+  assert.equal(preview.status, 423)
+  assert.equal(preview.body.code, "V3_CHECKOUT_NOT_ACTIVATED")
+  assert.equal(preview.body.paymentCreated, false)
+  assert.equal(preview.body.squareRequestAuthorized, false)
   assert.deepEqual(await readState(), before)
   console.log("ORDINARY PREVIEW STILL UNCHANGED: PASS")
 

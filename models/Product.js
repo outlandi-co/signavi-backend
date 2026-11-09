@@ -191,9 +191,55 @@ const shippingSchema = new mongoose.Schema(
       default: "unassigned"
     },
 
+    mode: {
+      type: String,
+      enum: [
+        "saved_package",
+        "product_measurements",
+        "per_order"
+      ],
+      default: "product_measurements",
+      required: true
+    },
+
+    packageId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ShippingPackage",
+      default: null
+    },
+
     shipSeparately: {
       type: Boolean,
       default: false
+    },
+
+    // SIGNAVI_SHIPPING_006_COMPATIBILITY
+    // Leave absent on legacy records so shipSeparately remains authoritative.
+    compatibilityMode: {
+      type: String,
+      enum: ["combine", "protected", "separate"],
+      default: undefined
+    },
+
+    requiresProtection: {
+      type: Boolean,
+      default: false
+    },
+
+    oversized: {
+      type: Boolean,
+      default: false
+    },
+
+    maxUnitsPerPackage: {
+      type: Number,
+      default: null,
+      min: 1,
+      validate: {
+        validator: value =>
+          value == null || Number.isSafeInteger(value),
+        message: "Maximum units per package must be a positive integer."
+      }
     }
   },
   { _id: false }

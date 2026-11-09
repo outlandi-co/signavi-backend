@@ -1,7 +1,7 @@
 
 import mongoose from "mongoose"
 
-import Reservation from "../models/SharedSquarePaymentReservation.js"
+import Reservation from "../models/SmartShippingV3ProductionPurchaseReservation.js"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 
 import {
