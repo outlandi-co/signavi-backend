@@ -1,86 +1,139 @@
-import assert from "node:assert/strict"
-import fs from "node:fs"
+import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   getSmartShippingCheckoutVersion
-} from "../utils/smartShippingV3FeatureFlags.js"
+} from "../utils/smartShippingV3FeatureFlags.js";
 
 const source = fs.readFileSync(
   new URL("../routes/orders.js", import.meta.url),
   "utf8"
-)
+);
 
-const routeStart = source.indexOf('"/:id/checkout"')
-const routeEnd = source.indexOf("/* ================= SHIP ORDER", routeStart)
+const routeStart = source.indexOf('"/:id/checkout"');
+const routeEnd = source.indexOf(
+  "/* ================= SHIP ORDER",
+  routeStart
+);
 
-assert.ok(routeStart >= 0)
-assert.ok(routeEnd > routeStart)
+assert.ok(routeStart >= 0, "Checkout route must exist");
+assert.ok(routeEnd > routeStart, "Checkout route boundary must exist");
 
-const checkout = source.slice(routeStart, routeEnd)
+const checkout = source.slice(routeStart, routeEnd);
 
-const guard = checkout.indexOf(
+function position(marker) {
+  const index = checkout.indexOf(marker);
+  assert.ok(index >= 0, "Missing checkout marker: " + marker);
+  return index;
+}
+
+const guard = position(
   'getSmartShippingCheckoutVersion() === "v3"'
-)
-const preview = checkout.indexOf('code: "V3_PREVIEW_ONLY"')
-const shipping = checkout.indexOf(
+);
+
+const productionDeny = position(
+  "denyV3ProductionCheckout()"
+);
+
+const productionReturn = position(
+  "return res.status(gate.httpStatus).json(gate.body)"
+);
+
+const prepared = position(
+  "const prepared = prepareV3CheckoutPayment({"
+);
+
+const sandboxPrepared = position(
+  'code: "V3_SANDBOX_PREPARED_NO_PAYMENT"'
+);
+
+const locked = position(
+  'code: "V3_CHECKOUT_NOT_ACTIVATED"'
+);
+
+const shipping = position(
   "applyCheckoutShipping(order, req.body || {})"
-)
-const save = checkout.indexOf("await order.save()")
-const square = checkout.indexOf(
+);
+
+const save = position("await order.save()");
+
+const square = position(
   "/api/square/create-payment/"
-)
+);
 
-assert.ok(guard >= 0)
-assert.ok(preview > guard)
-assert.ok(shipping > preview)
-assert.ok(save > preview)
-assert.ok(square > preview)
+assert.ok(productionDeny > guard);
+assert.ok(productionReturn > productionDeny);
+assert.ok(prepared > productionReturn);
+assert.ok(sandboxPrepared > prepared);
+assert.ok(locked > sandboxPrepared);
 
-console.log("V3 GUARD BEFORE V2 SHIPPING: PASS")
-console.log("V3 PREVIEW BEFORE DATABASE SAVE: PASS")
-console.log("V3 PREVIEW BEFORE SQUARE HANDOFF: PASS")
+for (const legacy of [shipping, save, square]) {
+  assert.ok(legacy > locked, "V3 guards must precede legacy checkout");
+}
 
 assert.match(
   checkout,
-  /prepareV3CheckoutPayment\(\{/
-)
+  /return res\.status\(202\)\.json\(\{/
+);
+
+assert.match(
+  checkout,
+  /return res\.status\(423\)\.json\(\{/
+);
+
 assert.match(
   checkout,
   /verifyV3AppliedPayment\(order, prepared\)/
-)
+);
+
+const v3Block = checkout.slice(guard, shipping);
+
 assert.match(
-  checkout,
-  /return res\.status\(501\)\.json\(\{/
-)
+  v3Block,
+  /paymentCreated:\s*false/
+);
 
-console.log("V3 VERIFICATION AND EARLY RETURN: PASS")
+assert.match(
+  v3Block,
+  /squareRequestAuthorized:\s*false/
+);
 
-const previousFlag = process.env.SMART_SHIPPING_V3_ENABLED
-const previousNodeEnv = process.env.NODE_ENV
+assert.match(
+  v3Block,
+  /SQUARE_ENVIRONMENT/
+);
+
+console.log("V3 GUARD BEFORE LEGACY CHECKOUT: PASS");
+console.log("PRODUCTION DENIAL BEFORE SANDBOX PREPARATION: PASS");
+console.log("SANDBOX PREPARATION WITHOUT PAYMENT: PASS");
+console.log("UNAUTHORIZED CHECKOUT LOCKED: PASS");
+
+const previousFlag = process.env.SMART_SHIPPING_V3_ENABLED;
+const previousNodeEnv = process.env.NODE_ENV;
 
 try {
-  delete process.env.SMART_SHIPPING_V3_ENABLED
-  process.env.NODE_ENV = "development"
+  delete process.env.SMART_SHIPPING_V3_ENABLED;
+  process.env.NODE_ENV = "development";
 
-  assert.equal(getSmartShippingCheckoutVersion(), "v2")
-  console.log("DEFAULT V2 ROUTING: PASS")
+  assert.equal(getSmartShippingCheckoutVersion(), "v2");
+  console.log("DEFAULT V2 ROUTING: PASS");
 
-  process.env.SMART_SHIPPING_V3_ENABLED = "true"
-  process.env.NODE_ENV = "production"
+  process.env.SMART_SHIPPING_V3_ENABLED = "true";
+  process.env.NODE_ENV = "production";
 
-  assert.equal(getSmartShippingCheckoutVersion(), "v2")
-  console.log("PRODUCTION V2 ROUTING: PASS")
+  assert.equal(getSmartShippingCheckoutVersion(), "v2");
+  console.log("PRODUCTION V2 ROUTING: PASS");
 } finally {
   if (previousFlag === undefined) {
-    delete process.env.SMART_SHIPPING_V3_ENABLED
+    delete process.env.SMART_SHIPPING_V3_ENABLED;
   } else {
-    process.env.SMART_SHIPPING_V3_ENABLED = previousFlag
+    process.env.SMART_SHIPPING_V3_ENABLED = previousFlag;
   }
 
   if (previousNodeEnv === undefined) {
-    delete process.env.NODE_ENV
+    delete process.env.NODE_ENV;
   } else {
-    process.env.NODE_ENV = previousNodeEnv
+    process.env.NODE_ENV = previousNodeEnv;
   }
 }
 
-console.log("ALL V3 CHECKOUT GUARD STRUCTURE TESTS PASSED")
+console.log("ALL V3 CHECKOUT GUARD STRUCTURE TESTS PASSED");
