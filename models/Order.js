@@ -103,6 +103,33 @@ const itemSchema = new mongoose.Schema(
         trim: true
       }
     }
+    ,
+
+    customization: {
+      artwork: {
+        type: String,
+        default: "",
+        trim: true,
+        maxlength: 2048
+      },
+      productionType: {
+        type: String,
+        default: "",
+        trim: true,
+        maxlength: 80
+      },
+      printLocation: {
+        type: String,
+        default: "",
+        trim: true,
+        maxlength: 80
+      },
+      design: {
+        x: { type: Number, default: 0 },
+        y: { type: Number, default: 0 },
+        size: { type: Number, default: 0 }
+      }
+    }
   },
   {
     _id: false
@@ -390,6 +417,14 @@ const orderSchema = new mongoose.Schema(
     },
 
     /* ================= ORDER TYPE ================= */
+
+    storefront: {
+      type: String,
+      enum: ["signavi_store", "signavi_studio"],
+      default: "signavi_store",
+      required: true,
+      index: true
+    },
 
     orderType: {
       type: String,

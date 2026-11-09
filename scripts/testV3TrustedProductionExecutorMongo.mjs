@@ -83,7 +83,7 @@ function makeExecutorOptions(identity, squareCreate, counters) {
         claimed: result?.claimed,
         reason: result?.reason,
         orderMatches: result?.orderId === id,
-        purchaseKeyMatches: result?.idempotencyKey === purchaseKey,
+        purchaseKeyMatches: result?.purchaseKey === purchaseKey,
         ownerMatches: result?.owner === owner,
         amountMatches: result?.amountCents === amountCents,
         hasSquareKey: Boolean(result?.squareIdempotencyKey)

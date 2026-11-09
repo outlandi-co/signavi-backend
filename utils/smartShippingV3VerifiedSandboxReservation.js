@@ -4,9 +4,7 @@ import {
   createV3SandboxIdentityReader
 } from "./smartShippingV3SandboxIdentityReader.js"
 
-import {
-  reserveV3SquareRequest
-} from "./smartShippingV3ReserveSquareRequest.js"
+import { reserveV3IsolatedSquareRequest } from "./smartShippingV3ReserveSquareRequest.js"
 
 // V3 Sandbox preparation only.
 //
@@ -57,7 +55,7 @@ export const reserveV3VerifiedSandboxRequest = async ({
 
   return coordinateV3VerifiedSandboxReservation({
     verifyIdentity: () => reader.verifyIdentity(),
-    reserve: () => reserveV3SquareRequest({ orderId, owner }),
+    reserve: () => reserveV3IsolatedSquareRequest({ orderId, owner }),
     expectedMerchantId,
     expectedLocationId
   })

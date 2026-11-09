@@ -1,3 +1,6 @@
+import {
+  isV3UnstartedPaymentOperation
+} from "./isV3UnstartedPaymentOperation.js"
 import mongoose from "mongoose"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
 import {
@@ -76,7 +79,7 @@ export const releaseV3UnstartedPreparation = async ({
         paymentUrl: ""
       }).session(session)
 
-      if (!operation) {
+      if (!isV3UnstartedPaymentOperation(operation)) {
         throw new Error(
           "V3 payment lock release requires unstarted operation."
         )

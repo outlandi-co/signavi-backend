@@ -154,3 +154,73 @@ export const persistV3SquareDiagnostic = async ({
     diagnostic: safe
   })
 }
+/* ===== ISOLATED V3 SANDBOX SQUARE DIAGNOSTICS ===== */
+
+export const persistV3IsolatedSquareDiagnostic = async ({
+  orderId,
+  owner,
+  diagnostic
+}) => {
+  if (
+    typeof orderId !== "string" ||
+    !/^[a-f0-9]{24}$/i.test(orderId) ||
+    typeof owner !== "string" ||
+    !owner.trim()
+  ) {
+    throw new Error("Invalid diagnostic ownership identity.")
+  }
+
+  const safe = sanitizeV3PersistedSquareDiagnostic(diagnostic)
+
+  const { runV3SandboxAtomicTransition } = await import(
+    "./v3SandboxAtomicTransition.js"
+  )
+
+  return runV3SandboxAtomicTransition({
+    orderId: orderId.toLowerCase(),
+    owner,
+
+    transition: async ({ session, connection, models }) => {
+      const PaymentOperation = models.PaymentOperation
+
+      if (PaymentOperation?.db !== connection) {
+        throw new Error("V3_SANDBOX_DIAGNOSTIC_MODEL_MISMATCH")
+      }
+
+      const result = await PaymentOperation.findOneAndUpdate(
+        {
+          orderId,
+          environment: "sandbox",
+          status: "reconciliation_required",
+          requestOwner: owner,
+          squareCreationAttemptClaimedAt: { $type: "date" },
+          squarePaymentLinkId: "",
+          squareOrderId: "",
+          paymentUrl: "",
+          squareDiagnostic: null
+        },
+        {
+          $set: {
+            squareDiagnostic: safe
+          }
+        },
+        {
+          session,
+          returnDocument: "after",
+          runValidators: true
+        }
+      )
+
+      if (!result) {
+        throw new Error(
+          "Diagnostic persistence rejected by ownership or state guard."
+        )
+      }
+
+      return Object.freeze({
+        saved: true,
+        diagnostic: safe
+      })
+    }
+  })
+}

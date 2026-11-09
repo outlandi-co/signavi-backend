@@ -36,6 +36,20 @@ const createCase = async ({ expired = false } = {}) => {
 
   assert.equal(result.success, true)
 
+    // Match the production recovery guard's required
+    // unpaid Sandbox order state. Isolated test fixture only.
+    await mongoose.connection.collection("orders").insertOne({
+      _id: id,
+      source: "store",
+      currency: "USD",
+      status: "payment_required",
+      paymentStatus: "unpaid",
+      squareEnvironment: "sandbox",
+      squareExpectedAmountCents: 5528,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    })
+
   if (expired) {
     const changed = await mongoose.connection
       .collection("smart_shipping_v3_checkout_locks")
@@ -73,6 +87,11 @@ const readState = async id => ({
 
 try {
   assert.ok(process.env.MONGO_URI, "MONGO_URI missing.")
+
+  if (!/^mongodb:\/\/(127\.0\.0\.1|localhost):/.test(process.env.MONGO_URI || "")) {
+    throw new Error("LOCAL_TEST_MONGODB_REQUIRED")
+  }
+
 
   await mongoose.connect(process.env.MONGO_URI, {
     dbName,
@@ -219,6 +238,9 @@ try {
     mongoose.connection.name === dbName
   ) {
     try {
+      await mongoose.connection.collection("orders").deleteMany({
+        _id: { $in: ids }
+      })
       await PaymentOperation.deleteMany({
         orderId: { $in: ids }
       })

@@ -1,5 +1,9 @@
 import mongoose from "mongoose"
 import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import Order from "../models/Order.js"
+import {
+  verifyV3ExpiredRecoveryEvidence
+} from "./verifyV3ExpiredRecoveryEvidence.js"
 import {
   runV3OwnedPaymentTransition
 } from "./smartShippingV3AtomicTransition.js"
@@ -89,6 +93,25 @@ export const recoverV3ExpiredUnstartedCheckout = async ({
         )
       }
 
+      // Verify order and payment evidence inside the
+      // same transaction as the owned-lock release.
+      const order = await Order.findById(id)
+        .session(session)
+
+      const evidence = verifyV3ExpiredRecoveryEvidence({
+        orderId: String(id),
+        owner,
+        now,
+        lock,
+        order,
+        operation
+      })
+
+      if (evidence.eligible !== true) {
+        throw new Error(
+          `V3 recovery blocked: ${evidence.reason}`
+        )
+      }
       // The ownership-fencing write in
       // runV3OwnedPaymentTransition protects against
       // concurrent payment-start and release changes.

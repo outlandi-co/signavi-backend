@@ -73,3 +73,67 @@ export const releaseV3CheckoutLock = async (lock) => {
 
   return result.deletedCount === 1
 }
+/* ===== ISOLATED V3 SANDBOX CHECKOUT LOCK ===== */
+
+const requireSandboxCheckoutLock = (CheckoutLock) => {
+  if (
+    !CheckoutLock ||
+    CheckoutLock.db === mongoose.connection ||
+    CheckoutLock.db?.readyState !== 1 ||
+    CheckoutLock.db?.db?.databaseName !==
+      "signavi_shipping_v3_dev"
+  ) {
+    throw new Error("V3_SANDBOX_CHECKOUT_LOCK_ISOLATION_REQUIRED");
+  }
+
+  return CheckoutLock;
+};
+
+export const acquireV3IsolatedCheckoutLock = async (
+  orderId,
+  { CheckoutLock } = {}
+) => {
+  const Model = requireSandboxCheckoutLock(CheckoutLock);
+  const id = String(orderId || "").toLowerCase();
+
+  if (!mongoose.isValidObjectId(id)) {
+    throw new Error("Invalid V3 sandbox checkout order ID.");
+  }
+
+  const owner = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + LOCK_MS);
+
+  try {
+    await Model.create({
+      _id: new mongoose.Types.ObjectId(id),
+      owner,
+      expiresAt
+    });
+
+    return { orderId: id, owner, expiresAt };
+  } catch (error) {
+    if (error?.code === 11000) {
+      return null;
+    }
+
+    throw error;
+  }
+};
+
+export const releaseV3IsolatedCheckoutLock = async (
+  lock,
+  { CheckoutLock } = {}
+) => {
+  const Model = requireSandboxCheckoutLock(CheckoutLock);
+
+  if (!lock?.orderId || !lock?.owner) {
+    return false;
+  }
+
+  const result = await Model.deleteOne({
+    _id: lock.orderId,
+    owner: lock.owner
+  });
+
+  return result.deletedCount === 1;
+};

@@ -1,3 +1,5 @@
+import { normalizeOrderItemCustomization } from "../utils/orderItemCustomization.js";
+import { resolveCheckoutStorefront } from "../utils/resolveCheckoutStorefront.js"
 
 import express from "express"
 import mongoose from "mongoose"
@@ -24,6 +26,13 @@ import { calculateCatalogCart } from "../utils/catalogPricing.js"
 import { requireAuth } from "../middleware/auth.js"
 import { sendOrderStatusEmail } from "../utils/sendEmail.js"
 import { generateInvoice } from "../utils/generateInvoice.js"
+import { createStudioRecoveryHttpHandler } from "../utils/createStudioRecoveryHttpHandler.mjs"
+import { sanitizeStorefrontOrderCreation } from "../utils/sanitizeStorefrontOrderCreation.mjs"
+import { checkStudioRecoveryThrottle } from "../utils/checkStudioRecoveryThrottle.mjs"
+import {
+  createStudioPaymentConfirmationHttpHandler
+} from "../utils/createStudioPaymentConfirmationHttpHandler.mjs"
+import { STOREFRONT_RECOVERY_COUNTER_COLLECTION } from "../utils/verifyStorefrontRecoveryCounterIndex.mjs"
 const router = express.Router()
 const TAX_RATE = 0.0825
 
@@ -750,6 +759,17 @@ router.get(
   }
 )
 
+/* ================= STUDIO PAYMENT CONFIRMATION ================= */
+
+// Read-only guest confirmation. Never returns the entire order.
+// This route is separate from authenticated GET /:id.
+router.get(
+  "/:id/studio-payment-confirmation",
+  createStudioPaymentConfirmationHttpHandler({
+    findOrder: id => Order.findById(id),
+    verifyGuestToken: verifyGuestCheckoutToken
+  })
+)
 /* ================= GET SINGLE ORDER ================= */
 
 router.get(
@@ -796,6 +816,63 @@ router.get(
 // verified yet. Do not deploy this intermediate
 // version until shipping and Square are integrated.
 
+// Studio checkout recovery is deliberately disabled.
+// Enable only after HTTP, database, and proxy security review.
+const STUDIO_RECOVERY_HTTP_ENABLED = false
+
+const studioRecoveryHandler = createStudioRecoveryHttpHandler({
+  checkThrottle: async ({ clientKey, attemptKey }) => {
+    const db = mongoose.connection.db
+
+    if (
+      mongoose.connection.readyState !== 1 ||
+      !db
+    ) {
+      return { allowed: false }
+    }
+
+    const collection = db.collection(
+      STOREFRONT_RECOVERY_COUNTER_COLLECTION
+    )
+
+    return checkStudioRecoveryThrottle({
+      collection,
+      clientKey,
+      attemptKey
+    })
+  },
+
+  findOrder: attemptKey =>
+    Order.findOne({
+      storefrontCreationAttemptKey: attemptKey,
+      storefront: "signavi_studio"
+    }).lean(),
+
+  issueGuestToken: order =>
+    createGuestCheckoutToken(order)
+})
+
+router.post(
+  "/storefront/recover",
+  (req, res, next) => {
+    if (!STUDIO_RECOVERY_HTTP_ENABLED) {
+      return res.status(404).json({
+        success: false,
+        message: "Not found."
+      })
+    }
+
+    if (getSmartShippingCheckoutVersion() !== "v3") {
+      return res.status(503).json({
+        success: false,
+        message: "Checkout recovery unavailable."
+      })
+    }
+
+    return next()
+  },
+  studioRecoveryHandler
+)
 router.post(
   "/",
   async (req, res) => {
@@ -803,6 +880,17 @@ router.post(
 
     try {
       const b = req.body || {}
+
+      let checkoutStorefront
+
+      try {
+        checkoutStorefront = resolveCheckoutStorefront(b)
+      } catch (channelError) {
+        return res.status(400).json({
+          success: false,
+          message: channelError.message
+        })
+      }
 
       if (getSmartShippingCheckoutVersion() === "v3") {
         // The index must already exist. Never create it here.
@@ -907,16 +995,13 @@ router.post(
         _id: {
           $in: [...new Set(productIds)]
         },
-        storefront: "signavi_store"
+        storefront: checkoutStorefront
       })
 
       let catalog
 
       try {
-        catalog = calculateCatalogCart(
-          products,
-          b.items
-        )
+        catalog = calculateCatalogCart(products, b.items, checkoutStorefront)
       } catch (pricingError) {
         return res.status(400).json({
           success: false,
@@ -927,7 +1012,23 @@ router.post(
       // All item prices and variant details below
       // were calculated using saved products.
 
-      const items = catalog.items.map((item) => ({
+
+      // Validate customer design data without trusting browser prices.
+      let orderCustomizations
+
+      try {
+        orderCustomizations = b.items.map((item) =>
+          normalizeOrderItemCustomization(item?.customization)
+        )
+      } catch (customizationError) {
+        return res.status(400).json({
+          success: false,
+          message: customizationError.message
+        })
+      }
+
+      const items = catalog.items.map((item, index) => ({
+        customization: orderCustomizations[index],
         productId: item.productId,
         name: item.name,
         quantity: item.quantity,
@@ -966,6 +1067,7 @@ router.post(
 
       const order = await Order.create({
         ...(storefrontCreationMetadata || {}),
+        storefront: checkoutStorefront,
         customerName:
           String(b.customerName || "Customer").trim(),
 
@@ -1023,7 +1125,7 @@ router.post(
 
       return res.status(201).json({
         success: true,
-        data: order,
+        data: sanitizeStorefrontOrderCreation(order),
         checkoutToken,
         checkoutVersion: getSmartShippingCheckoutVersion()
       })

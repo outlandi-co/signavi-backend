@@ -1,6 +1,13 @@
 import mongoose from "mongoose"
 
-import PaymentOperation from "../models/SmartShippingV3PaymentOperation.js"
+import {
+  getV3SandboxConnection
+} from "./v3SandboxDatabaseConnection.js"
+
+import {
+  getV3SandboxModels
+} from "./v3SandboxModels.js"
+
 import {
   assertV3PreclaimSquareReference
 } from "./smartShippingV3PreclaimReferenceGuard.js"
@@ -10,11 +17,11 @@ import {
 } from "./smartShippingV3TrustedSandboxSdk.js"
 
 import {
-  claimV3SquareCreationAttempt
+  claimV3IsolatedSquareCreationAttempt
 } from "./smartShippingV3ClaimCreationAttempt.js"
 
 import {
-  markV3PaymentCompleted
+  markV3IsolatedPaymentCompleted
 } from "./smartShippingV3PaymentState.js"
 
 import {
@@ -22,7 +29,7 @@ import {
 } from "./smartShippingV3ExecutionWorkflow.js"
 
 import {
-  persistV3SquareDiagnostic
+  persistV3IsolatedSquareDiagnostic
 } from "./smartShippingV3PersistSquareDiagnostic.js"
 
 // Internal server-only execution entry point.
@@ -57,12 +64,20 @@ const runTrustedExecution = async ({
     throw new Error("Invalid trusted V3 execution identity.")
   }
 
+  const connection = await getV3SandboxConnection()
+
   if (
-    mongoose.connection.readyState !== 1 ||
-    mongoose.connection.db?.databaseName !==
-      "signavi_shipping_v3_dev"
+    connection === mongoose.connection ||
+    connection.readyState !== 1 ||
+    connection.db?.databaseName !== "signavi_shipping_v3_dev"
   ) {
     throw new Error("V3 isolated development database required.")
+  }
+
+  const { PaymentOperation } = getV3SandboxModels(connection)
+
+  if (PaymentOperation.db !== connection) {
+    throw new Error("V3_SANDBOX_EXECUTOR_MODEL_MISMATCH")
   }
 
   const id = String(orderId).toLowerCase()
@@ -99,14 +114,14 @@ const runTrustedExecution = async ({
     owner,
     sdk,
 
-    claimAttempt: () => claimV3SquareCreationAttempt({
+    claimAttempt: () => claimV3IsolatedSquareCreationAttempt({
       orderId: id,
       owner,
       idempotencyKey: operation.idempotencyKey
     }),
 
     recordVerifiedLink: data =>
-      markV3PaymentCompleted({
+      markV3IsolatedPaymentCompleted({
         orderId: id,
         owner,
         amountCents: operation.amountCents,
@@ -124,7 +139,7 @@ const runTrustedExecution = async ({
     result?.diagnostic
   ) {
     try {
-      await persistV3SquareDiagnostic({
+      await persistV3IsolatedSquareDiagnostic({
         orderId: id,
         owner,
         diagnostic: result.diagnostic
