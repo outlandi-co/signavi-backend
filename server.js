@@ -40,7 +40,7 @@ import customerRoutes from "./routes/customers.js"
 
 import squareRoutes from "./routes/square.js"
 import squareWebhook from "./routes/squareWebhook.js"
-import shippingRoutes from "./routes/shipping.js"
+import shippingRoutes, { createConfiguredV3StorefrontShippingQuoteRouter } from "./routes/shipping.js"
 
 import adminEmailRoutes from "./routes/admin/adminEmailRoutes.js"
 import adminEmailThreadRoutes from "./routes/admin/adminEmailThreadRoutes.js"
@@ -124,6 +124,8 @@ const corsOptions = {
     "Content-Type",
     "Authorization",
     "x-signavi-guest-checkout-token",
+    "x-signavi-storefront-attempt-key",
+    "x-signavi-storefront-recovery-secret",
     "x-signavi-v3-sandbox-mode"
   ],
 
@@ -717,6 +719,16 @@ app.use(
   "/api/shipping",
   shippingRoutes
 )
+// V3 storefront shipping quotes require explicit activation.
+// This flag does not authorize Square payment execution.
+if (
+  process.env.ENABLE_V3_STOREFRONT_SHIPPING_QUOTES === "true"
+) {
+  app.use(
+    "/api/v3/shipping",
+    createConfiguredV3StorefrontShippingQuoteRouter()
+  )
+}
 
 app.use("/api/shipping-packages", shippingPackagesRoutes)
 

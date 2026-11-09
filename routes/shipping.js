@@ -1,3 +1,14 @@
+import { normalizeShippingPackageCatalog } from "../utils/normalizeShippingPackageCatalog.mjs"
+import { resolveCheckoutStorefront } from "../utils/resolveCheckoutStorefront.js"
+import { selectPreferredShippingPackage } from "../utils/selectPreferredShippingPackage.mjs"
+import ShippingPackage from "../models/ShippingPackage.js"
+import { isDimensionRateEligible } from "../utils/isDimensionRateEligible.mjs"
+import ShippingProductPackageProfile from "../models/ShippingProductPackageProfile.js"
+import { buildVerifiedSavedPackageParcels } from "../utils/buildVerifiedSavedPackageParcels.mjs"
+import { loadActiveShippingPackages } from "../utils/loadActiveShippingPackages.mjs"
+import OrderV3StorefrontShipping from "../models/Order.js"
+import { createV3StorefrontShippingQuoteRouter } from "./v3StorefrontShippingQuote.js"
+import { createV3StorefrontTrustedShipments } from "../utils/createV3StorefrontTrustedShipments.js"
 
 import express from "express"
 import axios from "axios"
@@ -96,8 +107,8 @@ const getDestination = (input) => {
 const getShippoKey = () =>
   String(process.env.SHIPPO_API_KEY || "").trim()
 
-/* ================= SHIPPO REQUEST ================= */
 
+/* ================= SHIPPO REQUEST ================= */
 
 const requestShippoRates = async ({
   from,
@@ -121,6 +132,23 @@ const requestShippoRates = async ({
 
   if (carrierAccounts.length > 0) {
     shipmentData.carrier_accounts = carrierAccounts
+  }
+
+  // Development-only diagnostic.
+  // Never log addresses, customer data, or API credentials.
+  if (process.env.NODE_ENV !== "production") {
+    console.log("SHIPPO PARCEL REQUEST:", {
+      parcelCount: parcels.length,
+      parcels: parcels.map((parcel) => ({
+        length: parcel.length,
+        width: parcel.width,
+        height: parcel.height,
+        weight: parcel.weight,
+        distance_unit: parcel.distance_unit,
+        mass_unit: parcel.mass_unit
+      })),
+      testMode: token.startsWith("shippo_test_")
+    })
   }
 
   const response = await axios.post(
@@ -376,6 +404,13 @@ const choosePackage = (
   ])
 
   const compatiblePackages = packages.filter((box) => {
+    // STUDIO_058H27_DIMENSION_RATE_GUARD
+    // Carrier-template packaging must never receive an
+    // ordinary dimension-based rate.
+    if (!isDimensionRateEligible(box)) {
+      return false
+    }
+
     if (specializedTypes.has(preferredType)) {
       return box.type === preferredType
     }
@@ -428,13 +463,18 @@ const choosePackage = (
       a.volume - b.volume
   )
 
-  return candidates[0] || null
+  return selectPreferredShippingPackage({
+    candidates,
+    packages,
+    productShipping,
+    quantity
+  })
 }
 
 
 /* ================= BUILD CART PARCELS ================= */
 
-const makeCartParcels = async (items, packages) => {
+export const makeCartParcels = async (items, packages, storefront = "signavi_store") => {
   if (
     !Array.isArray(items) ||
     items.length < 1 ||
@@ -442,6 +482,12 @@ const makeCartParcels = async (items, packages) => {
   ) {
     return {
       error: "Provide 1 to 50 cart items."
+    }
+  }
+
+  if (!["signavi_store", "signavi_studio"].includes(storefront)) {
+    return {
+      error: "Invalid shipping storefront."
     }
   }
 
@@ -461,7 +507,7 @@ const makeCartParcels = async (items, packages) => {
     ) {
       return {
         error:
-          "Each cart item needs a valid productId and integer quantity (1–200)."
+          "Each cart item needs a valid productId and integer quantity (1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“200)."
       }
     }
 
@@ -488,10 +534,11 @@ const makeCartParcels = async (items, packages) => {
   const products = await Product.find({
     _id: {
       $in: [...quantityById.keys()]
-    }
+    },
+    storefront
   })
     .select(
-      "_id productType shipping active storefrontVisible"
+      "_id productType shipping active storefrontVisible storefront"
     )
     .lean()
 
@@ -503,6 +550,10 @@ const makeCartParcels = async (items, packages) => {
   }
 
   const parcels = []
+
+  // STUDIO_058H40_TRUSTED_PARCEL_ENTRIES
+  // Internal only; never pass this array directly to Shippo.
+  const parcelEntries = []
 
   for (const product of products) {
     if (
@@ -523,9 +574,147 @@ const makeCartParcels = async (items, packages) => {
       continue
     }
 
+
+    // SIGNAVI_SHIPPING_059_STUDIO_SANDBOX_ONLY
+    // Only modifies the product object returned by the read-only
+    // database query. Nothing is saved to MongoDB.
+    const studioSandboxMeasurements =
+      process.env.NODE_ENV === "development" &&
+      process.env.SHIPPO_CUSTOMER_RATE_MODE === "test" &&
+      process.env.SIGNAVI_DEV_SHIPPING_PACKAGES === "true" &&
+      storefront === "signavi_studio" &&
+      String(product._id) === "6ad12bb31032fce6ba5995a8"
+
+    if (studioSandboxMeasurements) {
+      const shipping = product.shipping || {}
+
+      const missingMeasurements = [
+        shipping.weightOz,
+        shipping.lengthIn,
+        shipping.widthIn,
+        shipping.heightIn
+      ].some(value => !Number.isFinite(Number(value)) ||
+                       Number(value) <= 0)
+
+      if (missingMeasurements) {
+        product.shipping = {
+          ...shipping,
+          mode: "product_measurements",
+          weightOz: 6,
+          lengthIn: 12,
+          widthIn: 10,
+          heightIn: 0.75,
+          packagingType: "mailer",
+          shipSeparately: true
+        }
+
+        console.log(
+          "DEV SHIPPING: sandbox measurements applied to Black T Shirt"
+        )
+      }
+    }
+
     const quantity = quantityById.get(
       String(product._id)
     )
+
+    // STUDIO_058H21_VERIFIED_SAVED_PACKAGE
+    // Saved packaging uses fulfillment-verified product/package
+    // information, not measurements copied from the editor.
+    if (product.shipping?.mode === "saved_package") {
+      const selectedPackageId = String(
+        product.shipping.packageId ?? ""
+      )
+
+      if (!/^[a-f0-9]{24}$/i.test(selectedPackageId)) {
+        return {
+          error: "Select a valid saved shipping package."
+        }
+      }
+
+      const selectedPackage = packages.find(
+        (box) =>
+          String(box.id).toLowerCase() ===
+          selectedPackageId.toLowerCase()
+      )
+
+      if (!selectedPackage) {
+        return {
+          error: "Selected shipping package is unavailable."
+        }
+      }
+
+      if (
+        selectedPackage.type !== product.shipping.packagingType
+      ) {
+        return {
+          error: "Saved shipping package type no longer matches the product."
+        }
+      }
+
+      // Shippo's carrier-specific parcel template and eligible
+      // rate filtering must be integrated before quoting USPS
+      // Flat Rate. Never substitute ordinary box rates.
+      if (selectedPackage.uspsFlatRate === true) {
+        return {
+          error:
+            "USPS Flat Rate checkout requires verified carrier-template integration. Contact the store."
+        }
+      }
+
+      if (!isDimensionRateEligible(selectedPackage)) {
+        return {
+          error:
+            "Carrier-specific saved packaging requires verified rate integration. Contact the store."
+        }
+      }
+
+      // Retrieve trusted profile data. Never accept it from
+      // the customer's request body.
+      const profiles = await ShippingProductPackageProfile.find({
+        productId: product._id,
+        packageId: selectedPackageId,
+        active: true
+      })
+        .select(
+          "productId packageId unitWeightOz verifiedCapacity verifiedBy verifiedAt verificationNotes active"
+        )
+        .lean()
+
+      const verified = buildVerifiedSavedPackageParcels({
+        productId: String(product._id),
+        selectedPackageId,
+        quantity,
+        packages,
+        profiles,
+        shipSeparately: product.shipping.shipSeparately === true
+      })
+
+      if (verified.error) {
+        return { error: verified.error }
+      }
+
+      if (
+        !Array.isArray(verified.parcels) ||
+        verified.parcels.length < 1 ||
+        parcels.length + verified.parcels.length > 10
+      ) {
+        return {
+          error:
+            "This order requires more than 10 packages or has incomplete shipping information."
+        }
+      }
+
+      for (const parcel of verified.parcels) {
+        parcels.push(parcel)
+        parcelEntries.push({
+          parcel,
+          packaging: selectedPackage
+        })
+      }
+
+      continue
+    }
 
     const selection = choosePackage(
       product.shipping || {},
@@ -562,13 +751,19 @@ const makeCartParcels = async (items, packages) => {
         }
       }
 
-      parcels.push({
+      const parcel = {
         length: String(box.length),
         width: String(box.width),
         height: String(box.height),
         distance_unit: "in",
         weight: String(weight),
         mass_unit: "oz"
+      }
+
+      parcels.push(parcel)
+      parcelEntries.push({
+        parcel,
+        packaging: box
       })
 
       if (parcels.length > 10) {
@@ -582,13 +777,39 @@ const makeCartParcels = async (items, packages) => {
     }
   }
 
-  return { parcels }
+  if (
+    parcelEntries.length !== parcels.length ||
+    parcelEntries.some((entry, index) =>
+      entry.parcel !== parcels[index] ||
+      !entry.packaging ||
+      !/^[a-f0-9]{24}$/i.test(
+        String(entry.packaging.id ?? "")
+      )
+    )
+  ) {
+    return {
+      error: "Trusted shipping package identity is unavailable."
+    }
+  }
+
+  return { parcels, parcelEntries }
 }
 
 /* ================= CUSTOMER SHIPPING RATES ================= */
 
 router.post("/get-rates", async (req, res) => {
   try {
+    let checkoutStorefront
+
+    try {
+      checkoutStorefront = resolveCheckoutStorefront(req.body)
+    } catch (channelError) {
+      return res.status(400).json({
+        success: false,
+        message: channelError.message
+      })
+    }
+
     const to = getDestination(
       req.body?.address_to
     )
@@ -599,11 +820,76 @@ router.post("/get-rates", async (req, res) => {
       })
     }
 
-    const packages = getPackages()
-    const from = getShipFrom()
-    const token = getShippoKey()
+    let packages = await loadActiveShippingPackages(ShippingPackage)
 
-    if (!packages || !from || !token) {
+    const developmentPackageFallback =
+      process.env.NODE_ENV === "development" &&
+      process.env.SHIPPO_CUSTOMER_RATE_MODE === "test" &&
+      process.env.SIGNAVI_DEV_SHIPPING_PACKAGES === "true"
+
+    if (
+      developmentPackageFallback &&
+      (!Array.isArray(packages) || packages.length === 0)
+    ) {
+      packages = normalizeShippingPackageCatalog([
+        {
+          _id: "000000000000000000000001",
+          id: "000000000000000000000001",
+          name: "Development Poly Mailer",
+          carrier: "Generic",
+          type: "mailer",
+          lengthIn: 14,
+          widthIn: 10,
+          heightIn: 2,
+          tareWeightOz: 1,
+          maxWeightOz: 64,
+          clearanceIn: 0,
+          uspsFlatRate: false,
+          shippoParcelTemplate: "",
+          verifiedShirtCapacity: null,
+          active: true
+        },
+        {
+          _id: "000000000000000000000002",
+          id: "000000000000000000000002",
+          name: "Development Shipping Box",
+          carrier: "Generic",
+          type: "box",
+          lengthIn: 12,
+          widthIn: 10,
+          heightIn: 4,
+          tareWeightOz: 8,
+          maxWeightOz: 320,
+          clearanceIn: 0,
+          uspsFlatRate: false,
+          shippoParcelTemplate: "",
+          verifiedShirtCapacity: null,
+          active: true
+        }
+      ])
+
+      console.log("DEV SHIPPING: provisional packages enabled")
+    }
+    const from = getShipFrom()
+
+    // Use a Shippo test key for local customer rate requests.
+    // Preserve existing live-key behavior in other shipping endpoints.
+    const useTestRates =
+      process.env.NODE_ENV !== "production" &&
+      process.env.SHIPPO_CUSTOMER_RATE_MODE === "test"
+
+    const token = useTestRates
+      ? String(process.env.SHIPPO_TEST_API_KEY || "").trim()
+      : getShippoKey()
+
+    if (useTestRates && !token.startsWith("shippo_test_")) {
+      return res.status(503).json({
+        success: false,
+        message: "Shippo test-rate credentials are not configured."
+      })
+    }
+
+    if (!Array.isArray(packages) || packages.length === 0 || !from || !token) {
       return res.status(503).json({
         message:
           "Cart shipping is not configured. Please contact the store."
@@ -615,7 +901,8 @@ router.post("/get-rates", async (req, res) => {
 
     const result = await makeCartParcels(
       req.body?.items,
-      packages
+      packages,
+      checkoutStorefront
     )
 
     if (result.error) {
@@ -639,6 +926,42 @@ router.post("/get-rates", async (req, res) => {
       const shipment = await requestShippoRates({
         from, to, parcels: result.parcels, token
       })
+      console.log("CART SHIPPO RATE DIAGNOSTIC:", {
+        rawRateCount: Array.isArray(shipment.rates)
+          ? shipment.rates.length
+          : 0,
+        acceptedRateCount: Array.isArray(shipment.rates)
+          ? shipment.rates.filter(validUsdRate).length
+          : 0,
+        messageCount: Array.isArray(shipment.messages)
+          ? shipment.messages.length
+          : 0,
+        messageCategories: Array.isArray(shipment.messages)
+          ? shipment.messages.map((message) => {
+              const source = String(message?.source || "").toLowerCase();
+              const code = String(message?.code || "").toLowerCase();
+
+              if (source.includes("carrier")) return "carrier";
+              if (source.includes("shippo")) return "shippo";
+              if (source.includes("address")) return "address";
+              if (source.includes("parcel")) return "parcel";
+              if (code.includes("address")) return "address";
+              if (code.includes("parcel")) return "parcel";
+              if (code.includes("carrier")) return "carrier";
+
+              return "unspecified";
+            }).slice(0, 10)
+          : [],
+        messageCodes: Array.isArray(shipment.messages)
+  ? shipment.messages.slice(0, 10).map((message) => ({
+      code: String(message?.code || "").slice(0, 80),
+      source: String(message?.source || "").slice(0, 80)
+    }))
+  : [],
+        parcelCount: result.parcels.length,
+        testMode
+      })
+
       return res.json({
         success: true,
         rates: (shipment.rates || [])
@@ -701,7 +1024,7 @@ router.post("/get-rates", async (req, res) => {
 })
 
 /* =========================================================
-   ADMIN SHIPPING CALCULATOR — TEST MODE ONLY
+   ADMIN SHIPPING CALCULATOR ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â TEST MODE ONLY
 
    Allows administrator to quote manually packed parcels.
    Does not automatically package cart items.
@@ -911,4 +1234,38 @@ router.post(
   }
 )
 
+// Constructed only when explicitly requested by server registration.
+// This factory does not activate any HTTP endpoint.
+export const createConfiguredV3StorefrontShippingQuoteRouter = () => {
+  const getCustomerToken = () => {
+    const useTestRates =
+      process.env.NODE_ENV !== "production" &&
+      process.env.SHIPPO_CUSTOMER_RATE_MODE === "test"
+
+    const token = useTestRates
+      ? String(process.env.SHIPPO_TEST_API_KEY || "").trim()
+      : getShippoKey()
+
+    if (useTestRates && !token.startsWith("shippo_test_")) {
+      return ""
+    }
+
+    return token
+  }
+
+  const getTrustedShipments = createV3StorefrontTrustedShipments({
+    buildParcels: makeCartParcels,
+    requestRates: requestShippoRates,
+    getPackages: () =>
+      loadActiveShippingPackages(ShippingPackage),
+    getShipFrom,
+    getDestination,
+    getToken: getCustomerToken
+  })
+
+  return createV3StorefrontShippingQuoteRouter({
+    findOrder: id => OrderV3StorefrontShipping.findById(id),
+    getTrustedShipments
+  })
+}
 export default router

@@ -71,7 +71,7 @@ try {
 
   await assert.rejects(
     run(),
-    /isolated development database required/
+    /(?:V3_SANDBOX_DATABASE_NOT_CONFIGURED|isolated development database required)/
   )
   console.log("UNCONNECTED DATABASE BLOCKED: PASS")
 

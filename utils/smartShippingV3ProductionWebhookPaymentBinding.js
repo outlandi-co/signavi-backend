@@ -66,7 +66,12 @@ export const verifyV3ProductionWebhookPaymentBinding = ({
     id !== opId ||
     order?.squareEnvironment !== "production" ||
     operation?.environment !== "production" ||
-    operation?.status !== "completed" ||
+    !(
+      (firstPayment &&
+        operation?.status === "reconciliation_required") ||
+      (exactPaidReplay &&
+        operation?.status === "completed")
+    ) ||
     String(order?.currency ?? "").toUpperCase() !== "USD" ||
     !string(operation?.requestOwner) ||
     !string(operation?.idempotencyKey).startsWith("signavi-v3-production-") ||

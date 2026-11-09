@@ -2,6 +2,8 @@ import {
   fingerprintStorefrontOrder
 } from "./storefrontOrderIdempotency.mjs"
 
+import { resolveCheckoutStorefront } from "./resolveCheckoutStorefront.js"
+
 const PRODUCT_ID = /^[a-f0-9]{24}$/i
 
 const clean = value => String(value ?? "").trim()
@@ -45,6 +47,8 @@ export function projectPreCatalogStorefrontOrder(request) {
   ) {
     throw new Error("Invalid shipping address.")
   }
+
+  const storefront = resolveCheckoutStorefront(request)
 
   const items = request.items.map(item => {
     if (
@@ -98,11 +102,23 @@ export function projectPreCatalogStorefrontOrder(request) {
       selectedVariant = { color, size }
     }
 
-    return {
+    const identity = {
       productId,
       quantity,
       selectedVariant
     }
+
+    // Preserve the exact legacy Store fingerprint.
+    // Studio gets a channel-specific, design-aware identity.
+    if (storefront === "signavi_studio") {
+      return {
+        ...identity,
+        storefront,
+        customization: item.customization ?? null
+      }
+    }
+
+    return identity
   })
 
   return {

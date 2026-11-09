@@ -1,5 +1,5 @@
 {
-  "watch": ["server.js", "routes", "models"],
+  "watch": ["server.js", "routes", "models", "utils"],
   "ignore": ["uploads", "uploads/*", "*.log", "node_modules"],
   "ext": "js,json",
   "exec": "node server.js",
