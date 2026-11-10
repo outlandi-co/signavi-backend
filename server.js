@@ -24,6 +24,7 @@ import supplierRoutes from "./routes/supplierRoutes.js"
 import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js"
 import estimateRoutes from "./routes/estimateRoutes.js"
 
+import { connectStudioDatabase } from "./config/studioDatabase.js";
 import productRoutes from "./routes/products.js"
 import { requireAuth } from "./middleware/auth.js"
 import orderRoutes from "./routes/orders.js"
@@ -942,7 +943,15 @@ mongoose
   .connect(
     process.env.MONGO_URI
   )
-  .then(() => {
+  .then(async () => {
+
+    // Signavi Studio isolation rollout.
+    // Disabled unless explicitly enabled by configuration.
+    // Do not enable before Studio model and route isolation is verified.
+    if (process.env.STUDIO_DATABASE_ENABLED === "true") {
+      await connectStudioDatabase();
+      console.log("Dedicated Signavi Studio database connected");
+    }
     console.log(
       "Ã¢Å“â€¦ Mongo connected"
     )

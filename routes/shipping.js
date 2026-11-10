@@ -1,3 +1,5 @@
+import { resolveProductCatalogModel } from "../services/resolveProductCatalogModel.js";
+import { getProductModelForChannel } from "../models/productModelSelection.js";
 import { normalizeShippingPackageCatalog } from "../utils/normalizeShippingPackageCatalog.mjs"
 import { resolveCheckoutStorefront } from "../utils/resolveCheckoutStorefront.js"
 import { selectPreferredShippingPackage } from "../utils/selectPreferredShippingPackage.mjs"
@@ -531,7 +533,12 @@ export const makeCartParcels = async (items, packages, storefront = "signavi_sto
   // Look up trusted measurements in MongoDB.
   // Do not trust weights or dimensions submitted by the browser.
 
-  const products = await Product.find({
+  const CatalogProduct = resolveProductCatalogModel(storefront, {
+    legacyModel: Product,
+    isolatedModelResolver: getProductModelForChannel
+  });
+
+  const products = await CatalogProduct.find({
     _id: {
       $in: [...quantityById.keys()]
     },

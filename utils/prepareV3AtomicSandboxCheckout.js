@@ -1,4 +1,8 @@
 import crypto from "node:crypto"
+
+import {
+  runV3CrossDatabaseCheckoutTransition
+} from "./runV3CrossDatabaseCheckoutTransition.js"
 import mongoose from "mongoose"
 
 import Order from "../models/Order.js"
@@ -39,7 +43,9 @@ export const prepareV3AtomicSandboxCheckout = async ({
   lock,
   guestToken,
   signedQuote,
-  simulateFailureAfterOrderSave = false
+  simulateFailureAfterOrderSave = false,
+  storefrontConnection,
+  sandboxConnection
 } = {}) => {
   const enabled =
     ["development", "test"].includes(process.env.NODE_ENV) &&
@@ -66,16 +72,63 @@ export const prepareV3AtomicSandboxCheckout = async ({
     throw new Error("Invalid durable V3 checkout inputs.")
   }
 
+  const crossMode =
+    storefrontConnection != null ||
+    sandboxConnection != null
+
+  if (crossMode && (
+    process.env.NODE_ENV !== "test" ||
+    process.env.SMART_SHIPPING_V3_CROSS_DATABASE_TEST_ENABLED !== "true" ||
+    !storefrontConnection ||
+    !sandboxConnection
+  )) {
+    throw new Error("V3_CROSS_DATABASE_TEST_NOT_AUTHORIZED")
+  }
+
   const orderId = String(lock.orderId).toLowerCase()
   const orderObjectId = new mongoose.Types.ObjectId(orderId)
   const purchaseKey = `order:${orderId}`
 
-  return runV3OwnedPaymentTransition({
-    orderId,
-    owner: lock.owner,
+  const execute = async (session, models) => {
+    const {
+      StoreOrder,
+      StoreSharedReservation,
+      SandboxPaymentOperation,
+      SandboxOwnership,
+      SandboxAssociation,
+      SandboxSharedReservation
+    } = models
 
-    transition: async session => {
-      const order = await Order.findById(orderObjectId)
+    if (crossMode) {
+      const heldLock = await sandboxConnection
+        .collection("smart_shipping_v3_checkout_locks")
+        .findOne({
+          _id: orderObjectId,
+          owner: lock.owner,
+          expiresAt: { $gt: new Date() }
+        }, { session })
+
+      if (!heldLock) {
+        throw new Error("V3_SANDBOX_CHECKOUT_LOCK_NOT_VERIFIED")
+      }
+
+      const storeOperation = await storefrontConnection
+        .collection(PaymentOperation.collection.name)
+        .findOne({ orderId: orderObjectId }, { session })
+
+      if (storeOperation) {
+        throw new Error("Existing Store payment operation requires review.")
+      }
+
+      const storeAssociation = await storefrontConnection
+        .collection(Association.collection.name)
+        .findOne({ orderId: orderObjectId }, { session })
+
+      if (storeAssociation) {
+        throw new Error("Existing Store invoice association requires review.")
+      }
+    }
+      const order = await StoreOrder.findById(orderObjectId)
         .session(session)
 
       const prepared = prepareV3CheckoutPayment({
@@ -103,7 +156,7 @@ export const prepareV3AtomicSandboxCheckout = async ({
       }
 
       // Existing payment evidence always blocks new ownership.
-      const existingOperation = await PaymentOperation.findOne({
+      const existingOperation = await SandboxPaymentOperation.findOne({
         orderId: orderObjectId
       }).session(session).lean()
 
@@ -111,17 +164,33 @@ export const prepareV3AtomicSandboxCheckout = async ({
         throw new Error("Existing payment operation requires review.")
       }
 
-      const existingReservation = await PaymentReservation.findOne({
+      const reservationFilter = {
         documentType: "order",
         documentId: orderObjectId,
-        environment: "sandbox"
-      }).session(session).lean()
+        ...(crossMode ? {} : { environment: "sandbox" })
+      }
 
-      if (existingReservation) {
+      const existingStoreReservation =
+        await StoreSharedReservation.findOne(reservationFilter)
+          .session(session).lean()
+
+      if (existingStoreReservation) {
         throw new Error("Existing payment reservation requires review.")
       }
 
-      const existingAssociation = await Association.findOne({
+      if (crossMode) {
+        const existingSandboxReservation =
+          await SandboxSharedReservation.findOne(reservationFilter)
+            .session(session).lean()
+
+        if (existingSandboxReservation) {
+          throw new Error(
+            "Existing Sandbox payment reservation requires review."
+          )
+        }
+      }
+
+      const existingAssociation = await SandboxAssociation.findOne({
         environment: "sandbox",
         orderId: orderObjectId
       }).session(session).lean()
@@ -131,7 +200,7 @@ export const prepareV3AtomicSandboxCheckout = async ({
           "Existing durable invoice/order association requires review."
         )
       }
-      const existingOwnership = await Ownership.findOne({
+      const existingOwnership = await SandboxOwnership.findOne({
         environment: "sandbox",
         purchaseKey
       }).session(session).lean()
@@ -142,7 +211,7 @@ export const prepareV3AtomicSandboxCheckout = async ({
 
       // The unique purchase key provides durable ownership.
       // All subsequent writes use this same transaction session.
-      const ownership = await Ownership.create([{
+      const ownership = await SandboxOwnership.create([{
         environment: "sandbox",
         purchaseKey,
         claimedByDocumentType: "order",
@@ -150,7 +219,7 @@ export const prepareV3AtomicSandboxCheckout = async ({
         status: "reconciliation_required"
       }], { session })
 
-      const operations = await PaymentOperation.create([{
+      const operations = await SandboxPaymentOperation.create([{
         orderId: orderObjectId,
         checkoutReferenceId:
           createV3SquareSafeCheckoutReference({ orderId }),
@@ -183,8 +252,11 @@ export const prepareV3AtomicSandboxCheckout = async ({
       if (simulateFailureAfterOrderSave === true) {
         if (
           process.env.NODE_ENV !== "test" ||
-          mongoose.connection.db?.databaseName !==
-            "signavi_reservation_isolated_test"
+          (
+            !crossMode &&
+            mongoose.connection.db?.databaseName !==
+              "signavi_reservation_isolated_test"
+          )
         ) {
           throw new Error("Failure injection unavailable.")
         }
@@ -192,7 +264,7 @@ export const prepareV3AtomicSandboxCheckout = async ({
         throw new Error("SIMULATED_DURABLE_ORDER_SAVE_FAILURE")
       }
 
-      const storedOrder = await Order.findById(orderObjectId)
+      const storedOrder = await StoreOrder.findById(orderObjectId)
         .session(session)
 
       if (
@@ -204,7 +276,7 @@ export const prepareV3AtomicSandboxCheckout = async ({
         throw new Error("V3 stored order verification failed.")
       }
 
-      const operationCheck = await PaymentOperation.updateOne(
+      const operationCheck = await SandboxPaymentOperation.updateOne(
         {
           _id: operation._id,
           orderId: orderObjectId,
@@ -239,6 +311,26 @@ export const prepareV3AtomicSandboxCheckout = async ({
         squareRequestAuthorized: false,
         paymentCreated: false
       })
-    }
+  }
+
+  if (crossMode) {
+    return runV3CrossDatabaseCheckoutTransition({
+      storefrontConnection,
+      sandboxConnection,
+      transition: ({ session, models }) => execute(session, models)
+    })
+  }
+
+  return runV3OwnedPaymentTransition({
+    orderId,
+    owner: lock.owner,
+    transition: session => execute(session, {
+      StoreOrder: Order,
+      StoreSharedReservation: PaymentReservation,
+      SandboxPaymentOperation: PaymentOperation,
+      SandboxOwnership: Ownership,
+      SandboxAssociation: Association,
+      SandboxSharedReservation: PaymentReservation
+    })
   })
 }

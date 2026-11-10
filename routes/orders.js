@@ -1,3 +1,5 @@
+import { resolveProductCatalogModel } from "../services/resolveProductCatalogModel.js";
+import { getProductModelForChannel } from "../models/productModelSelection.js";
 import { normalizeOrderItemCustomization } from "../utils/orderItemCustomization.js";
 import { resolveCheckoutStorefront } from "../utils/resolveCheckoutStorefront.js"
 
@@ -991,7 +993,12 @@ router.post(
         })
       }
 
-      const products = await Product.find({
+      const CatalogProduct = resolveProductCatalogModel(checkoutStorefront, {
+    legacyModel: Product,
+    isolatedModelResolver: getProductModelForChannel
+  });
+
+  const products = await CatalogProduct.find({
         _id: {
           $in: [...new Set(productIds)]
         },
@@ -1487,6 +1494,124 @@ router.patch(
           req.get("x-signavi-v3-sandbox-mode") === "prepare"
 
         if (sandboxHttpEnabled) {
+          // Explicit internal test path, never a public checkout mode.
+          const durableHttpTestEnabled =
+            process.env.NODE_ENV === "test" &&
+            process.env.SQUARE_ENVIRONMENT === "sandbox" &&
+            process.env.SMART_SHIPPING_V3_DURABLE_PREPARE_ENABLED === "true" &&
+            process.env.SMART_SHIPPING_V3_CROSS_DATABASE_TEST_ENABLED === "true" &&
+            process.env.SMART_SHIPPING_V3_DURABLE_HTTP_TEST_ENABLED === "true" &&
+            req.get("x-signavi-v3-sandbox-durable") === "prepare"
+
+          if (durableHttpTestEnabled) {
+            const { default: mongoose } = await import("mongoose")
+
+            // Only permit local, explicitly isolated test databases.
+            const localTestDatabase =
+              !process.env.MONGO_URI &&
+              mongoose.connection.db?.databaseName === "signavi_store" &&
+              ["127.0.0.1", "localhost", "::1"].includes(
+                mongoose.connection.host
+              )
+
+            if (!localTestDatabase || order?.source !== "store") {
+              return res.status(423).json({
+                success: false,
+                code: "V3_DURABLE_HTTP_TEST_ISOLATION_REQUIRED",
+                paymentCreated: false,
+                squareRequestAuthorized: false
+              })
+            }
+
+            const {
+              acquireV3IsolatedCheckoutLock,
+              releaseV3IsolatedCheckoutLock
+            } = await import("../utils/smartShippingV3CheckoutLock.js")
+
+            const {
+              prepareV3AtomicSandboxCheckout
+            } = await import("../utils/prepareV3AtomicSandboxCheckout.js")
+
+            const sandboxConnection = mongoose.connection.useDb(
+              "signavi_shipping_v3_dev",
+              { useCache: true }
+            )
+
+            const CheckoutLock =
+              sandboxConnection.models.SmartShippingV3CheckoutLock ||
+              sandboxConnection.model(
+                "SmartShippingV3CheckoutLock",
+                new mongoose.Schema({
+                  _id: mongoose.Schema.Types.ObjectId,
+                  owner: { type: String, required: true },
+                  expiresAt: { type: Date, required: true }
+                }, {
+                  collection: "smart_shipping_v3_checkout_locks",
+                  versionKey: false
+                })
+              )
+
+            const lock = await acquireV3IsolatedCheckoutLock(
+              prepared.orderId,
+              { CheckoutLock }
+            )
+
+            if (!lock) {
+              return res.status(409).json({
+                success: false,
+                code: "V3_SANDBOX_CHECKOUT_ALREADY_LOCKED",
+                paymentCreated: false,
+                squareRequestAuthorized: false
+              })
+            }
+
+            try {
+              const durable = await prepareV3AtomicSandboxCheckout({
+                lock,
+                guestToken: req.get("x-signavi-guest-checkout-token"),
+                signedQuote: req.body?.v3ShippingQuote,
+                storefrontConnection: mongoose.connection,
+                sandboxConnection
+              })
+
+              if (
+                !durable?.success ||
+                durable.paymentCreated !== false ||
+                durable.squareRequestAuthorized !== false
+              ) {
+                throw new Error("V3_DURABLE_HTTP_RESULT_REJECTED")
+              }
+
+              return res.status(202).json({
+                success: true,
+                code: "V3_SANDBOX_DURABLE_HTTP_TEST_ONLY",
+                orderId: durable.orderId,
+                paymentOperationId: durable.paymentOperationId,
+                totalCents: durable.amountCents,
+                shippingAmountCents: durable.shippingAmountCents,
+                paymentCreated: false,
+                squareRequestAuthorized: false
+              })
+            } catch (error) {
+              console.error(
+                "V3 isolated durable HTTP preparation rejected:",
+                error?.message
+              )
+
+              return res.status(409).json({
+                success: false,
+                code: "V3_DURABLE_HTTP_PREPARATION_REJECTED",
+                paymentCreated: false,
+                squareRequestAuthorized: false
+              })
+            } finally {
+              await releaseV3IsolatedCheckoutLock(
+                lock,
+                { CheckoutLock }
+              )
+            }
+          }
+
           // Development preview only. Validation has already
           // completed; do not reserve payment operations or
           // acquire checkout locks without Square execution.
@@ -1655,4 +1780,115 @@ router.post(
   }
 )
 
+// V3 TEST-ONLY RECORDED LINK RELEASE
+// Never enable this endpoint for production traffic.
+// Square creation is not permitted here.
+router.get(
+  "/v3-test-only/:orderId/recorded-link",
+  async (req, res) => {
+    const reject = (status, code) =>
+      res.status(status).json({
+        success: false,
+        code,
+        paymentUrl: null
+      });
+
+    if (
+      process.env.NODE_ENV !== "test" ||
+      process.env.SQUARE_ENVIRONMENT !== "sandbox" ||
+      process.env.SMART_SHIPPING_V3_CROSS_DATABASE_TEST_ENABLED !== "true" ||
+      process.env.SMART_SHIPPING_V3_HTTP_LINK_RELEASE_TEST_ENABLED !== "true" ||
+      process.env.SMART_SHIPPING_V3_SQUARE_CREATE_ENABLED !== "false"
+    ) {
+      return reject(423, "V3_LINK_RELEASE_DISABLED");
+    }
+
+    const localTestDatabase =
+      mongoose.connection.readyState === 1 &&
+      mongoose.connection.db?.databaseName === "signavi_store" &&
+      ["127.0.0.1", "localhost", "::1"].includes(
+        mongoose.connection.host
+      );
+
+    if (!localTestDatabase) {
+      return reject(423, "V3_TEST_DATABASE_REQUIRED");
+    }
+
+    // Injected by trusted in-process acceptance tests only.
+    // Never populate these adapters from HTTP request data.
+    const readers =
+      req.app.locals?.v3SandboxLinkReleaseTestReaders;
+
+    if (
+      typeof readers?.readSquareLink !== "function" ||
+      typeof readers?.readSquareOrder !== "function" ||
+      typeof readers?.expectedLocationId !== "string" ||
+      !readers.expectedLocationId.trim()
+    ) {
+      return reject(423, "V3_TRUSTED_TEST_READERS_REQUIRED");
+    }
+
+    try {
+      const [
+        { createV3CrossDatabaseCheckoutModels },
+        { createV3TestOnlyLinkReleaseHandler }
+      ] = await Promise.all([
+        import("../utils/createV3CrossDatabaseCheckoutModels.js"),
+        import("../utils/createV3TestOnlyLinkReleaseHandler.js")
+      ]);
+
+      const sandboxConnection = mongoose.connection.useDb(
+        "signavi_shipping_v3_dev",
+        { useCache: true }
+      );
+
+      const models = createV3CrossDatabaseCheckoutModels({
+        storefrontConnection: mongoose.connection,
+        sandboxConnection
+      });
+
+      const handler = createV3TestOnlyLinkReleaseHandler({
+        authenticateGuest: async ({ req, order }) => {
+          if (order?.source !== "store") return false;
+
+          return verifyGuestCheckoutToken(
+            order,
+            req.get("x-signavi-guest-checkout-token")
+          );
+        },
+
+        loadRecords: async ({ orderId }) => {
+          const order = await models.StoreOrder
+            .findById(orderId)
+            .lean();
+
+          if (!order || order.source !== "store") {
+            return { order: null };
+          }
+
+          const [operation, ownership] = await Promise.all([
+            models.SandboxPaymentOperation.findOne({
+              orderId
+            }).lean(),
+
+            models.SandboxOwnership.findOne({
+              environment: "sandbox",
+              purchaseKey: `order:${orderId}`
+            }).lean()
+          ]);
+
+          return { order, operation, ownership };
+        },
+
+        readSquareLink: readers.readSquareLink,
+        readSquareOrder: readers.readSquareOrder,
+        expectedLocationId: readers.expectedLocationId
+      });
+
+      return await handler(req, res);
+    } catch {
+      return reject(503, "V3_LINK_RELEASE_UNAVAILABLE");
+    }
+  }
+);
 export default router
