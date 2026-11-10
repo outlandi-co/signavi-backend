@@ -1,3 +1,5 @@
+import { resolveWebhookInventoryProduct } from "../services/resolveWebhookInventoryProduct.js";
+import { getProductModelForChannel } from "../models/productModelSelection.js";
 import express from "express"
 import Quote from "../models/Quote.js"
 import Order from "../models/Order.js"
@@ -126,7 +128,12 @@ router.post("/square", express.json(), async (req, res) => {
       /* ================= INVENTORY DEDUCTION ================= */
       for (const item of order.items) {
 
-        const product = await Product.findOne({ name: item.name })
+        const product = await resolveWebhookInventoryProduct({
+          item,
+          order,
+          legacyModel: Product,
+          isolatedModelResolver: getProductModelForChannel
+        })
 
         if (!product || !product.variants?.length) {
           console.warn("⚠️ Product missing:", item.name)

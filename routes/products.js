@@ -1,3 +1,7 @@
+import { resolveProductIdQuery } from "../services/resolveProductIdQuery.js";
+import { assertProductChannelUpdate } from "../services/assertProductChannelUpdate.js";
+import { resolveProductRequestModel } from "../services/resolveProductRequestModel.js";
+import { getProductModelForChannel } from "../models/productModelSelection.js";
 import ShippingPackage from "../models/ShippingPackage.js"
 import {
   normalizeProductShippingCompatibility
@@ -1040,7 +1044,7 @@ router.post("/", requireAuth, requireAdmin, productUpload, async (req, res) => {
 
     const discountUpdates = getDiscountUpdates(req.body)
 
-    const product = await Product.create({
+    const product = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).create({
       sku,
 
       name: String(name).trim(),
@@ -1113,9 +1117,21 @@ router.get("/", async (req, res) => {
   try {
     const { storefrontVisible, category, search } = req.query
 
-    const requestedStorefront = getStorefrontFromRequest(req)
+    const requestedStorefront = getStorefrontFromRequest(req);
 
-    const filter = {}
+    // SIGNAVI_ISOLATED_PUBLIC_CATALOG
+    const isolatedPublicCatalog =
+      process.env.SIGNAVI_PRODUCT_DATABASE_ISOLATION === "true";
+
+    if (
+      isolatedPublicCatalog &&
+      !["signavi_studio", "signavi_store"].includes(req.query?.storefront)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Explicit valid storefront required"
+      });
+    }const filter = {}
     const andFilters = []
 
     if (storefrontVisible === "true") {
@@ -1142,6 +1158,12 @@ router.get("/", async (req, res) => {
       })
     }
 
+    if (isolatedPublicCatalog) {
+      filter.active = true;
+      filter.storefrontVisible = true;
+      andFilters.push({ salesChannel: requestedStorefront });
+    }
+
     if (andFilters.length > 0) {
       filter.$and = andFilters
     }
@@ -1155,8 +1177,13 @@ router.get("/", async (req, res) => {
     console.log("🔍 FINAL PRODUCT FILTER")
     console.log(JSON.stringify(filter, null, 2))
 
-    const matchingProducts = await Product.find({
-      storefront: requestedStorefront
+    const matchingProducts = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).find({
+      storefront: requestedStorefront,
+      ...(isolatedPublicCatalog ? {
+        salesChannel: requestedStorefront,
+        active: true,
+        storefrontVisible: true
+      } : {})
     }).select("name storefront salesChannel storefrontVisible active")
 
     console.log(
@@ -1170,7 +1197,7 @@ router.get("/", async (req, res) => {
       }))
     )
 
-    const products = await Product.find(filter).sort({ createdAt: -1 })
+    const products = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).find(filter).sort({ createdAt: -1 })
 
     return res.json({
       success: true,
@@ -1193,7 +1220,26 @@ router.get("/", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
+    const isolatedPublicCatalog =
+      process.env.SIGNAVI_PRODUCT_DATABASE_ISOLATION === "true";
+
+    if (
+      isolatedPublicCatalog &&
+      !["signavi_studio", "signavi_store"].includes(req.query?.storefront)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Explicit valid storefront required"
+      });
+    }
+    const productFilter = resolveProductIdQuery(req, req.params.id);
+
+    if (isolatedPublicCatalog) {
+      productFilter.active = true;
+      productFilter.storefrontVisible = true;
+    }
+
+    const product = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOne(productFilter)
 
     if (!product) {
       return res.status(404).json({
@@ -1221,7 +1267,7 @@ router.get("/:id", async (req, res) => {
 
 router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
+    const product = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOne(resolveProductIdQuery(req, req.params.id))
 
     if (!product) {
       return res.status(404).json({
@@ -1490,7 +1536,13 @@ router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) 
       updates
     })
 
-    const updated = await Product.findByIdAndUpdate(req.params.id, updates, {
+    assertProductChannelUpdate({
+      req,
+      existingProduct: product,
+      updates
+    })
+
+    const updated = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOneAndUpdate(resolveProductIdQuery(req, req.params.id), updates, {
       new: true,
       runValidators: true
     })
@@ -1514,7 +1566,7 @@ router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) 
 
 router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const deleted = await Product.findByIdAndDelete(req.params.id)
+    const deleted = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOneAndDelete(resolveProductIdQuery(req, req.params.id))
 
     if (!deleted) {
       return res.status(404).json({

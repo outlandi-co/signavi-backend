@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict"
+import assert from "node:assert/strict"
 import crypto from "node:crypto"
 import { SquareError } from "square"
 
@@ -7,7 +7,7 @@ import {
 } from "../utils/smartShippingV3ExecutionWorkflow.js"
 
 import {
-  createV3CheckoutReference
+  createV3SquareSafeCheckoutReference
 } from "../utils/smartShippingV3CheckoutReference.js"
 
 const envKeys = [
@@ -91,7 +91,7 @@ try {
         orderId,
         amountCents: 100,
         checkoutReferenceId:
-          createV3CheckoutReference({ orderId }),
+          createV3SquareSafeCheckoutReference({ orderId }),
         idempotencyKey:
           "signavi-v3-sandbox-field-regression",
         claimedAt: new Date().toISOString(),
