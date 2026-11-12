@@ -10,7 +10,6 @@ export function assertProductChannelUpdate({
     throw new Error("INVALID_ISOLATION_FLAG");
   }
 
-  if (!enabled) return true;
 
   // Isolated product updates must use plain field assignments.
   // Block MongoDB operators and dotted update paths.

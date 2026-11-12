@@ -157,6 +157,34 @@ const productUpload = (req, res, next) => {
     const files = req.files || []
 
     try {
+      // Reject conflicting multipart ownership fields before Cloudinary.
+      // Keep product creation behavior unchanged.
+      if (req.method === "PATCH" && req.route?.path === "/:id") {
+        const channel = req.query?.storefront;
+
+        if (
+          channel !== "signavi_studio" &&
+          channel !== "signavi_store"
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Valid storefront query parameter required"
+          });
+        }
+
+        for (const key of ["storefront", "salesChannel"]) {
+          if (
+            Object.prototype.hasOwnProperty.call(req.body || {}, key) &&
+            req.body[key] !== channel
+          ) {
+            return res.status(400).json({
+              success: false,
+              message: "Product channel conflict"
+            });
+          }
+        }
+      }
+
       // Upload before changing MongoDB, so a failed image upload never
       // creates or updates a product with a broken local /uploads/ URL.
       for (const file of files) {
@@ -1263,9 +1291,75 @@ router.get("/:id", async (req, res) => {
   }
 })
 
+const requireProductOwnershipBeforeUpload = async (req, res, next) => {
+  try {
+    const channel = req.query?.storefront;
+
+    if (
+      channel !== "signavi_studio" &&
+      channel !== "signavi_store"
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid storefront query parameter required"
+      });
+    }
+
+    // Multipart body fields do not exist before Multer runs.
+    // Perform the pre-upload lookup using the URL only.
+    const preflightReq = {
+      query: req.query,
+      body: {}
+    };
+
+    const filter = resolveProductIdQuery(
+      preflightReq,
+      req.params.id
+    );
+
+    const ProductModel = resolveProductRequestModel(
+      preflightReq,
+      {
+        legacyModel: Product,
+        isolatedModelResolver: getProductModelForChannel
+      }
+    );
+
+    const product = await ProductModel.findOne(filter);
+
+    if (
+      !product ||
+      product.storefront !== channel ||
+      product.salesChannel !== channel
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      });
+    }
+
+    return next();
+  } catch (err) {
+    console.error("PRODUCT OWNERSHIP PREFLIGHT ERROR:", err);
+
+    const invalidRequest = [
+      "PRODUCT_ID_REQUIRED",
+      "PRODUCT_CHANNEL_REQUIRED_OR_CONFLICTING",
+      "PRODUCT_CHANNEL_CONFLICT_OR_INVALID"
+    ].includes(err.message);
+
+    return res.status(invalidRequest ? 400 : 500).json({
+      success: false,
+      message: invalidRequest
+        ? "Invalid product ownership request"
+        : "Product ownership verification failed"
+    });
+  }
+};
+
 /* ================= UPDATE PRODUCT ================= */
 
-router.patch("/:id", requireAuth, requireAdmin, productUpload, async (req, res) => {
+router.patch("/:id", requireAuth, requireAdmin, requireProductOwnershipBeforeUpload, productUpload, async (req, res) => {
   try {
     const product = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOne(resolveProductIdQuery(req, req.params.id))
 
