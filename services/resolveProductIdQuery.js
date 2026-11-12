@@ -15,9 +15,6 @@ export function resolveProductIdQuery(
     throw new Error("PRODUCT_ID_REQUIRED");
   }
 
-  if (!enabled) {
-    return { _id: id };
-  }
 
   const supplied = [
     req?.query?.storefront,
