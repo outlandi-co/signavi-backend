@@ -7,7 +7,8 @@ import {
 } from "./v3SandboxModels.js";
 
 import {
-  acquireV3IsolatedCheckoutLock
+  acquireV3IsolatedCheckoutLock,
+  releaseV3IsolatedCheckoutLock
 } from "./smartShippingV3CheckoutLock.js";
 
 import mongoose from "mongoose";
@@ -175,17 +176,24 @@ export async function executeV3TrustedSandboxCheckout({
     { CheckoutLock }
   );
 
-  if (
-    !lock?.owner ||
-    !(lock.expiresAt instanceof Date) ||
-    lock.expiresAt <= new Date() ||
-    String(lock.orderId).toLowerCase() !== id
-  ) {
-    throw new Error("V3_SANDBOX_CHECKOUT_LOCK_REJECTED");
-  }
+  try {
+    if (
+      !lock?.owner ||
+      !(lock.expiresAt instanceof Date) ||
+      lock.expiresAt <= new Date() ||
+      String(lock.orderId).toLowerCase() !== id
+    ) {
+      throw new Error("V3_SANDBOX_CHECKOUT_LOCK_REJECTED");
+    }
 
-  return executeV3TrustedSandboxHandoff({
-    orderId: id,
-    owner: lock.owner
-  });
+    return await executeV3TrustedSandboxHandoff({
+      orderId: id,
+      owner: lock.owner
+    });
+  } finally {
+    await releaseV3IsolatedCheckoutLock(
+      lock,
+      { CheckoutLock }
+    );
+  }
 }
