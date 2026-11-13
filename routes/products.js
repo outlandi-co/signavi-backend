@@ -19,6 +19,7 @@ import fs from "fs"
 import Product from "../models/Product.js"
 import Material from "../models/Material.js"
 import { requireAuth } from "../middleware/auth.js"
+import { createProductStorefrontScope, matchesProductStorefront } from "../utils/productStorefrontScope.mjs"
 
 const router = express.Router()
 
@@ -302,6 +303,15 @@ const getStorefrontFromRequest = (req) => {
   if (
     /^http:\/\/(localhost|127\.0\.0\.1):5173(?:\/|$)/.test(origin) ||
     /^http:\/\/(localhost|127\.0\.0\.1):5173(?:\/|$)/.test(referer)
+  ) {
+    return "signavi_studio"
+  }
+
+  // Port 5174 also serves Studio in the feature workflow.
+  // Store is selected explicitly through the storefront parameter.
+  if (
+    /^http:\/\/(localhost|127\.0\.0\.1):5174(?:\/|$)/.test(origin) ||
+    /^http:\/\/(localhost|127\.0\.0\.1):5174(?:\/|$)/.test(referer)
   ) {
     return "signavi_studio"
   }
@@ -1246,28 +1256,86 @@ router.get("/", async (req, res) => {
 
 /* ================= GET SINGLE PRODUCT ================= */
 
+/* ================= ADMIN PRODUCT DETAIL ================= */
+
+router.get("/admin/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const scope = createProductStorefrontScope({
+      user: req.user,
+      storefront: req.query.storefront,
+      productId: req.params.id
+    })
+
+    if (!scope.ok) {
+      return res.status(scope.status).json({
+        success: false,
+        message: scope.code
+      })
+    }
+
+    const scopedReq = { query: { storefront: scope.storefront }, body: {} }
+    const ProductModel = resolveProductRequestModel(scopedReq, {
+      legacyModel: Product,
+      isolatedModelResolver: getProductModelForChannel
+    })
+    const product = await ProductModel.findOne({
+      ...scope.filter,
+      storefront: scope.storefront,
+      salesChannel: scope.storefront
+    })
+
+    if (!matchesProductStorefront(product, scope.storefront)) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      })
+    }
+
+    return res.json({
+      success: true,
+      data: product
+    })
+  } catch (err) {
+    console.error("ADMIN PRODUCT FETCH ERROR:", err)
+
+    return res.status(500).json({
+      success: false,
+      message: "Fetch product failed"
+    })
+  }
+})
+
+/* ================= PUBLIC PRODUCT DETAIL ================= */
+
 router.get("/:id", async (req, res) => {
   try {
-    const isolatedPublicCatalog =
-      process.env.SIGNAVI_PRODUCT_DATABASE_ISOLATION === "true";
-
-    if (
-      isolatedPublicCatalog &&
-      !["signavi_studio", "signavi_store"].includes(req.query?.storefront)
-    ) {
+    const storefront = normalizeStorefront(req.query?.storefront)
+    if (!storefront) {
       return res.status(400).json({
         success: false,
-        message: "Explicit valid storefront required"
-      });
-    }
-    const productFilter = resolveProductIdQuery(req, req.params.id);
-
-    if (isolatedPublicCatalog) {
-      productFilter.active = true;
-      productFilter.storefrontVisible = true;
+        message: "Valid storefront required"
+      })
     }
 
-    const product = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOne(productFilter)
+    if (!/^[a-f0-9]{24}$/i.test(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid product ID"
+      })
+    }
+
+    const productFilter = {
+      ...resolveProductIdQuery(req, req.params.id),
+      storefront,
+      salesChannel: storefront,
+      storefrontVisible: true,
+      active: true
+    }
+    const ProductModel = resolveProductRequestModel(req, {
+      legacyModel: Product,
+      isolatedModelResolver: getProductModelForChannel
+    })
+    const product = await ProductModel.findOne(productFilter)
 
     if (!product) {
       return res.status(404).json({
@@ -1281,12 +1349,11 @@ router.get("/:id", async (req, res) => {
       data: product
     })
   } catch (err) {
-    console.error("❌ FETCH PRODUCT ERROR:", err)
+    console.error("PUBLIC PRODUCT FETCH ERROR:", err)
 
     return res.status(500).json({
       success: false,
-      message: "Fetch product failed",
-      error: err.message
+      message: "Fetch product failed"
     })
   }
 })
@@ -1357,17 +1424,170 @@ const requireProductOwnershipBeforeUpload = async (req, res, next) => {
   }
 };
 
+/* ================= STUDIO VISIBILITY ================= */
+
+router.patch(
+  "/studio/:id/visibility",
+  requireAuth,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { storefrontVisible } = req.body || {};
+
+      if (!/^[a-f0-9]{24}$/i.test(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid product ID"
+        });
+      }
+
+      if (typeof storefrontVisible !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          message: "Visibility must be true or false"
+        });
+      }
+
+      const studioReq = {
+        query: { storefront: "signavi_studio" },
+        body: {}
+      }
+      const ProductModel = resolveProductRequestModel(studioReq, {
+        legacyModel: Product,
+        isolatedModelResolver: getProductModelForChannel
+      })
+      const product = await ProductModel.findOneAndUpdate(
+        {
+          _id: id,
+          storefront: "signavi_studio",
+          salesChannel: "signavi_studio"
+        },
+        {
+          $set: { storefrontVisible }
+        },
+        {
+          new: true,
+          runValidators: true
+        }
+      );
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: "Studio product not found"
+        });
+      }
+
+      return res.json({
+        success: true,
+        data: product
+      });
+    } catch (error) {
+      console.error("Studio visibility error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Visibility update failed"
+      });
+    }
+  }
+);
+
 /* ================= UPDATE PRODUCT ================= */
 
-router.patch("/:id", requireAuth, requireAdmin, requireProductOwnershipBeforeUpload, productUpload, async (req, res) => {
+/* ========== PRODUCT WRITE CHANNEL SCOPE ========== */
+
+const requireScopedProductWrite = async (req, res, next) => {
   try {
-    const product = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOne(resolveProductIdQuery(req, req.params.id))
+    const scope = createProductStorefrontScope({
+      user: req.user,
+      storefront: req.query.storefront,
+      productId: req.params.id
+    })
+
+    if (!scope.ok) {
+      return res.status(scope.status).json({
+        success: false,
+        message: scope.code
+      })
+    }
+
+    const scopedReq = { query: { storefront: scope.storefront }, body: {} }
+    const ProductModel = resolveProductRequestModel(scopedReq, {
+      legacyModel: Product,
+      isolatedModelResolver: getProductModelForChannel
+    })
+    const product = await ProductModel.findOne({
+      ...scope.filter,
+      storefront: scope.storefront,
+      salesChannel: scope.storefront
+    })
+
+    if (!matchesProductStorefront(product, scope.storefront)) {
+      return res.status(404).json({
+        success: false,
+        message: "Product not found"
+      })
+    }
+
+    req.productStorefrontScope = scope
+    next()
+  } catch (error) {
+    console.error("PRODUCT WRITE SCOPE ERROR:", error)
+
+    return res.status(500).json({
+      success: false,
+      message: "Product authorization failed"
+    })
+  }
+}
+
+router.patch("/:id", requireAuth, requireAdmin, requireProductOwnershipBeforeUpload, requireScopedProductWrite, productUpload, async (req, res) => {
+  try {
+    const ProductModel = resolveProductRequestModel(req, {
+      legacyModel: Product,
+      isolatedModelResolver: getProductModelForChannel
+    })
+    const product = await ProductModel.findOne({
+      ...req.productStorefrontScope.filter,
+      storefront: req.productStorefrontScope.storefront,
+      salesChannel: req.productStorefrontScope.storefront
+    })
 
     if (!product) {
       return res.status(404).json({
         success: false,
         message: "Product not found"
       })
+    }
+
+    // Product ownership is immutable through ordinary edits.
+    // Channel transfers require a separate authorized workflow.
+    const existingStorefront = normalizeStorefront(product.storefront)
+    const existingSalesChannel = normalizeStorefront(product.salesChannel)
+
+    if (
+      !existingStorefront ||
+      existingSalesChannel !== existingStorefront
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: "Product channel requires administrative reconciliation."
+      })
+    }
+
+    for (const field of ["storefront", "salesChannel"]) {
+      if (req.body[field] === undefined) continue
+
+      const submitted = normalizeStorefront(req.body[field])
+
+      if (submitted !== existingStorefront) {
+        return res.status(409).json({
+          success: false,
+          message: "Product ownership cannot be changed through this editor."
+        })
+      }
     }
 
     const updates = {}
@@ -1394,24 +1614,6 @@ router.patch("/:id", requireAuth, requireAdmin, requireProductOwnershipBeforeUpl
     }
 
     const uploads = collectProductUploads(files, req.body, receivedVariants)
-
-    if (req.body.storefront !== undefined) {
-      const storefront = normalizeStorefront(req.body.storefront)
-
-      if (storefront) {
-        updates.storefront = storefront
-        updates.salesChannel = getSalesChannelFromStorefront(storefront)
-      }
-    }
-
-    if (req.body.salesChannel !== undefined) {
-      const salesChannel = normalizeStorefront(req.body.salesChannel)
-
-      if (salesChannel) {
-        updates.salesChannel = salesChannel
-        updates.storefront = salesChannel
-      }
-    }
 
     if (req.body.storefrontVisible !== undefined) {
       updates.storefrontVisible = toBoolean(req.body.storefrontVisible, true)
@@ -1636,7 +1838,13 @@ router.patch("/:id", requireAuth, requireAdmin, requireProductOwnershipBeforeUpl
       updates
     })
 
-    const updated = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOneAndUpdate(resolveProductIdQuery(req, req.params.id), updates, {
+    const updated = await ProductModel.findOneAndUpdate(
+      {
+        ...req.productStorefrontScope.filter,
+        storefront: req.productStorefrontScope.storefront,
+        salesChannel: req.productStorefrontScope.storefront
+      },
+      updates, {
       new: true,
       runValidators: true
     })
@@ -1658,9 +1866,17 @@ router.patch("/:id", requireAuth, requireAdmin, requireProductOwnershipBeforeUpl
 
 /* ================= DELETE PRODUCT ================= */
 
-router.delete("/:id", requireAuth, requireAdmin, async (req, res) => {
+router.delete("/:id", requireAuth, requireAdmin, requireScopedProductWrite, async (req, res) => {
   try {
-    const deleted = await resolveProductRequestModel(req, { legacyModel: Product, isolatedModelResolver: getProductModelForChannel }).findOneAndDelete(resolveProductIdQuery(req, req.params.id))
+    const ProductModel = resolveProductRequestModel(req, {
+      legacyModel: Product,
+      isolatedModelResolver: getProductModelForChannel
+    })
+    const deleted = await ProductModel.findOneAndDelete({
+      ...req.productStorefrontScope.filter,
+      storefront: req.productStorefrontScope.storefront,
+      salesChannel: req.productStorefrontScope.storefront
+    })
 
     if (!deleted) {
       return res.status(404).json({
