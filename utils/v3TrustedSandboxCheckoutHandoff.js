@@ -1,4 +1,7 @@
 import {
+  assertV3TrustedSandboxFirstPaymentAuthorization
+} from "./assertV3TrustedSandboxFirstPaymentAuthorization.js"
+import {
   getV3SandboxConnection
 } from "./v3SandboxDatabaseConnection.js";
 
@@ -56,6 +59,11 @@ export async function executeV3TrustedSandboxHandoff({
 
   // Merchant identity is verified before durable reservation.
   // Reservation uses the existing atomic ownership transition.
+  // Reject missing first-payment authority before creating
+  // or mutating a durable payment reservation.
+  // The executor independently enforces the same boundary.
+  assertV3TrustedSandboxFirstPaymentAuthorization()
+
   const reservation =
     await reserveV3VerifiedSandboxRequest({
       orderId,

@@ -1,3 +1,6 @@
+import {
+  assertV3TrustedSandboxFirstPaymentAuthorization
+} from "./assertV3TrustedSandboxFirstPaymentAuthorization.js"
 import mongoose from "mongoose"
 
 import {
@@ -106,6 +109,10 @@ const runTrustedExecution = async ({
     orderId: id,
     checkoutReferenceId: operation.checkoutReferenceId
   })
+
+  // Do not construct the SDK or consume the durable
+  // creation claim without trusted first-payment authority.
+  assertV3TrustedSandboxFirstPaymentAuthorization()
 
   const sdk = sdkFactory()
 
