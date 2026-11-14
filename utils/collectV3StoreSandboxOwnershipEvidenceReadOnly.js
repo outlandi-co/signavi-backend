@@ -83,6 +83,59 @@ export function assessV3StoreSandboxOwnershipEvidence({
 }
 
 /**
+ * Compare the current server-acquired lock with its persisted
+ * database snapshot. Both must refer to the same attempt.
+ *
+ * This is a consistency check, not proof of caller authority.
+ */
+export function assessV3AcquiredCheckoutLockBinding({
+  orderId,
+  acquiredLock,
+  persistedLock,
+  now = new Date()
+} = {}) {
+  const id = String(orderId ?? "").toLowerCase();
+
+  const validLock = lock =>
+    lock &&
+    String(lock.orderId ?? lock._id ?? "").toLowerCase() === id &&
+    typeof lock.owner === "string" &&
+    lock.owner.trim() &&
+    lock.expiresAt instanceof Date &&
+    Number.isFinite(lock.expiresAt.getTime()) &&
+    lock.expiresAt > now;
+
+  if (
+    !ID.test(id) ||
+    !(now instanceof Date) ||
+    !Number.isFinite(now.getTime()) ||
+    !validLock(acquiredLock) ||
+    !validLock(persistedLock)
+  ) {
+    return Object.freeze({
+      bound: false,
+      reason: "CURRENT_CHECKOUT_LOCK_NOT_VERIFIED"
+    });
+  }
+
+  if (
+    acquiredLock.owner !== persistedLock.owner ||
+    acquiredLock.expiresAt.getTime() !==
+      persistedLock.expiresAt.getTime()
+  ) {
+    return Object.freeze({
+      bound: false,
+      reason: "CHECKOUT_LOCK_ATTEMPT_MISMATCH"
+    });
+  }
+
+  return Object.freeze({
+    bound: true,
+    reason: "CHECKOUT_LOCK_ATTEMPT_MATCHED",
+    squareRequestAuthorized: false
+  });
+}
+/**
  * Production-bound, server-only read-only coordinator.
  * No caller can inject an order, owner, amount, reader,
  * connection or approval through this function.
@@ -93,7 +146,8 @@ export function assessV3StoreSandboxOwnershipEvidence({
 export async function collectV3StoreSandboxOwnershipEvidenceReadOnly({
   orderId,
   guestToken,
-  signedQuote
+  signedQuote,
+  acquiredLock
 } = {}) {
   const id = String(orderId ?? "").toLowerCase();
 
@@ -153,6 +207,16 @@ export async function collectV3StoreSandboxOwnershipEvidenceReadOnly({
     const lock = await sandboxConnection.db
       .collection("smart_shipping_v3_checkout_locks")
       .findOne({ _id: new mongoose.Types.ObjectId(id) });
+
+    const binding = assessV3AcquiredCheckoutLockBinding({
+      orderId: id,
+      acquiredLock,
+      persistedLock: lock
+    });
+
+    if (binding.bound !== true) {
+      return denied(binding.reason);
+    }
 
     const ownership = assessV3StoreSandboxOwnershipEvidence({
       orderId: id,
