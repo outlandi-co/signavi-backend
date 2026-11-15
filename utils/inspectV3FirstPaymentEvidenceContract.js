@@ -94,6 +94,27 @@ export function inspectV3FirstPaymentEvidenceContract(
       unsafeSourceCount++;
     }
 
+    // Source-specific observations are diagnostic only.
+    // An empty array never proves that activity is absent.
+    const observedPositiveSignals = [];
+
+    if (validRecord) {
+      if (source === "paymentLinks" &&
+          record.existingLink === true) {
+        observedPositiveSignals.push("existingLink");
+      }
+
+      if (source === "squareOrders" &&
+          record.existingOrder === true) {
+        observedPositiveSignals.push("existingOrder");
+      }
+
+      if (source === "squarePayments" &&
+          record.existingPayment === true) {
+        observedPositiveSignals.push("existingPayment");
+      }
+    }
+
     sources[source] = Object.freeze({
       present: validRecord,
       complete,
@@ -103,6 +124,7 @@ export function inspectV3FirstPaymentEvidenceContract(
           : "UNKNOWN",
       missingFields: Object.freeze(missingFields),
       raisedAuthority: Object.freeze(raisedAuthority),
+      observedPositiveSignals: Object.freeze(observedPositiveSignals),
       unsafe
     });
   }
