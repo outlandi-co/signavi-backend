@@ -90,6 +90,7 @@ export function createV3ServerBoundFirstPaymentReview(
      */
     async reviewWithDiagnostics(orderId) {
       const snapshot = {};
+      const localSnapshot = {};
       let untrustedAuthorityClaimObserved = false;
 
       const sourceReaders = Object.freeze({
@@ -133,6 +134,21 @@ export function createV3ServerBoundFirstPaymentReview(
         };
       }
 
+      // Capture local readers during the same strict review.
+      // These values are reports, not trusted clearance.
+      for (const [readerName, sourceName] of [
+        ["readKnownHistory", "knownHistory"],
+        ["readOwnership", "ownership"]
+      ]) {
+        const reader = boundReaders[readerName];
+
+        wrappedReaders[readerName] = async (...args) => {
+          const evidence = await reader(...args);
+          localSnapshot[sourceName] = evidence;
+          return evidence;
+        };
+      }
+
       let reviewResult;
 
       if (
@@ -165,9 +181,77 @@ export function createV3ServerBoundFirstPaymentReview(
         snapshot
       });
 
+      const describeLocalSource = (name) => {
+        const evidence = localSnapshot[name];
+
+        const present =
+          evidence !== null &&
+          typeof evidence === "object" &&
+          !Array.isArray(evidence);
+
+        const identityMatched =
+          present &&
+          evidence.orderId === orderId &&
+          evidence.environment === "sandbox";
+
+        const reportedComplete =
+          identityMatched &&
+          evidence.complete === true;
+
+        return Object.freeze({
+          present,
+          identityMatched: Boolean(identityMatched),
+          reportedComplete: Boolean(reportedComplete),
+          observation: !identityMatched
+            ? "UNVERIFIED"
+            : reportedComplete
+              ? "REPORTED_COMPLETE_NO_CLEARANCE"
+              : "REPORTED_INCOMPLETE",
+
+          // Distinct reports, never authoritative facts.
+          reportedKnownRecordsClear:
+            name === "knownHistory" &&
+            identityMatched &&
+            evidence.knownRecordsClear === true,
+
+          reportedExclusive:
+            name === "ownership" &&
+            identityMatched &&
+            evidence.exclusive === true,
+
+          reportedDurable:
+            name === "ownership" &&
+            identityMatched &&
+            evidence.durable === true,
+
+          provenanceVerified: false,
+          trustedForReconciliation: false,
+          safeForAuthorization: false
+        });
+      };
+
+      const fiveSourceDiagnostics = Object.freeze({
+        knownHistory: describeLocalSource("knownHistory"),
+        ownership: describeLocalSource("ownership"),
+
+        // Reuse the existing Square diagnostic objects.
+        paymentLinks: diagnostics.sources.paymentLinks,
+        squareOrders: diagnostics.sources.squareOrders,
+        squarePayments: diagnostics.sources.squarePayments,
+
+        // A completed read does not establish authoritative
+        // negative history, ownership, or payment clearance.
+        unresolvedSourceCount: 5,
+        authoritativeNoPriorActivity: false,
+        initializationAuthorized: false,
+        squareRequestAuthorized: false,
+        retryAuthorized: false
+      });
+
       return Object.freeze({
         review: reviewResult,
         diagnostics,
+        fiveSourceDiagnostics,
 
         // No combination of review and diagnostic output
         // can authorize payment creation.
