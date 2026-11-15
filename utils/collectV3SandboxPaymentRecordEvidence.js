@@ -5,6 +5,7 @@ const denied = (orderId, reason, priorActivityFound = false) =>
     complete: false,
     reason,
     priorActivityFound,
+    ...(priorActivityFound ? { existingPayment: true } : {}),
     authoritativeNoPriorActivity: false,
     squareRequestAuthorized: false,
     retryAuthorized: false
@@ -97,6 +98,7 @@ export async function collectV3SandboxPaymentRecordEvidence({
           ? "POSSIBLE_PRIOR_SQUARE_PAYMENT"
           : "NO_EXPLICIT_SQUARE_PAYMENT_MATCH",
         priorActivityFound,
+        ...(priorActivityFound ? { existingPayment: true } : {}),
         authoritativeNoPriorActivity: false,
         squareRequestAuthorized: false,
         retryAuthorized: false
