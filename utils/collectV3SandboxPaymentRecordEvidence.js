@@ -55,19 +55,19 @@ export async function collectV3SandboxPaymentRecordEvidence({
 
     if (!response ||
         !Array.isArray(response.payments) ||
-        (response.errors?.length ?? 0) > 0) {
+        (response.errors != null && (!Array.isArray(response.errors) || response.errors.length > 0))) {
       return denied(id, "SQUARE_PAYMENT_RESPONSE_INVALID",
         priorActivityFound);
     }
 
     for (const payment of response.payments) {
       if (!payment || typeof payment.id !== "string" ||
-          !payment.id.trim() || seenIds.has(payment.id)) {
+          !payment.id.trim() || seenIds.has(payment.id.trim())) {
         return denied(id, "SQUARE_PAYMENT_IDENTITY_INVALID",
           priorActivityFound);
       }
 
-      seenIds.add(payment.id);
+      seenIds.add(payment.id.trim());
 
       const reference = typeof payment.referenceId === "string"
         ? payment.referenceId.trim().toLowerCase()
