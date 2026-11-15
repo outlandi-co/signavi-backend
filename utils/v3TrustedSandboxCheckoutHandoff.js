@@ -179,6 +179,11 @@ export async function executeV3TrustedSandboxCheckout({
     throw new Error("V3_SANDBOX_CHECKOUT_MODEL_MISMATCH");
   }
 
+  // Deny unavailable first-payment authority before
+  // acquiring or modifying the durable checkout lock.
+  // Reservation and execution enforce separate guards.
+  assertV3TrustedSandboxFirstPaymentAuthorization()
+
   const lock = await acquireV3IsolatedCheckoutLock(
     id,
     { CheckoutLock }
