@@ -125,6 +125,16 @@ export function inspectV3FirstPaymentEvidenceContract(
       missingFields: Object.freeze(missingFields),
       raisedAuthority: Object.freeze(raisedAuthority),
       observedPositiveSignals: Object.freeze(observedPositiveSignals),
+      // Informational only: reported completion is not clearance.
+      collectionStatus: !validRecord
+        ? "UNKNOWN"
+        : record.priorActivityFound === true
+          ? "PRIOR_ACTIVITY_OBSERVED"
+          : record.complete === true
+            ? "REPORTED_COMPLETE_NO_CLEARANCE"
+            : record.complete === false
+              ? "REPORTED_INCOMPLETE"
+              : "UNKNOWN",
       unsafe
     });
   }
