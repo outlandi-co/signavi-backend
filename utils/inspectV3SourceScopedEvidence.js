@@ -81,6 +81,9 @@ export function inspectV3SourceScopedEvidence({
     sources[name] = Object.freeze({
       present,
       identityMatched: Boolean(identityMatched),
+      // Matching claimed fields does not authenticate the source.
+      provenanceVerified: false,
+      trustedForReconciliation: false,
       reportedComplete: Boolean(complete),
       positiveField,
       positiveObserved: Boolean(positiveObserved),
