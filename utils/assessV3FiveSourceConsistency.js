@@ -32,6 +32,8 @@ export function assessV3FiveSourceConsistency(
 
   const issues = [];
   const missingOrUnverified = [];
+  const incompleteSources = [];
+  const contradictorySources = [];
   const squareActivitySources = [];
 
   for (const name of SOURCE_NAMES) {
@@ -43,6 +45,24 @@ export function assessV3FiveSourceConsistency(
       source.identityMatched !== true
     ) {
       missingOrUnverified.push(name);
+      continue;
+    }
+
+    // These are reported status fields, not trusted proofs.
+    if (
+      source.reportedComplete !== true ||
+      source.observation === "REPORTED_INCOMPLETE"
+    ) {
+      incompleteSources.push(name);
+    }
+
+    // A present, identity-matched report may still be
+    // internally unverified or contradictory.
+    if (
+      source.observation === "UNVERIFIED" ||
+      source.contradictory === true
+    ) {
+      contradictorySources.push(name);
     }
   }
 
@@ -60,6 +80,14 @@ export function assessV3FiveSourceConsistency(
 
   if (missingOrUnverified.length > 0) {
     issues.push("MISSING_OR_IDENTITY_UNVERIFIED_SOURCE");
+  }
+
+  if (incompleteSources.length > 0) {
+    issues.push("INCOMPLETE_SOURCE_REPORT");
+  }
+
+  if (contradictorySources.length > 0) {
+    issues.push("CONTRADICTORY_OR_UNVERIFIED_SOURCE_REPORT");
   }
 
   if (squareActivitySources.length > 0) {
@@ -109,6 +137,10 @@ export function assessV3FiveSourceConsistency(
     sourceCount: SOURCE_NAMES.length,
     missingOrUnverifiedSources: Object.freeze(
       missingOrUnverified
+    ),
+    incompleteSources: Object.freeze(incompleteSources),
+    contradictorySources: Object.freeze(
+      contradictorySources
     ),
     reportedSquareActivitySources: Object.freeze(
       squareActivitySources

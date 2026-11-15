@@ -273,3 +273,110 @@ test("the pure consistency assessor fails closed", () => {
   assert.equal(Object.isFrozen(result.issues), true);
   assert.equal(result.squareRequestAuthorized, false);
 });
+
+
+test("incomplete Square history is an explicit reconciliation issue", async () => {
+  const service = serviceWith({
+    overrides: {
+      readSquareOrders: async () =>
+        evidence({ complete: false })
+    }
+  });
+
+  const result = await service.reviewWithDiagnostics(orderId);
+  const assessment = result.crossSourceReconciliation;
+
+  assert.deepEqual(
+    assessment.incompleteSources,
+    ["squareOrders"]
+  );
+
+  assert.equal(
+    assessment.issues.includes("INCOMPLETE_SOURCE_REPORT"),
+    true
+  );
+
+  assertLocked(result);
+});
+
+test("incomplete local history is not silently cleared", async () => {
+  const service = serviceWith({
+    overrides: {
+      readKnownHistory: async () =>
+        evidence({
+          complete: false,
+          knownRecordsClear: true
+        })
+    }
+  });
+
+  const result = await service.reviewWithDiagnostics(orderId);
+  const assessment = result.crossSourceReconciliation;
+
+  assert.equal(
+    assessment.incompleteSources.includes("knownHistory"),
+    true
+  );
+
+  assert.equal(assessment.ready, false);
+  assertLocked(result);
+});
+
+test("contradictory Square observation is identified", async () => {
+  const service = serviceWith({
+    overrides: {
+      readSquarePayments: async () =>
+        evidence({
+          existingPayment: true,
+          priorActivityFound: false
+        })
+    }
+  });
+
+  const result = await service.reviewWithDiagnostics(orderId);
+  const assessment = result.crossSourceReconciliation;
+
+  assert.equal(
+    assessment.contradictorySources.includes("squarePayments"),
+    true
+  );
+
+  assert.equal(
+    assessment.issues.includes(
+      "CONTRADICTORY_OR_UNVERIFIED_SOURCE_REPORT"
+    ),
+    true
+  );
+
+  assertLocked(result);
+});
+
+test("complete-looking source claims still cannot authorize", async () => {
+  const service = serviceWith();
+  const result = await service.reviewWithDiagnostics(orderId);
+  const assessment = result.crossSourceReconciliation;
+
+  assert.deepEqual(assessment.incompleteSources, []);
+  assert.deepEqual(assessment.contradictorySources, []);
+
+  assert.equal(
+    assessment.issues.includes(
+      "TRUSTED_RECONCILIATION_NOT_ESTABLISHED"
+    ),
+    true
+  );
+
+  assertLocked(result);
+});
+
+test("invalid direct assessment still reports five missing sources", () => {
+  const result = assessV3FiveSourceConsistency(null);
+
+  assert.equal(result.missingOrUnverifiedSources.length, 5);
+  assert.deepEqual(result.incompleteSources, []);
+  assert.deepEqual(result.contradictorySources, []);
+  assert.equal(result.squareRequestAuthorized, false);
+
+  assert.equal(Object.isFrozen(result.incompleteSources), true);
+  assert.equal(Object.isFrozen(result.contradictorySources), true);
+});
