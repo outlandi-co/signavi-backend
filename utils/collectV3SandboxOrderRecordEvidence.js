@@ -65,7 +65,7 @@ export async function collectV3SandboxOrderRecordEvidence({
       !Array.isArray(response.orders) ||
       (response.errors !== undefined &&
         !Array.isArray(response.errors)) ||
-      (response.errors?.length ?? 0) > 0
+      (response.errors != null && (!Array.isArray(response.errors) || response.errors.length > 0))
     ) {
       return blocked(
         id, "SQUARE_ORDER_RESPONSE_INVALID", priorActivityFound
@@ -77,14 +77,14 @@ export async function collectV3SandboxOrderRecordEvidence({
         !order ||
         typeof order.id !== "string" ||
         !order.id.trim() ||
-        seenOrders.has(order.id)
+        seenOrders.has(order.id.trim())
       ) {
         return blocked(
           id, "SQUARE_ORDER_IDENTITY_INVALID", priorActivityFound
         );
       }
 
-      seenOrders.add(order.id);
+      seenOrders.add(order.id.trim());
 
       const reference = typeof order.referenceId === "string"
         ? order.referenceId.trim().toLowerCase()
