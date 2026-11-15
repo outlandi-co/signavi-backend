@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -31,7 +31,7 @@ function makeDatabaseFixtures() {
   const calls = [];
 
   const values = {
-    "signavi_store:orders": { _id: orderId }
+    "signavi_store:orders": { _id: orderId, paymentStatus: "payment_required" }
   };
 
   function connection(databaseName) {
@@ -257,4 +257,37 @@ test("previous Square payment blocks five-reader review", async () => {
   const result = await fixture.service.review(orderId);
 
   assertBlocked(result);
+});
+
+
+test("valid unpaid local history clears without authorizing payment", async () => {
+  const fixture = createFixture();
+
+  const history = await fixture.readers.readKnownHistory({
+    orderId,
+    environment: "sandbox"
+  });
+
+  assert.equal(history.complete, true);
+  assert.equal(history.knownRecordsClear, true);
+  assert.equal(history.reason, "KNOWN_LOCAL_RECORDS_CLEAR_ONLY");
+  assert.equal(history.authoritativeNoPriorActivity, false);
+  assert.equal(history.squareRequestAuthorized, false);
+
+  const ownership = await fixture.readers.readOwnership({
+    orderId,
+    environment: "sandbox"
+  });
+
+  assert.equal(ownership.complete, true);
+  assert.equal(ownership.exclusive, false);
+  assert.equal(ownership.durable, false);
+  assert.equal(
+    ownership.reason,
+    "OWNERSHIP_SNAPSHOT_REQUIRES_ATOMIC_CLAIM"
+  );
+  assert.equal(ownership.squareRequestAuthorized, false);
+
+  const review = await fixture.service.review(orderId);
+  assertBlocked(review);
 });
