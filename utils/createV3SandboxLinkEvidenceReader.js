@@ -58,6 +58,9 @@ export function createV3SandboxLinkEvidenceReader({
       matchedLinkIds: Object.freeze([
         ...(evidence?.matchedLinkIds || [])
       ]),
+      ...(Array.isArray(evidence?.matchedLinkIds) &&
+          evidence.matchedLinkIds.length > 0
+        ? { existingLink: true } : {}),
       authoritativeNoPriorActivity: false,
       squareRequestAuthorized: false,
       retryAuthorized: false
