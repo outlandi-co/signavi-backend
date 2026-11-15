@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import path from "node:path";
@@ -313,6 +313,143 @@ test("real local Store and V3 sandbox isolation", async t => {
         console.log(
           "GENUINE_SIGNED_CHECKOUT_REVIEW_ONLY_VERIFIED"
         );
+
+        const checkoutInput = {
+          orderId: String(orderId),
+          guestToken,
+          signedQuote
+        };
+
+        const assertDenied = result => {
+          assert.equal(result.eligibleForReview, false);
+          assert.equal(result.squareRequestAuthorized, false);
+          assert.equal(result.retryAuthorized, false);
+        };
+
+        // Conflict 1: persisted amount disagrees with Store.
+        {
+          const changed = await operations.updateOne(
+            { orderId, amountCents: 2700 },
+            { $set: { amountCents: 2701 } }
+          );
+
+          assert.equal(changed.matchedCount, 1);
+
+          try {
+            const denied =
+              await collectV3ServerOwnedPrelockEvidenceReadOnly(
+                checkoutInput
+              );
+
+            assertDenied(denied);
+            console.log("PERSISTED_AMOUNT_MISMATCH_REJECTED");
+          } finally {
+            const restored = await operations.updateOne(
+              { orderId, amountCents: 2701 },
+              { $set: { amountCents: 2700 } }
+            );
+
+            assert.equal(restored.matchedCount, 1);
+          }
+        }
+
+        // Conflict 2: a Square attempt has already been claimed.
+        {
+          const changed = await operations.updateOne(
+            {
+              orderId,
+              squareCreationAttemptClaimedAt: null
+            },
+            {
+              $set: {
+                squareCreationAttemptClaimedAt: new Date()
+              }
+            }
+          );
+
+          assert.equal(changed.matchedCount, 1);
+
+          try {
+            const denied =
+              await collectV3ServerOwnedPrelockEvidenceReadOnly(
+                checkoutInput
+              );
+
+            assertDenied(denied);
+            console.log("PREVIOUS_SQUARE_ATTEMPT_REJECTED");
+          } finally {
+            const restored = await operations.updateOne(
+              { orderId },
+              {
+                $set: {
+                  squareCreationAttemptClaimedAt: null
+                }
+              }
+            );
+
+            assert.equal(restored.matchedCount, 1);
+          }
+        }
+
+        // Conflict 3: even an expired lock blocks pre-lock review.
+        {
+          const locks = sandbox.db.collection(
+            "smart_shipping_v3_checkout_locks"
+          );
+
+          assert.equal(
+            await locks.findOne({ _id: orderId }),
+            null,
+            "SYNTHETIC_LOCK_ALREADY_EXISTS"
+          );
+
+          const owner = `synthetic-conflict-${orderId}`;
+
+          const inserted = await locks.insertOne({
+            _id: orderId,
+            owner,
+            expiresAt: new Date(Date.now() - 60000),
+            createdAt: new Date()
+          });
+
+          assert.equal(inserted.acknowledged, true);
+
+          try {
+            const denied =
+              await collectV3ServerOwnedPrelockEvidenceReadOnly(
+                checkoutInput
+              );
+
+            assertDenied(denied);
+            console.log("EXISTING_EXPIRED_LOCK_REJECTED");
+          } finally {
+            const removed = await locks.deleteOne({
+              _id: orderId,
+              owner
+            });
+
+            assert.equal(
+              removed.deletedCount,
+              1,
+              "SYNTHETIC_LOCK_CLEANUP_FAILED"
+            );
+          }
+        }
+
+        // Restored records must permit review, not payment.
+        {
+          const recovered =
+            await collectV3ServerOwnedPrelockEvidenceReadOnly(
+              checkoutInput
+            );
+
+          assert.equal(recovered.eligibleForReview, true);
+          assert.equal(recovered.stage, "pre_lock");
+          assert.equal(recovered.squareRequestAuthorized, false);
+          assert.equal(recovered.retryAuthorized, false);
+
+          console.log("PRELOCK_EVIDENCE_RESTORED_REVIEW_ONLY");
+        }
 
         const tamperedQuote =
           signedQuote.slice(0, -1) +
