@@ -236,3 +236,85 @@ test("Square source diagnostics are reused", async () => {
 
   assertLocked(result);
 });
+
+
+test("local readers cannot forge payment or provenance authority", async () => {
+  const claims = [
+    "authoritativeNoPriorActivity",
+    "initializationAuthorized",
+    "squareRequestAuthorized",
+    "retryAuthorized",
+    "provenanceVerified",
+    "trustedForReconciliation",
+    "authoritativeAbsenceEstablished",
+    "safeForAuthorization"
+  ];
+
+  for (const readerName of [
+    "readKnownHistory",
+    "readOwnership"
+  ]) {
+    for (const field of claims) {
+      const service = createService({
+        overrides: {
+          [readerName]: async () => evidence({
+            knownRecordsClear: true,
+            exclusive: true,
+            durable: true,
+            [field]: true
+          })
+        }
+      });
+
+      const result =
+        await service.reviewWithDiagnostics(orderId);
+
+      assert.equal(
+        result.review.readyForAuthorizationReview,
+        false,
+        readerName + ":" + field
+      );
+
+      assert.equal(
+        result.review.reason,
+        "UNTRUSTED_SOURCE_AUTHORITY_CLAIM",
+        readerName + ":" + field
+      );
+
+      assertLocked(result);
+    }
+  }
+});
+
+test("ordinary local history and ownership reports remain diagnostic", async () => {
+  const service = createService();
+  const result = await service.reviewWithDiagnostics(orderId);
+
+  assert.equal(
+    result.review.reason,
+    "STRICT_EVIDENCE_CANDIDATE_REQUIRES_TRUSTED_REVIEW"
+  );
+
+  // A review candidate is not an authorization.
+  assert.equal(
+    result.review.squareRequestAuthorized,
+    false
+  );
+
+  assert.equal(
+    result.review.initializationAuthorized,
+    false
+  );
+
+  assert.equal(
+    result.fiveSourceDiagnostics.knownHistory.trustedForReconciliation,
+    false
+  );
+
+  assert.equal(
+    result.fiveSourceDiagnostics.ownership.trustedForReconciliation,
+    false
+  );
+
+  assertLocked(result);
+});

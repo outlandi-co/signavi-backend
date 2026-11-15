@@ -149,6 +149,30 @@ export function createV3ServerBoundFirstPaymentReview(
         wrappedReaders[readerName] = async (...args) => {
           const evidence = await reader(...args);
           localSnapshot[sourceName] = evidence;
+
+          // Local history and ownership reports cannot
+          // certify payment authority or trusted provenance.
+          const forbiddenLocalClaims = [
+            "authoritativeNoPriorActivity",
+            "initializationAuthorized",
+            "squareRequestAuthorized",
+            "retryAuthorized",
+            "provenanceVerified",
+            "trustedForReconciliation",
+            "authoritativeAbsenceEstablished",
+            "safeForAuthorization"
+          ];
+
+          if (
+            evidence !== null &&
+            typeof evidence === "object" &&
+            forbiddenLocalClaims.some(
+              field => evidence[field] === true
+            )
+          ) {
+            untrustedAuthorityClaimObserved = true;
+          }
+
           return evidence;
         };
       }
