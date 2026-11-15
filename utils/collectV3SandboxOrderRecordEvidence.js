@@ -13,7 +13,7 @@ const blocked = (orderId, reason, found = false) =>
     retryAuthorized: false
   });
 
-export async function collectV3SandboxOrderRecordEvidence({
+async function collectV3SandboxOrderRecordEvidenceRaw({
   orderId,
   listPage,
   maxPages = 10
@@ -143,4 +143,21 @@ export async function collectV3SandboxOrderRecordEvidence({
   return blocked(
     id, "SQUARE_ORDER_PAGE_LIMIT_REACHED", priorActivityFound
   );
+}
+
+/**
+ * Positive-only diagnostic observation.
+ * A matching Square order never authorizes payment creation.
+ */
+export async function collectV3SandboxOrderRecordEvidence(input) {
+  const evidence = await collectV3SandboxOrderRecordEvidenceRaw(input);
+
+  if (evidence?.priorActivityFound !== true) {
+    return evidence;
+  }
+
+  return Object.freeze({
+    ...evidence,
+    existingOrder: true
+  });
 }
