@@ -586,6 +586,92 @@ try {
 
     assert.notEqual(executorConnection, store);
 
+
+    // Acceptance-test-only execution adapter.
+    // Never export this adapter to application routes.
+    const { runV3SandboxExecutionWorkflow } = await import(
+      "../utils/smartShippingV3ExecutionWorkflow.js"
+    );
+    const { claimV3IsolatedSquareCreationAttempt } = await import(
+      "../utils/smartShippingV3ClaimCreationAttempt.js"
+    );
+    const { markV3IsolatedPaymentCompleted } = await import(
+      "../utils/smartShippingV3PaymentState.js"
+    );
+    const { persistV3IsolatedSquareDiagnostic } = await import(
+      "../utils/smartShippingV3PersistSquareDiagnostic.js"
+    );
+
+    const runMockWorkflow = async ({ orderId, owner, sdk }) => {
+      const id = String(orderId);
+
+      const operation =
+        await models.SandboxPaymentOperation.findOne({
+          orderId: id
+        }).lean();
+
+      assert.ok(operation, "Expected isolated payment operation");
+
+      const result = await runV3SandboxExecutionWorkflow({
+        orderId: id,
+        owner,
+        sdk,
+
+        claimAttempt: () =>
+          claimV3IsolatedSquareCreationAttempt({
+            orderId: id,
+            owner,
+            idempotencyKey: operation.idempotencyKey
+          }),
+
+        recordVerifiedLink: data =>
+          markV3IsolatedPaymentCompleted({
+            orderId: id,
+            owner,
+            amountCents: operation.amountCents,
+            idempotencyKey: operation.idempotencyKey,
+            squarePaymentLinkId: data.squarePaymentLinkId,
+            squareOrderId: data.squareOrderId,
+            paymentUrl: data.paymentUrl
+          })
+      });
+
+      if (
+        result?.status === "reconciliation_required" &&
+        result?.diagnostic
+      ) {
+        try {
+          await persistV3IsolatedSquareDiagnostic({
+            orderId: id,
+            owner,
+            diagnostic: result.diagnostic
+          });
+
+          return {
+            ...result,
+            diagnosticPersisted: true
+          };
+        } catch (error) {
+          const diagnosticFailureReason =
+            ["ValidationError", "CastError", "StrictModeError"]
+              .includes(error?.name)
+              ? "validation_failure"
+              : error?.message ===
+                "Diagnostic persistence rejected by ownership or state guard."
+                ? "guard_rejected"
+                : "database_failure";
+
+          return {
+            ...result,
+            diagnosticPersisted: false,
+            diagnosticFailureReason
+          };
+        }
+      }
+
+      return result;
+    };
+
     const linkId = `mock-link-${crypto.randomUUID()}`;
     const squareOrderId =
       `mock-square-order-${crypto.randomUUID()}`;
@@ -681,8 +767,26 @@ try {
       }
     };
 
-    const runTrusted = () =>
+
+    // Protected trusted entry must fail before mock SDK creation.
+    await assert.rejects(
       runV3TrustedSandboxExecutionForTests({
+        orderId: String(executorItem.orderId),
+        owner: executorItem.lock.owner,
+        sdk: mockSdk
+      }),
+      /V3_TRUSTED_FIRST_PAYMENT_AUTHORIZATION_NOT_CONNECTED/
+    );
+
+    assert.equal(mockCreateCalls, 0);
+    assert.equal(mockEvidenceLookups, 0);
+
+    console.log(
+      "PASS: TRUSTED AUTHORIZATION GUARD DENIED EXECUTION"
+    );
+
+    const runTrusted = () =>
+      runMockWorkflow({
         orderId: String(executorItem.orderId),
         owner: executorItem.lock.owner,
         sdk: mockSdk
@@ -735,7 +839,7 @@ try {
 
     await assert.rejects(
       runTrusted(),
-      /unclaimed reservation not found/
+      /V3 creation attempt already claimed or reservation invalid/
     );
 
     assert.equal(mockCreateCalls, 1);
@@ -775,7 +879,7 @@ try {
     };
 
     const runUncertain = () =>
-      runV3TrustedSandboxExecutionForTests({
+      runMockWorkflow({
         orderId: String(uncertainItem.orderId),
         owner: uncertainItem.lock.owner,
         sdk: uncertainSdk
@@ -829,7 +933,7 @@ try {
     // Retrying must fail BEFORE a second SDK request.
     await assert.rejects(
       runUncertain(),
-      /unclaimed reservation not found/
+      /V3 creation attempt already claimed or reservation invalid/
     );
 
     assert.equal(uncertainCreateCalls, 1);
@@ -955,7 +1059,7 @@ try {
     };
 
     const runRecordingFailure = () =>
-      runV3TrustedSandboxExecutionForTests({
+      runMockWorkflow({
         orderId: String(recordingItem.orderId),
         owner: recordingItem.lock.owner,
         sdk: recordingSdk
@@ -1005,7 +1109,7 @@ try {
 
     await assert.rejects(
       runRecordingFailure(),
-      /unclaimed reservation not found/
+      /V3_SANDBOX_TRANSITION_LOCK_NOT_OWNED/
     );
 
     assert.equal(recordingCreateCalls, 1);

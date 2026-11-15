@@ -105,34 +105,28 @@ export async function reserveV3CrossDatabaseSandboxRequest({
         documentId: objectId
       }
 
-      const [
-        storeReservation,
-        sandboxReservation,
-        sandboxAssociation,
-        storeAssociation,
-        ownership
-      ] = await Promise.all([
-        StoreSharedReservation
-          .findOne(reservationQuery).session(session).lean(),
+      // Sequential reads are required within a MongoDB transaction.
+      // The Store and sandbox models must share the same MongoDB client.
+      const storeReservation = await StoreSharedReservation
+        .findOne(reservationQuery).session(session).lean()
 
-        SandboxSharedReservation
-          .findOne(reservationQuery).session(session).lean(),
+      const sandboxReservation = await SandboxSharedReservation
+        .findOne(reservationQuery).session(session).lean()
 
-        SandboxAssociation
-          .findOne({ orderId: objectId })
-          .session(session).lean(),
+      const sandboxAssociation = await SandboxAssociation
+        .findOne({ orderId: objectId })
+        .session(session).lean()
 
-        storefrontConnection
-          .collection(SandboxAssociation.collection.name)
-          .findOne(
-            { orderId: objectId },
-            { session, projection: { _id: 1 } }
-          ),
+      const storeAssociation = await storefrontConnection
+        .collection(SandboxAssociation.collection.name)
+        .findOne(
+          { orderId: objectId },
+          { session, projection: { _id: 1 } }
+        )
 
-        SandboxOwnership
-          .findOne({ environment: "sandbox", purchaseKey })
-          .session(session).lean()
-      ])
+      const ownership = await SandboxOwnership
+        .findOne({ environment: "sandbox", purchaseKey })
+        .session(session).lean()
 
       if (storeReservation || sandboxReservation) {
         throw new Error("V3_PAYMENT_HISTORY_REQUIRES_REVIEW")
