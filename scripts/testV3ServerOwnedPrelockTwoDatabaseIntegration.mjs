@@ -6,6 +6,23 @@ import path from "node:path";
 import Order from "../models/Order.js";
 
 import {
+  createGuestCheckoutToken,
+  verifyGuestCheckoutToken
+} from "../utils/guestCheckoutToken.js";
+
+import {
+  createV3OrderFingerprint
+} from "../utils/smartShippingV3OrderFingerprint.js";
+
+import {
+  createV3SignedQuote
+} from "../utils/smartShippingV3QuoteSigning.js";
+
+import {
+  prepareV3CheckoutPayment
+} from "../utils/smartShippingV3PaymentPreparation.js";
+
+import {
   getV3SandboxConnection
 } from "../utils/v3SandboxDatabaseConnection.js";
 
@@ -105,7 +122,21 @@ test("real local Store and V3 sandbox isolation", async t => {
         zip: "95340",
         country: "US"
       },
-      items: [],
+      items: [{
+        productId: new mongoose.Types.ObjectId(),
+        name: "Synthetic Local Test Shirt",
+        quantity: 1,
+        price: 20,
+        unitPrice: 20,
+        salePrice: 20,
+        finalPrice: 20,
+        productType: "physical",
+        source: "store",
+        variant: {
+          color: "black",
+          size: "M"
+        }
+      }],
       source: "store",
       status: "pending",
       paymentStatus: "unpaid",
@@ -123,7 +154,7 @@ test("real local Store and V3 sandbox isolation", async t => {
       status: "pending",
       amountCents: 2700,
       requestOwner: "",
-      idempotencyKey: `local-test-${orderId}`,
+      idempotencyKey: `signavi-v3-sandbox-${orderId}`,
       checkoutReferenceId: `local-ref-${orderId}`,
       squareCreationAttemptClaimedAt: null,
       squareIdempotencyKey: null,
@@ -209,6 +240,105 @@ test("real local Store and V3 sandbox isolation", async t => {
         );
         assert.equal(result.squareRequestAuthorized, false);
         assert.equal(result.retryAuthorized, false);
+      }
+    );
+
+        await t.test(
+      "genuine signed checkout qualifies for review only",
+      async () => {
+        const savedOrder = await Order.findById(orderId);
+
+        assert.ok(savedOrder);
+        assert.equal(savedOrder.items.length, 1);
+
+        const guestToken =
+          createGuestCheckoutToken(savedOrder);
+
+        assert.equal(
+          verifyGuestCheckoutToken(savedOrder, guestToken),
+          true
+        );
+
+        const fingerprint =
+          createV3OrderFingerprint(savedOrder);
+
+        assert.match(fingerprint, /^[a-f0-9]{64}$/);
+
+        const signedQuote = createV3SignedQuote({
+          cartFingerprint: fingerprint,
+          shippingAmountCents: 500,
+          parcelRateIds: ["local-test-rate-1"],
+          carrier: "USPS",
+          serviceToken: "usps_priority"
+        });
+
+        const prepared = prepareV3CheckoutPayment({
+          order: savedOrder,
+          guestToken,
+          signedQuote
+        });
+
+        assert.ok(prepared);
+        assert.equal(prepared.totalCents, 2700);
+        assert.equal(
+          savedOrder.squareExpectedAmountCents,
+          prepared.totalCents
+        );
+
+        const result =
+          await collectV3ServerOwnedPrelockEvidenceReadOnly({
+            orderId: String(orderId),
+            guestToken,
+            signedQuote
+          });
+
+        assert.deepEqual(
+          {
+            eligibleForReview: result.eligibleForReview,
+            stage: result.stage,
+            reason: result.reason,
+            squareRequestAuthorized:
+              result.squareRequestAuthorized,
+            retryAuthorized: result.retryAuthorized
+          },
+          {
+            eligibleForReview: true,
+            stage: "pre_lock",
+            reason: "SERVER_OWNED_PRELOCK_EVIDENCE_CONSISTENT",
+            squareRequestAuthorized: false,
+            retryAuthorized: false
+          }
+        );
+
+        console.log(
+          "GENUINE_SIGNED_CHECKOUT_REVIEW_ONLY_VERIFIED"
+        );
+
+        const tamperedQuote =
+          signedQuote.slice(0, -1) +
+          (signedQuote.at(-1) === "A" ? "B" : "A");
+
+        const invalidResult =
+          await collectV3ServerOwnedPrelockEvidenceReadOnly({
+            orderId: String(orderId),
+            guestToken,
+            signedQuote: tamperedQuote
+          });
+
+        assert.equal(
+          invalidResult.eligibleForReview,
+          false
+        );
+        assert.equal(
+          invalidResult.squareRequestAuthorized,
+          false
+        );
+        assert.equal(
+          invalidResult.retryAuthorized,
+          false
+        );
+
+        console.log("TAMPERED_QUOTE_REJECTED");
       }
     );
 
