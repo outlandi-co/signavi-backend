@@ -5,6 +5,10 @@ import {
   inspectV3SourceScopedEvidence
 } from "./inspectV3SourceScopedEvidence.js";
 
+import {
+  assessV3FiveSourceConsistency
+} from "./assessV3FiveSourceConsistency.js";
+
 const readerNames = Object.freeze([
   "readKnownHistory",
   "readPaymentLinks",
@@ -248,10 +252,16 @@ export function createV3ServerBoundFirstPaymentReview(
         retryAuthorized: false
       });
 
+      const crossSourceReconciliation =
+        assessV3FiveSourceConsistency(
+          fiveSourceDiagnostics
+        );
+
       return Object.freeze({
         review: reviewResult,
         diagnostics,
         fiveSourceDiagnostics,
+        crossSourceReconciliation,
 
         // No combination of review and diagnostic output
         // can authorize payment creation.
