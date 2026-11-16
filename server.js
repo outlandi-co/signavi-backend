@@ -90,7 +90,8 @@ const allowedOrigins = [
   "http://localhost:5174",
   "http://localhost:3000",
   "https://signavi-studio-osb4608sk-signavistudio-9574s-projects.vercel.app",
-  "https://signavi-studio-git-develop-v2-signavistudio-9574s-projects.vercel.app"
+  "https://signavi-studio-git-develop-v2-signavistudio-9574s-projects.vercel.app",
+  "https://signavi-studio-git-feature-02087a-signavistudio-9574s-projects.vercel.app"
 ]
 
 const corsOptions = {
