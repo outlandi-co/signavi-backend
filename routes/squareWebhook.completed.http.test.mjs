@@ -523,6 +523,206 @@ try {
       });
     }
   );
+
+  async function verifyV3OwnershipScenario({
+    storefront = "signavi_store",
+    operationOverrides = {},
+    mutateBeforeUpdate = null,
+    replay = false,
+    expectedAttempts = 1,
+    expectedWrites = 1
+  } = {}) {
+    const originals = {
+      findOne: Order.findOne,
+      findById: Order.findById,
+      findOneAndUpdate: Order.findOneAndUpdate,
+      invoiceFind: Invoice.find,
+      operationFind: SmartShippingV3PaymentOperation.findOne
+    };
+
+    const orderId = "507f1f77bcf86cd799439011";
+    const referenceId = "signavi-v3-" + orderId;
+
+    const persisted = {
+      _id: orderId,
+      storefront,
+      source: "store",
+      currency: "USD",
+      squareEnvironment: "sandbox",
+      squareOrderId: "synthetic-square-order-001",
+      squareExpectedAmountCents: 2599,
+      paymentStatus: "unpaid",
+      status: "payment_required",
+      finalPrice: 25.99,
+      timeline: []
+    };
+
+    const operation = {
+      orderId,
+      environment: "sandbox",
+      status: "completed",
+      requestOwner: "synthetic-test-owner",
+      idempotencyKey: "signavi-v3-sandbox-test-operation",
+      squarePaymentLinkId: "synthetic-link-001",
+      squareOrderId: "synthetic-square-order-001",
+      paymentUrl: "https://sandbox.square.link/synthetic-test",
+      checkoutReferenceId: referenceId,
+      amountCents: 2599,
+      ...operationOverrides
+    };
+
+    let attempts = 0;
+    let writes = 0;
+
+    Order.findOne = async () => structuredClone(persisted);
+    Order.findById = async () => structuredClone(persisted);
+
+    Invoice.find = () => ({
+      limit: async () => []
+    });
+
+    SmartShippingV3PaymentOperation.findOne = () => ({
+      lean: async () => structuredClone(operation)
+    });
+
+    Order.findOneAndUpdate = async (filter, update, options) => {
+      attempts++;
+
+      assert.equal(options.new, true);
+      assert.equal(filter._id, orderId);
+
+      // This is mandatory for the verified V3 Store flow.
+      assert.equal(filter.storefront, "signavi_store");
+
+      if (mutateBeforeUpdate && attempts === 1) {
+        mutateBeforeUpdate(persisted);
+      }
+
+      if (!matchesAtomicFilter(persisted, filter)) {
+        return null;
+      }
+
+      assert.equal(update.$set.paymentStatus, "paid");
+      assert.equal(update.$set.status, "paid");
+      assert.equal(
+        update.$set.squarePaymentId,
+        "synthetic-payment-001"
+      );
+
+      Object.assign(persisted, structuredClone(update.$set));
+      persisted.timeline.push(
+        structuredClone(update.$push.timeline)
+      );
+
+      writes++;
+
+      return structuredClone(persisted);
+    };
+
+    try {
+      const squareOrder = verifiedSquareOrder({
+        reference_id: referenceId
+      });
+
+      const first = await runScenario(
+        base,
+        verifiedPayment(),
+        squareOrder
+      );
+
+      assert.equal(first.status, 200);
+      assert.equal(first.requested.length, 2);
+      assert.equal(attempts, expectedAttempts);
+      assert.equal(writes, expectedWrites);
+
+      if (expectedWrites === 1) {
+        assert.equal(persisted.paymentStatus, "paid");
+        assert.equal(persisted.status, "paid");
+        assert.equal(persisted.timeline.length, 1);
+        assert.equal(
+          persisted.squarePaymentId,
+          "synthetic-payment-001"
+        );
+      } else {
+        assert.equal(persisted.paymentStatus, "unpaid");
+        assert.equal(persisted.timeline.length, 0);
+      }
+
+      if (replay) {
+        const second = await runScenario(
+          base,
+          verifiedPayment(),
+          squareOrder
+        );
+
+        assert.equal(second.status, 200);
+        assert.equal(second.requested.length, 2);
+        assert.equal(attempts, 1);
+        assert.equal(writes, 1);
+        assert.equal(persisted.timeline.length, 1);
+      }
+
+    } finally {
+      Order.findOne = originals.findOne;
+      Order.findById = originals.findById;
+      Order.findOneAndUpdate = originals.findOneAndUpdate;
+      Invoice.find = originals.invoiceFind;
+      SmartShippingV3PaymentOperation.findOne =
+        originals.operationFind;
+    }
+  }
+
+  await test(
+    "Valid V3 Store payment makes exactly one atomic update",
+    async () => {
+      await verifyV3OwnershipScenario();
+    }
+  );
+
+  await test(
+    "V3 Studio ownership rejects payment before atomic update",
+    async () => {
+      await verifyV3OwnershipScenario({
+        storefront: "signavi_studio",
+        expectedAttempts: 0,
+        expectedWrites: 0
+      });
+    }
+  );
+
+  await test(
+    "Concurrent Store-to-Studio change blocks V3 atomic update",
+    async () => {
+      await verifyV3OwnershipScenario({
+        expectedAttempts: 1,
+        expectedWrites: 0,
+        mutateBeforeUpdate(order) {
+          order.storefront = "signavi_studio";
+        }
+      });
+    }
+  );
+
+  await test(
+    "Exact V3 completed payment replay makes no second update",
+    async () => {
+      await verifyV3OwnershipScenario({ replay: true });
+    }
+  );
+
+  await test(
+    "Invalid V3 payment operation rejects before atomic update",
+    async () => {
+      await verifyV3OwnershipScenario({
+        operationOverrides: {
+          idempotencyKey: "invalid-operation-key"
+        },
+        expectedAttempts: 0,
+        expectedWrites: 0
+      });
+    }
+  );
+
 } finally {
   app.set("squareWebhookTestFetch", null);
 
