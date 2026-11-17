@@ -15,6 +15,7 @@ import {
   verifyV3ProductionWebhookPaymentBinding
 } from "../utils/smartShippingV3ProductionWebhookPaymentBinding.js"
 
+import { createV3WebhookStorefrontFilter } from "../utils/createV3WebhookStorefrontFilter.js"
 import express from "express"
 import crypto from "node:crypto"
 import fetch from "node-fetch"
@@ -811,6 +812,8 @@ router.post("/webhook", async (req, res) => {
       typeof squareOrder.reference_id === "string" &&
       squareOrder.reference_id.startsWith("signavi-v3-")
 
+    let verifiedV3StorefrontFilter = null
+
     const v3Operation = squareMode === "sandbox"
       ? await SmartShippingV3PaymentOperation.findOne({
           orderId: order._id
@@ -836,6 +839,9 @@ router.post("/webhook", async (req, res) => {
           squareOrder,
           expectedLocationId: locationId
         })
+
+        verifiedV3StorefrontFilter =
+          createV3WebhookStorefrontFilter(order)
 
         // Exact verified payment replay: no second update.
         if (v3Binding.exactPaidReplay) {
@@ -945,6 +951,7 @@ router.post("/webhook", async (req, res) => {
         {
           _id: order._id,
           squareEnvironment: squareMode,
+          ...(verifiedV3StorefrontFilter || {}),
 
           paymentStatus: {
             $nin: ["paid", "refunded"]
