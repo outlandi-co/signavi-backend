@@ -1,8 +1,11 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createServer } from "node:http";
 import express from "express";
+import Order from "../models/Order.js";
+import Invoice from "../models/Invoice.js";
+import SmartShippingV3PaymentOperation from "../models/SmartShippingV3PaymentOperation.js";
 
 const previous = {
   NODE_ENV: process.env.NODE_ENV,
@@ -213,6 +216,115 @@ try {
     assert.equal(result.requested.length, 2);
   });
 
+  // Verified Square data, isolated database lookups.
+  // An attempted payment update is a test failure.
+
+  async function verifyRejection(base, overrides) {
+    const originals = {
+      findOne: Order.findOne,
+      findOneAndUpdate: Order.findOneAndUpdate,
+      invoiceFind: Invoice.find,
+      operationFind: SmartShippingV3PaymentOperation.findOne
+    };
+
+    let lookups = 0;
+    let updateAttempts = 0;
+
+    const savedOrder = {
+      _id: "507f1f77bcf86cd799439011",
+      storefront: "signavi_store",
+      source: "store",
+      squareEnvironment: "sandbox",
+      squareOrderId: "synthetic-square-order-001",
+      squareExpectedAmountCents: 2599,
+      paymentStatus: "unpaid",
+      status: "payment_required",
+      finalPrice: 25.99,
+      ...overrides
+    };
+
+    Order.findOne = async () => {
+      lookups++;
+      return savedOrder;
+    };
+
+    Invoice.find = () => ({
+      limit: async () => []
+    });
+
+    SmartShippingV3PaymentOperation.findOne = () => ({
+      lean: async () => null
+    });
+
+    Order.findOneAndUpdate = async () => {
+      updateAttempts++;
+      throw new Error("UNEXPECTED_PAYMENT_UPDATE");
+    };
+
+    try {
+      const result = await runScenario(
+        base,
+        verifiedPayment(),
+        verifiedSquareOrder()
+      );
+
+      assert.equal(result.status, 200);
+      assert.equal(result.requested.length, 2);
+      assert.equal(lookups, 1);
+      assert.equal(updateAttempts, 0);
+    } finally {
+      Order.findOne = originals.findOne;
+      Order.findOneAndUpdate = originals.findOneAndUpdate;
+      Invoice.find = originals.invoiceFind;
+      SmartShippingV3PaymentOperation.findOne =
+        originals.operationFind;
+    }
+  }
+
+  await test(
+    "Wrong saved Square environment rejects payment",
+    async () => {
+      await verifyRejection(base, {
+        squareEnvironment: "production"
+      });
+    }
+  );
+
+  await test(
+    "Conflicting Square order ID rejects payment",
+    async () => {
+      await verifyRejection(base, {
+        squareOrderId: "different-square-order"
+      });
+    }
+  );
+
+  await test(
+    "Incorrect saved payment amount rejects payment",
+    async () => {
+      await verifyRejection(base, {
+        squareExpectedAmountCents: 3000
+      });
+    }
+  );
+
+  await test(
+    "Conflicting Square payment ID rejects payment",
+    async () => {
+      await verifyRejection(base, {
+        squarePaymentId: "another-payment-id"
+      });
+    }
+  );
+
+  await test(
+    "Closed shipped order rejects completed payment",
+    async () => {
+      await verifyRejection(base, {
+        status: "shipped"
+      });
+    }
+  );
 } finally {
   app.set("squareWebhookTestFetch", null);
 
