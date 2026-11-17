@@ -5,6 +5,10 @@ import { existsSync } from "node:fs";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import { MongoClient, ObjectId } from "mongodb";
 
+import {
+  verifySquarePaymentIndexes
+} from "./verifySquarePaymentIndexes.js";
+
 const binaryPath = process.env.SIGNAVI_TEST_MONGOD_BINARY;
 
 if (!binaryPath || !existsSync(binaryPath)) {
@@ -130,7 +134,7 @@ try {
     {
       unique: true,
       partialFilterExpression: {
-        squarePaymentId: { $type: "string" }
+        squarePaymentId: { $type: "string", $gt: "" }
       }
     }
   );
@@ -140,10 +144,44 @@ try {
     {
       unique: true,
       partialFilterExpression: {
-        squareOrderId: { $type: "string" }
+        squareOrderId: { $type: "string", $gt: "" }
       }
     }
   );
+
+
+  await test("Real MongoDB Square indexes satisfy readiness verifier", async () => {
+    const indexes = await store.listIndexes().toArray();
+
+    const result = verifySquarePaymentIndexes(indexes);
+
+    assert.equal(result.ready, true);
+    assert.equal(result.fields.squarePaymentId, true);
+    assert.equal(result.fields.squareOrderId, true);
+  });
+
+  await test("Multiple unpaid orders may have empty Square identifiers", async () => {
+    const first = createOrder({
+      squarePaymentId: "",
+      squareOrderId: ""
+    });
+
+    const second = createOrder({
+      squarePaymentId: "",
+      squareOrderId: ""
+    });
+
+    await store.insertMany([first, second]);
+
+    assert.equal(
+      await store.countDocuments({
+        _id: { $in: [first._id, second._id] },
+        squarePaymentId: "",
+        squareOrderId: ""
+      }),
+      2
+    );
+  });
 
   await test("Real MongoDB performs one authorized Store payment update", async () => {
     const order = createOrder();
