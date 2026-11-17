@@ -104,7 +104,7 @@ const verifySignature = (rawBody, signature) => {
 // RETRIEVE VERIFIED PAYMENT DATA FROM SQUARE
 // =====================================================
 
-const squareGet = async (endpoint) => {
+const squareGet = async (endpoint, req) => {
   if (!validSquareMode) {
     throw new Error(
       "Invalid Square environment configuration"
@@ -124,7 +124,16 @@ const squareGet = async (endpoint) => {
       ? "https://connect.squareupsandbox.com"
       : "https://connect.squareup.com"
 
-  const response = await fetch(
+  // HTTP regression tests must never call Square's real API.
+  const transport = process.env.NODE_ENV === "test"
+    ? req?.app?.get("squareWebhookTestFetch")
+    : fetch
+
+  if (typeof transport !== "function") {
+    throw new Error("SQUARE_WEBHOOK_TEST_TRANSPORT_REQUIRED")
+  }
+
+  const response = await transport(
     `${baseUrl}/v2/${endpoint}`,
     {
       headers: {
@@ -617,7 +626,8 @@ router.post("/webhook", async (req, res) => {
     // =================================================
 
     const paymentResponse = await squareGet(
-      `payments/${encodeURIComponent(incoming.id)}`
+      `payments/${encodeURIComponent(incoming.id)}`,
+      req
     )
 
     const payment = paymentResponse.payment
@@ -657,7 +667,8 @@ router.post("/webhook", async (req, res) => {
     // =================================================
 
     const orderResponse = await squareGet(
-      `orders/${encodeURIComponent(payment.order_id)}`
+      `orders/${encodeURIComponent(payment.order_id)}`,
+      req
     )
 
     const squareOrder = orderResponse.order
