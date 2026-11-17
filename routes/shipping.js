@@ -6,6 +6,7 @@ import { selectPreferredShippingPackage } from "../utils/selectPreferredShipping
 import ShippingPackage from "../models/ShippingPackage.js"
 import { isDimensionRateEligible } from "../utils/isDimensionRateEligible.mjs"
 import ShippingProductPackageProfile from "../models/ShippingProductPackageProfile.js"
+import { resolveShippingProfileQueryModel } from "../services/resolveShippingProfileQueryModel.js"
 import { buildVerifiedSavedPackageParcels } from "../utils/buildVerifiedSavedPackageParcels.mjs"
 import { loadActiveShippingPackages } from "../utils/loadActiveShippingPackages.mjs"
 import OrderV3StorefrontShipping from "../models/Order.js"
@@ -678,7 +679,12 @@ export const makeCartParcels = async (items, packages, storefront = "signavi_sto
 
       // Retrieve trusted profile data. Never accept it from
       // the customer's request body.
-      const profiles = await ShippingProductPackageProfile.find({
+      const ProfileModel = resolveShippingProfileQueryModel(
+        storefront,
+        { legacyModel: ShippingProductPackageProfile }
+      );
+
+      const profiles = await ProfileModel.find({
         productId: product._id,
         packageId: selectedPackageId,
         active: true
