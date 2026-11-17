@@ -96,6 +96,75 @@ try {
     assert.equal(saveCount, 0);
   });
 
+  for (const storefront of [
+    "signavi_store",
+    "signavi_studio"
+  ]) {
+    await test(
+      `Another order's guest token cannot authorize ${storefront}`,
+      async () => {
+        lookupCount = 0;
+        saveCount = 0;
+        lookupResult = syntheticOrder(storefront);
+
+        const otherOrderToken = createGuestCheckoutToken({
+          _id: "507f1f77bcf86cd799439099"
+        });
+
+        const response = await fetch(
+          `${base}/api/orders/${orderId}/checkout`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-signavi-guest-checkout-token": otherOrderToken
+            },
+            body: JSON.stringify({})
+          }
+        );
+
+        const body = await response.json();
+
+        assert.equal(response.status, 403);
+        assert.equal(body.success, false);
+        assert.equal(lookupCount, 1);
+        assert.equal(saveCount, 0);
+      }
+    );
+
+    await test(
+      `Shipped ${storefront} order cannot checkout again`,
+      async () => {
+        lookupCount = 0;
+        saveCount = 0;
+
+        lookupResult = syntheticOrder(storefront);
+        lookupResult.status = "shipped";
+
+        const guestToken =
+          createGuestCheckoutToken(lookupResult);
+
+        const response = await fetch(
+          `${base}/api/orders/${orderId}/checkout`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-signavi-guest-checkout-token": guestToken
+            },
+            body: JSON.stringify({})
+          }
+        );
+
+        const body = await response.json();
+
+        assert.equal(response.status, 409);
+        assert.equal(body.success, false);
+        assert.equal(lookupCount, 1);
+        assert.equal(saveCount, 0);
+      }
+    );
+  }
   await test("Invalid guest checkout token returns HTTP 403", async () => {
     lookupCount = 0;
     saveCount = 0;
