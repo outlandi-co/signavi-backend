@@ -3,6 +3,13 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import express from "express";
 import Order from "../models/Order.js";
+import crypto from "node:crypto";
+import {
+  createGuestCheckoutToken
+} from "../utils/guestCheckoutToken.js";
+
+process.env.SHIPPING_QUOTE_SECRET =
+  crypto.randomBytes(32).toString("hex");
 
 const { default: router } = await import("./orders.js");
 
@@ -113,6 +120,43 @@ try {
     assert.equal(lookupCount, 1);
     assert.equal(saveCount, 0);
   });
+  for (const storefront of [
+    "signavi_store",
+    "signavi_studio"
+  ]) {
+    await test(
+      `Already-paid ${storefront} checkout returns HTTP 409`,
+      async () => {
+        lookupCount = 0;
+        saveCount = 0;
+
+        lookupResult = syntheticOrder(storefront);
+        lookupResult.paymentStatus = "paid";
+
+        const guestToken =
+          createGuestCheckoutToken(lookupResult);
+
+        const response = await fetch(
+          `${base}/api/orders/${orderId}/checkout`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "x-signavi-guest-checkout-token": guestToken
+            },
+            body: JSON.stringify({})
+          }
+        );
+
+        const body = await response.json();
+
+        assert.equal(response.status, 409);
+        assert.equal(body.success, false);
+        assert.equal(lookupCount, 1);
+        assert.equal(saveCount, 0);
+      }
+    );
+  }
   for (const storefront of [
     "signavi_store",
     "signavi_studio"
