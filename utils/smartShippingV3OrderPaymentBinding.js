@@ -18,6 +18,16 @@ export const verifyV3OrderPaymentBinding = ({
     throw new Error("Missing V3 order/payment records.")
   }
 
+  if (
+    order.storefront !== "signavi_store" ||
+    (
+      order.salesChannel != null &&
+      order.salesChannel !== "signavi_store"
+    )
+  ) {
+    throw new Error("V3 storefront ownership mismatch.")
+  }
+
   const orderId = String(order._id ?? "")
   const expectedReference = operation.checkoutReferenceId
 
