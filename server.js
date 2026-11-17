@@ -51,6 +51,7 @@ import supportRoutes from "./routes/support/supportRoutes.js"
 import aiChatRoutes from "./routes/aiChat.js"
 import orderWorkflowRoutes from "./routes/orderWorkflowRoutes.js"
 import shippingPackagesRoutes from "./routes/shippingPackages.js"
+import shippingPackingProfilesRoutes from "./routes/shippingPackingProfiles.js"
 import notificationRoutes from "./routes/notifications.js"
 
 import instagramRoutes from "./routes/instagramRoutes.js"
@@ -735,6 +736,16 @@ if (
 }
 
 app.use("/api/shipping-packages", shippingPackagesRoutes)
+
+if (
+  process.env.NODE_ENV !== "production" &&
+  process.env.SIGNAVI_PACKING_PROFILE_ADMIN_ENABLED === "true"
+) {
+  app.use(
+    "/api/shipping-packing-profiles",
+    shippingPackingProfilesRoutes
+  );
+}
 
 /* ================= ORDER WORKFLOW ================= */
 
