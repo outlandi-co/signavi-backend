@@ -221,6 +221,73 @@ try {
     }
   );
 
+
+  await test(
+    "Valid production V3 binding verifies but cannot mark order paid",
+    async () => {
+      resetCounts();
+
+      squareReference = referenceId;
+
+      mockOperation = {
+        orderId,
+        environment: "production",
+        status: "reconciliation_required",
+        requestOwner: "synthetic-production-test-owner",
+        idempotencyKey:
+          "signavi-v3-production-synthetic-test",
+        squarePaymentLinkId: "synthetic-production-link-001",
+        squareOrderId: "synthetic-square-order-001",
+        paymentUrl:
+          "https://square.link/synthetic-production-test",
+        checkoutReferenceId: referenceId,
+        amountCents: 2599
+      };
+
+      const originalLog = console.log;
+      const logs = [];
+
+      let result;
+
+      try {
+        console.log = (...args) => {
+          logs.push(args.map(String).join(" "));
+        };
+
+        result = await send(base);
+      } finally {
+        console.log = originalLog;
+      }
+
+      assert.equal(result.status, 200);
+
+      assert.deepEqual(calls.square, [
+        "/v2/payments/synthetic-payment-001",
+        "/v2/orders/synthetic-square-order-001"
+      ]);
+
+      assert.equal(calls.operations, 1);
+      assert.equal(calls.invoice, 0);
+      assert.equal(calls.atomic, 0);
+
+      assert.equal(savedOrder.paymentStatus, "unpaid");
+      assert.equal(savedOrder.status, "payment_required");
+
+      assert.ok(
+        logs.some(message =>
+          message.includes(
+            "Production V3 payment binding verified; reconciliation disabled"
+          )
+        ),
+        "The successful production V3 verification branch must execute."
+      );
+
+      originalLog(
+        "VALID_PRODUCTION_V3_BINDING_VERIFIED_RECONCILIATION_DISABLED"
+      );
+    }
+  );
+
 } finally {
   app.set("squareWebhookTestFetch", null);
 
