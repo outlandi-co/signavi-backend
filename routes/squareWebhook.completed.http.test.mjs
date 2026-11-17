@@ -325,6 +325,204 @@ try {
       });
     }
   );
+  // Evaluate the actual MongoDB filter against isolated persisted data.
+  function matchesAtomicFilter(document, filter) {
+    return Object.entries(filter).every(([field, condition]) => {
+      if (field === "$or") {
+        return condition.some(branch =>
+          matchesAtomicFilter(document, branch)
+        );
+      }
+
+      const exists = Object.hasOwn(document, field);
+      const value = document[field];
+
+      if (
+        condition !== null &&
+        typeof condition === "object" &&
+        !Array.isArray(condition)
+      ) {
+        return Object.entries(condition).every(([operator, expected]) => {
+          if (operator === "$exists") {
+            return exists === expected;
+          }
+
+          if (operator === "$in") {
+            return expected.includes(value === undefined ? null : value);
+          }
+
+          if (operator === "$nin") {
+            return !expected.includes(value);
+          }
+
+          throw new Error("UNSUPPORTED_ATOMIC_FILTER_OPERATOR");
+        });
+      }
+
+      return value === condition;
+    });
+  }
+
+  async function verifyAtomicScenario({
+    replay = false,
+    mutateBeforeUpdate = null,
+    expectedWrites = 1
+  } = {}) {
+    const originals = {
+      findOne: Order.findOne,
+      findById: Order.findById,
+      findOneAndUpdate: Order.findOneAndUpdate,
+      invoiceFind: Invoice.find,
+      operationFind: SmartShippingV3PaymentOperation.findOne
+    };
+
+    const persisted = {
+      _id: "507f1f77bcf86cd799439011",
+      storefront: "signavi_store",
+      source: "store",
+      squareEnvironment: "sandbox",
+      squareOrderId: "synthetic-square-order-001",
+      squareExpectedAmountCents: 2599,
+      paymentStatus: "unpaid",
+      status: "payment_required",
+      finalPrice: 25.99,
+      timeline: []
+    };
+
+    let attempts = 0;
+    let writes = 0;
+
+    Order.findOne = async () => structuredClone(persisted);
+    Order.findById = async () => structuredClone(persisted);
+
+    Invoice.find = () => ({
+      limit: async () => []
+    });
+
+    SmartShippingV3PaymentOperation.findOne = () => ({
+      lean: async () => null
+    });
+
+    Order.findOneAndUpdate = async (filter, update, options) => {
+      attempts++;
+
+      assert.equal(options.new, true);
+      assert.equal(filter._id, persisted._id);
+
+      // Simulates a competing database change after the
+      // initial lookup but before MongoDB evaluates the filter.
+      if (mutateBeforeUpdate && attempts === 1) {
+        mutateBeforeUpdate(persisted);
+      }
+
+      if (!matchesAtomicFilter(persisted, filter)) {
+        return null;
+      }
+
+      assert.equal(update.$set.paymentStatus, "paid");
+      assert.equal(update.$set.status, "paid");
+      assert.equal(update.$set.squarePaymentId, "synthetic-payment-001");
+      assert.equal(update.$set.squareOrderId, "synthetic-square-order-001");
+
+      Object.assign(persisted, structuredClone(update.$set));
+
+      persisted.timeline.push(
+        structuredClone(update.$push.timeline)
+      );
+
+      writes++;
+      return structuredClone(persisted);
+    };
+
+    try {
+      const first = await runScenario(
+        base,
+        verifiedPayment(),
+        verifiedSquareOrder()
+      );
+
+      assert.equal(first.status, 200);
+      assert.equal(first.requested.length, 2);
+      assert.equal(attempts, 1);
+      assert.equal(writes, expectedWrites);
+
+      if (expectedWrites === 1) {
+        assert.equal(persisted.paymentStatus, "paid");
+        assert.equal(persisted.status, "paid");
+        assert.equal(
+          persisted.squarePaymentId,
+          "synthetic-payment-001"
+        );
+        assert.equal(persisted.timeline.length, 1);
+        assert.match(
+          persisted.timeline[0].note,
+          /hold for fulfillment review/
+        );
+      } else {
+        assert.equal(persisted.paymentStatus, "unpaid");
+        assert.equal(persisted.timeline.length, 0);
+      }
+
+      if (replay) {
+        const second = await runScenario(
+          base,
+          verifiedPayment(),
+          verifiedSquareOrder()
+        );
+
+        assert.equal(second.status, 200);
+        assert.equal(second.requested.length, 2);
+        assert.equal(attempts, 1);
+        assert.equal(writes, 1);
+        assert.equal(persisted.timeline.length, 1);
+      }
+    } finally {
+      Order.findOne = originals.findOne;
+      Order.findById = originals.findById;
+      Order.findOneAndUpdate = originals.findOneAndUpdate;
+      Invoice.find = originals.invoiceFind;
+      SmartShippingV3PaymentOperation.findOne =
+        originals.operationFind;
+    }
+  }
+
+  await test(
+    "Valid Store payment makes exactly one atomic transition",
+    async () => {
+      await verifyAtomicScenario();
+    }
+  );
+
+  await test(
+    "Exact completed payment replay does not write twice",
+    async () => {
+      await verifyAtomicScenario({ replay: true });
+    }
+  );
+
+  await test(
+    "Concurrent Square environment change blocks atomic update",
+    async () => {
+      await verifyAtomicScenario({
+        expectedWrites: 0,
+        mutateBeforeUpdate(order) {
+          order.squareEnvironment = "production";
+        }
+      });
+    }
+  );
+
+  await test(
+    "Concurrent Square payment claim blocks atomic update",
+    async () => {
+      await verifyAtomicScenario({
+        expectedWrites: 0,
+        mutateBeforeUpdate(order) {
+          order.squarePaymentId = "competing-payment";
+        }
+      });
+    }
+  );
 } finally {
   app.set("squareWebhookTestFetch", null);
 
