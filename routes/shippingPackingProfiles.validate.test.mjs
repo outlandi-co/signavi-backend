@@ -1,4 +1,4 @@
-﻿import test, { before, after } from "node:test";
+import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import express from "express";
@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 
 const secret = randomUUID();
 process.env.JWT_SECRET = secret;
+process.env.SIGNAVI_PRODUCT_DATABASE_ISOLATION = "false";
 
 const { default: router } =
   await import("./shippingPackingProfiles.js");
@@ -16,7 +17,7 @@ const { default: Product } =
 const { default: ShippingPackage } =
   await import("../models/ShippingPackage.js");
 
-const originalProductFind = Product.findById;
+const originalProductFindOne = Product.findOne;
 const originalPackageFind = ShippingPackage.findById;
 
 const productId = "507f1f77bcf86cd799439011";
@@ -62,14 +63,21 @@ let simulateFailure = false;
 let server;
 let baseURL;
 
-Product.findById = () => ({
+Product.findOne = (query) => {
+  assert.deepEqual(query, {
+    _id: productId,
+    storefront: "signavi_studio",
+    salesChannel: "signavi_studio"
+  });
+  return ({
   lean: async () => {
     if (simulateFailure) {
       throw new Error("Synthetic database failure");
     }
     return currentProduct;
   }
-});
+  });
+};
 
 ShippingPackage.findById = () => ({
   lean: async () => currentPackage
@@ -115,7 +123,7 @@ before(async () => {
 });
 
 after(async () => {
-  Product.findById = originalProductFind;
+  Product.findOne = originalProductFindOne;
   ShippingPackage.findById = originalPackageFind;
 
   if (server) {

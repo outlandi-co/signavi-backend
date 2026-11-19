@@ -1,9 +1,11 @@
-﻿import express from "express";
+import express from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { requireAdmin } from "../middleware/requireAdmin.js";
 import ShippingProductPackageProfile from "../models/ShippingProductPackageProfile.js";
 
 import Product from "../models/Product.js";
+import { getProductModelForChannel } from "../models/productModelSelection.js";
+import { resolveProductCatalogModel } from "../services/resolveProductCatalogModel.js";
 import ShippingPackage from "../models/ShippingPackage.js";
 import {
   validatePackingProfileCreation
@@ -60,8 +62,17 @@ router.post("/validate-draft", async (req, res) => {
   }
 
   try {
+    const StudioProductModel = resolveProductCatalogModel("signavi_studio", {
+      legacyModel: Product,
+      isolatedModelResolver: getProductModelForChannel
+    });
+
     const [product, shippingPackage] = await Promise.all([
-      Product.findById(preliminary.data.productId).lean(),
+      StudioProductModel.findOne({
+        _id: preliminary.data.productId,
+        storefront: "signavi_studio",
+        salesChannel: "signavi_studio"
+      }).lean(),
       ShippingPackage.findById(preliminary.data.packageId).lean()
     ]);
 
