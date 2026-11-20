@@ -17,6 +17,9 @@ import {
 import {
   assessPackingProfileActivation
 } from "../utils/assessPackingProfileActivation.mjs";
+import {
+  validatePackingProfileRelationship
+} from "../utils/validatePackingProfileRelationship.mjs";
 const router = express.Router();
 
 // All profile operations require an authenticated administrator.
@@ -78,17 +81,59 @@ router.get("/:profileId/activation-review", async (req, res) => {
       });
     }
 
+    const StudioProductModel = resolveProductCatalogModel("signavi_studio", {
+      enabled: true,
+      legacyModel: Product,
+      isolatedModelResolver: getProductModelForChannel
+    });
+
+    const [product, shippingPackage] = await Promise.all([
+      StudioProductModel.findOne({
+        _id: profile.productId,
+        storefront: "signavi_studio",
+        salesChannel: "signavi_studio"
+      }).lean(),
+      ShippingPackage.findById(profile.packageId).lean()
+    ]);
+
+    const relationship = validatePackingProfileRelationship({
+      product,
+      shippingPackage,
+      expectedStorefront: "signavi_studio"
+    });
+
+    const identifiersMatch =
+      relationship.valid === true &&
+      String(profile.productId).toLowerCase() === relationship.productId &&
+      String(profile.packageId).toLowerCase() === relationship.packageId;
+
     const assessment = assessPackingProfileActivation({
       profile,
       evidence: {}
     });
+
+    if (!identifiersMatch) {
+      return res.status(422).json({
+        success: false,
+        message: relationship.valid
+          ? "Packing profile identifiers do not match"
+          : relationship.error,
+        ownershipVerified: false,
+        assessment: {
+          ...assessment,
+          eligibleForFurtherReview: false,
+          mayActivateProfile: false,
+          mayExecutePayment: false
+        }
+      });
+    }
 
     return res.status(200).json({
       success: true,
       profileId,
       productId: profile.productId,
       packageId: profile.packageId,
-      ownershipVerified: false,
+      ownershipVerified: true,
       assessment
     });
   } catch {

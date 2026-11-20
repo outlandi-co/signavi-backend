@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import crypto from "node:crypto";
@@ -6,6 +6,11 @@ import express from "express";
 import jwt from "jsonwebtoken";
 
 import Profile from "../models/ShippingProductPackageProfile.js";
+import ShippingPackage from "../models/ShippingPackage.js";
+import mongoose from "mongoose";
+import {
+  connectStudioDatabase
+} from "../config/studioDatabase.js";
 
 process.env.JWT_SECRET = crypto.randomBytes(32).toString("hex");
 
@@ -22,6 +27,73 @@ const originalUpdateOne = Profile.updateOne;
 const originalFindByIdAndUpdate = Profile.findByIdAndUpdate;
 const originalDeleteOne = Profile.deleteOne;
 
+const originalPackageFindById = ShippingPackage.findById;
+const primary = mongoose.connection;
+const originalState = primary.readyState;
+const originalUseDb = primary.useDb;
+
+const studioConnection = {
+  name: "signavi_studio",
+  readyState: 1,
+  models: {},
+  db: {
+    admin: () => ({
+      ping: async () => ({ ok: 1 })
+    })
+  }
+};
+
+const productId = "6afb9c92222951acaeec3db7";
+const packageId = "6af181b99f2f2d016a378202";
+
+const studioProduct = {
+  _id: productId,
+  storefront: "signavi_studio",
+  salesChannel: "signavi_studio",
+  productType: "physical",
+  shipping: {
+    mode: "saved_package",
+    packageId,
+    packagingType: "poly_mailer"
+  }
+};
+
+const shippingPackage = {
+  _id: packageId,
+  active: true,
+  type: "poly_mailer",
+  lengthIn: 14,
+  widthIn: 10,
+  heightIn: 2,
+  maxWeightOz: 32,
+  tareWeightOz: 1,
+  uspsFlatRate: false
+};
+
+studioConnection.models.Product = {
+  modelName: "Product",
+  db: studioConnection,
+  collection: {
+    name: "products",
+    conn: studioConnection
+  },
+  findOne: () => ({
+    lean: async () => studioProduct
+  })
+};
+
+ShippingPackage.findById = () => ({
+  lean: async () => shippingPackage
+});
+
+try {
+  primary.readyState = 1;
+  primary.useDb = () => studioConnection;
+  await connectStudioDatabase();
+} finally {
+  primary.useDb = originalUseDb;
+  primary.readyState = originalState;
+}
 await new Promise(resolve =>
   server.listen(0, "127.0.0.1", resolve)
 );
@@ -162,7 +234,7 @@ try {
     const body = await response.json();
 
     assert.equal(body.success, true);
-    assert.equal(body.ownershipVerified, false);
+    assert.equal(body.ownershipVerified, true);
     assert.equal(body.assessment.status, "REVIEW_ONLY");
 
     assert.equal(
@@ -175,6 +247,89 @@ try {
     assert.equal(body.assessment.mayExecutePayment, false);
   });
 
+  await test("Store product ownership is rejected", async () => {
+    const originalStorefront = studioProduct.storefront;
+    const originalChannel = studioProduct.salesChannel;
+
+    try {
+      studioProduct.storefront = "signavi_store";
+      studioProduct.salesChannel = "signavi_store";
+
+      const response = await request(reviewUrl(), adminToken);
+      const body = await response.json();
+
+      assert.equal(response.status, 422);
+      assert.equal(body.ownershipVerified, false);
+      assert.equal(
+        body.message,
+        "Product storefront ownership mismatch"
+      );
+      assert.equal(body.assessment.mayActivateProfile, false);
+    } finally {
+      studioProduct.storefront = originalStorefront;
+      studioProduct.salesChannel = originalChannel;
+    }
+  });
+
+  await test("mismatched package is rejected", async () => {
+    const originalPackageId = studioProduct.shipping.packageId;
+
+    try {
+      studioProduct.shipping.packageId =
+        "507f1f77bcf86cd799439099";
+
+      const response = await request(reviewUrl(), adminToken);
+      const body = await response.json();
+
+      assert.equal(response.status, 422);
+      assert.equal(body.ownershipVerified, false);
+      assert.equal(
+        body.message,
+        "Selected package does not match product"
+      );
+      assert.equal(body.assessment.mayActivateProfile, false);
+    } finally {
+      studioProduct.shipping.packageId = originalPackageId;
+    }
+  });
+
+  await test("inactive shipping package is rejected", async () => {
+    const originalActive = shippingPackage.active;
+
+    try {
+      shippingPackage.active = false;
+
+      const response = await request(reviewUrl(), adminToken);
+      const body = await response.json();
+
+      assert.equal(response.status, 422);
+      assert.equal(body.ownershipVerified, false);
+      assert.equal(body.message, "Shipping package is inactive");
+      assert.equal(body.assessment.mayActivateProfile, false);
+    } finally {
+      shippingPackage.active = originalActive;
+    }
+  });
+
+  await test("disconnected Studio database fails closed", async () => {
+    const originalReadyState = studioConnection.readyState;
+
+    try {
+      studioConnection.readyState = 0;
+
+      const response = await request(reviewUrl(), adminToken);
+      const body = await response.json();
+
+      assert.equal(response.status, 500);
+      assert.equal(body.success, false);
+      assert.equal(
+        body.message,
+        "Unable to review packing profile"
+      );
+    } finally {
+      studioConnection.readyState = originalReadyState;
+    }
+  });
   await test("database read failure returns 500", async () => {
     mockFindById(new Error("ISOLATED_READ_FAILURE"));
 
@@ -199,6 +354,7 @@ try {
   });
 
 } finally {
+  ShippingPackage.findById = originalPackageFindById;
   Profile.findById = originalFindById;
   Profile.updateOne = originalUpdateOne;
   Profile.findByIdAndUpdate = originalFindByIdAndUpdate;
