@@ -36,7 +36,22 @@ test("draft validator requires Studio ownership fields", () => {
 test("profile creation remains disabled", () => {
   assert.match(
     normalized,
-    /router\.post\("\/", \(_req, res\) => \{ return res\.status\(503\)/
+    /router\.post\("\/", async \(req, res\) => \{/
+  );
+
+  assert.match(
+    normalized,
+    /if \(!isolatedStudioProfilesEnabled\(\)\) \{ return res\.status\(503\)/
+  );
+
+  assert.match(
+    normalized,
+    /const ProfileModel = resolveAdminProfileModel\(\)/
+  );
+
+  assert.match(
+    normalized,
+    /active: false/
   );
 });
 
