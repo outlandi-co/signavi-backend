@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import express from "express";
 import axios from "axios";
+import crypto from "node:crypto";
+import { verifyShippingQuote } from "../utils/shippingQuote.js";
 
 process.env.NODE_ENV = "test";
 process.env.SIGNAVI_PRODUCT_DATABASE_ISOLATION = "true";
@@ -30,6 +32,9 @@ let studioProductQueries = 0;
 let studioProfileQueries = 0;
 let legacyQueries = 0;
 let shippoCalls = 0;
+let activeProfileForTest = false;
+let mockShippoEnabled = false;
+const requestedWeights = [];
 
 const studioProductModel = {
   modelName: "Product",
@@ -86,7 +91,16 @@ const studioProfileModel = {
         return this;
       },
       async lean() {
-        return [];
+        return activeProfileForTest ? [{
+          productId,
+          packageId,
+          unitWeightOz: 7,
+          verifiedCapacity: 3,
+          verifiedBy: "SYNTHETIC_TEST_ONLY",
+          verifiedAt: new Date("2026-01-01T00:00:00Z"),
+          verificationNotes: "Synthetic contract test, not physical verification.",
+          active: true
+        }] : [];
       }
     };
   }
@@ -157,9 +171,36 @@ mock.method(ShippingPackage, "find", filter => {
   };
 });
 
-mock.method(axios, "post", async () => {
+mock.method(axios, "post", async (url, payload) => {
   shippoCalls++;
-  throw new Error("SHIPPO_MUST_NOT_BE_CALLED");
+
+  if (!mockShippoEnabled) {
+    throw new Error("SHIPPO_MUST_NOT_BE_CALLED");
+  }
+
+  assert.equal(url, "https://api.goshippo.com/shipments/");
+  assert.equal(payload.parcels.length, 1);
+
+  requestedWeights.push(payload.parcels[0].weight);
+
+  const index = shippoCalls;
+
+  return {
+    data: {
+      rates: [{
+        object_id: "synthetic-http-rate-" + index,
+        amount: index === 1 ? "5.00" : "6.00",
+        currency: "USD",
+        provider: "USPS",
+        carrier_account: "synthetic-carrier-account",
+        servicelevel: {
+          token: "usps_priority",
+          name: "Priority Mail"
+        }
+      }],
+      messages: []
+    }
+  };
 });
 
 const app = express();
@@ -224,4 +265,88 @@ test("isolated Studio rejects inactive profile without Shippo", async () => {
   console.log("LEGACY_DATABASE_FALLBACK_ZERO");
   console.log("INACTIVE_PROFILE_HTTP_422_VERIFIED");
   console.log("SHIPPO_REQUEST_COUNT_ZERO");
+});
+
+
+test("isolated Studio returns signed multi-parcel HTTP rates", async () => {
+  activeProfileForTest = true;
+  mockShippoEnabled = true;
+
+  studioProductQueries = 0;
+  studioProfileQueries = 0;
+  legacyQueries = 0;
+  shippoCalls = 0;
+  requestedWeights.length = 0;
+
+  process.env.SHIPPING_QUOTE_SECRET =
+    crypto.randomBytes(32).toString("hex");
+
+  const items = [{ productId, quantity: 5 }];
+
+  const address_to = {
+    name: "Test Recipient",
+    street1: "123 Test Street",
+    city: "Example City",
+    state: "CA",
+    zip: "90000",
+    country: "US"
+  };
+
+  const response = await fetch(
+    `http://127.0.0.1:${server.address().port}/api/shipping/get-rates`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        storefront: "signavi_studio",
+        items,
+        address_to
+      })
+    }
+  );
+
+  const body = await response.json();
+
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.success, true);
+  assert.equal(body.parcelCount, 2);
+  assert.equal(body.testMode, true);
+  assert.equal(body.rates.length, 1);
+  assert.equal(body.rates[0].amount, "11.00");
+  assert.deepEqual(requestedWeights, ["23", "16"]);
+
+  assert.equal(shippoCalls, 2);
+  assert.equal(studioProductQueries, 1);
+  assert.equal(studioProfileQueries, 1);
+  assert.equal(legacyQueries, 0);
+
+  const verified = verifyShippingQuote(
+    body.rates[0].shippingQuote,
+    {
+      items,
+      destination: address_to,
+      allowTest: true
+    }
+  );
+
+  assert.equal(verified.amountCents, 1100);
+  assert.equal(verified.testMode, true);
+  assert.deepEqual(verified.rateIds, [
+    "synthetic-http-rate-1",
+    "synthetic-http-rate-2"
+  ]);
+
+  assert.throws(() => verifyShippingQuote(
+    body.rates[0].shippingQuote,
+    {
+      items,
+      destination: address_to,
+      allowTest: false
+    }
+  ), /Test shipping rates cannot be used/);
+
+  console.log("STUDIO_HTTP_200_VERIFIED");
+  console.log("TWO_PARCEL_SHIPPO_MOCK_VERIFIED");
+  console.log("SIGNED_MULTI_PARCEL_QUOTE_VERIFIED");
+  console.log("LEGACY_DATABASE_FALLBACK_ZERO");
 });
