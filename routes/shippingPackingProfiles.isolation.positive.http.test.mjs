@@ -77,6 +77,74 @@ mock.module("../models/productModelSelection.js", {
   }
 });
 
+
+const savedProfiles = [];
+
+const profileDb = {
+  name: "signavi_studio",
+  readyState: 1
+};
+
+class StudioProfileModel {
+  constructor(data) {
+    Object.assign(this, data);
+    this._id = "507f1f77bcf86cd799439099";
+  }
+
+  async save() {
+    savedProfiles.push({ ...this });
+    return this;
+  }
+
+  static find(query) {
+    assert.deepEqual(query, {});
+
+    return {
+      select() {
+        return this;
+      },
+      sort() {
+        return this;
+      },
+      async lean() {
+        return savedProfiles.map(profile => ({ ...profile }));
+      }
+    };
+  }
+}
+
+StudioProfileModel.modelName =
+  "ShippingProductPackageProfile";
+
+StudioProfileModel.db = profileDb;
+
+StudioProfileModel.collection = {
+  name: "shippingproductpackageprofiles",
+  conn: profileDb,
+  async indexes() {
+    return [
+      {
+        key: { _id: 1 },
+        name: "_id_"
+      },
+      {
+        key: { productId: 1, packageId: 1 },
+        name: "productId_1_packageId_1",
+        unique: true
+      }
+    ];
+  }
+};
+
+mock.module("../models/ShippingProfileForChannel.js", {
+  exports: {
+    getShippingProfileModelForChannel(channel) {
+      assert.equal(channel, "signavi_studio");
+      return StudioProfileModel;
+    }
+  }
+});
+
 const { default: router } =
   await import("./shippingPackingProfiles.js");
 
@@ -180,4 +248,77 @@ test("isolated administrator cannot create a packing profile", async () => {
 
   assert.equal(result.status, 503);
   assert.equal(legacyLookups, 0);
+});
+
+// PHASE_22N_HTTP_201_TEST
+test("admin creates and retrieves an inactive isolated Studio profile", async () => {
+  const previousIsolation =
+    process.env.SIGNAVI_SHIPPING_PROFILE_ISOLATION;
+
+  const previousEnvironment = process.env.NODE_ENV;
+
+  try {
+    process.env.NODE_ENV = "development";
+    process.env.SIGNAVI_SHIPPING_PROFILE_ISOLATION = "true";
+
+    savedProfiles.length = 0;
+
+    const creation = await request("/");
+
+    assert.equal(
+      creation.status,
+      201,
+      JSON.stringify(creation.body)
+    );
+
+    assert.equal(creation.body.success, true);
+    assert.equal(creation.body.saved, true);
+    assert.equal(creation.body.activated, false);
+    assert.equal(creation.body.storefront, "signavi_studio");
+
+    assert.equal(savedProfiles.length, 1);
+    assert.equal(savedProfiles[0].active, false);
+    assert.equal(String(savedProfiles[0].productId), productId);
+    assert.equal(String(savedProfiles[0].packageId), packageId);
+
+    const inventoryResponse = await fetch(baseURL, {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    const inventory = await inventoryResponse.json();
+
+    assert.equal(
+      inventoryResponse.status,
+      200,
+      JSON.stringify(inventory)
+    );
+
+    assert.equal(inventory.success, true);
+    assert.equal(inventory.count, 1);
+    assert.equal(inventory.data[0].active, false);
+
+    assert.equal(legacyLookups, 0);
+
+    console.log("STUDIO_PROFILE_HTTP_201_VERIFIED");
+    console.log("STUDIO_PROFILE_INACTIVE_VERIFIED");
+    console.log("STUDIO_PROFILE_INVENTORY_VERIFIED");
+    console.log("LEGACY_PRODUCT_LOOKUPS_ZERO");
+  } finally {
+    savedProfiles.length = 0;
+
+    if (previousIsolation === undefined) {
+      delete process.env.SIGNAVI_SHIPPING_PROFILE_ISOLATION;
+    } else {
+      process.env.SIGNAVI_SHIPPING_PROFILE_ISOLATION =
+        previousIsolation;
+    }
+
+    if (previousEnvironment === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = previousEnvironment;
+    }
+  }
 });
