@@ -14,6 +14,9 @@ import {
   preparePackingProfileDraft
 } from "../utils/preparePackingProfileDraft.mjs";
 
+import {
+  assessPackingProfileActivation
+} from "../utils/assessPackingProfileActivation.mjs";
 const router = express.Router();
 
 // All profile operations require an authenticated administrator.
@@ -49,6 +52,52 @@ router.get("/", async (req, res) => {
 // Fail closed until authenticated write validation,
 // database index verification, and isolated tests are complete.
 // Administrator-only validation; no database writes.
+router.get("/:profileId/activation-review", async (req, res) => {
+  const { profileId } = req.params;
+
+  if (!/^[a-f0-9]{24}$/i.test(profileId)) {
+    return res.status(400).json({
+      success: false,
+      message: "Valid packing profile ID is required"
+    });
+  }
+
+  try {
+    const profile = await ShippingProductPackageProfile
+      .findById(profileId)
+      .select(
+        "productId packageId unitWeightOz verifiedCapacity " +
+        "verifiedBy verifiedAt verificationNotes active"
+      )
+      .lean();
+
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message: "Packing profile not found"
+      });
+    }
+
+    const assessment = assessPackingProfileActivation({
+      profile,
+      evidence: {}
+    });
+
+    return res.status(200).json({
+      success: true,
+      profileId,
+      productId: profile.productId,
+      packageId: profile.packageId,
+      ownershipVerified: false,
+      assessment
+    });
+  } catch {
+    return res.status(500).json({
+      success: false,
+      message: "Unable to review packing profile"
+    });
+  }
+});
 router.post("/validate-draft", async (req, res) => {
   const input = req.body;
 
