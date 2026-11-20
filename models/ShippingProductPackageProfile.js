@@ -65,3 +65,5 @@ schema.index(
 
 export default mongoose.models.ShippingProductPackageProfile ||
   mongoose.model("ShippingProductPackageProfile", schema)
+
+export { schema as shippingProductPackageProfileSchema };

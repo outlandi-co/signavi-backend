@@ -25,6 +25,9 @@ import purchaseOrderRoutes from "./routes/purchaseOrderRoutes.js"
 import estimateRoutes from "./routes/estimateRoutes.js"
 
 import { connectStudioDatabase } from "./config/studioDatabase.js";
+import { connectStoreDatabase } from "./config/storeDatabase.js";
+import { initializeShippingProfileDatabases } from "./services/initializeShippingProfileDatabases.js";
+import { shouldInitializeIsolatedDatabases } from "./services/shouldInitializeIsolatedDatabases.js";
 import productRoutes from "./routes/products.js"
 import { requireAuth } from "./middleware/auth.js"
 import orderRoutes from "./routes/orders.js"
@@ -958,6 +961,27 @@ mongoose
     process.env.MONGO_URI
   )
   .then(async () => {
+
+    const shippingDatabasesReady =
+      await initializeShippingProfileDatabases({
+        enabled: shouldInitializeIsolatedDatabases({
+          environment: process.env.NODE_ENV,
+          productIsolation:
+            process.env.SIGNAVI_PRODUCT_DATABASE_ISOLATION,
+          shippingProfileIsolation:
+            process.env.SIGNAVI_SHIPPING_PROFILE_ISOLATION
+        }),
+        environment: process.env.NODE_ENV,
+        connectStore: connectStoreDatabase,
+        connectStudio: connectStudioDatabase
+      });
+
+    if (shippingDatabasesReady) {
+      console.log(
+        "Shipping profile isolation database connections ready"
+      );
+    }
+
 
     // Signavi Studio isolation rollout.
     // Disabled unless explicitly enabled by configuration.

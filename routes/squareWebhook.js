@@ -15,6 +15,7 @@ import {
   verifyV3ProductionWebhookPaymentBinding
 } from "../utils/smartShippingV3ProductionWebhookPaymentBinding.js"
 
+import { createV3WebhookStorefrontFilter } from "../utils/createV3WebhookStorefrontFilter.js"
 import express from "express"
 import crypto from "node:crypto"
 import fetch from "node-fetch"
@@ -103,7 +104,7 @@ const verifySignature = (rawBody, signature) => {
 // RETRIEVE VERIFIED PAYMENT DATA FROM SQUARE
 // =====================================================
 
-const squareGet = async (endpoint) => {
+const squareGet = async (endpoint, req) => {
   if (!validSquareMode) {
     throw new Error(
       "Invalid Square environment configuration"
@@ -123,7 +124,16 @@ const squareGet = async (endpoint) => {
       ? "https://connect.squareupsandbox.com"
       : "https://connect.squareup.com"
 
-  const response = await fetch(
+  // HTTP regression tests must never call Square's real API.
+  const transport = process.env.NODE_ENV === "test"
+    ? req?.app?.get("squareWebhookTestFetch")
+    : fetch
+
+  if (typeof transport !== "function") {
+    throw new Error("SQUARE_WEBHOOK_TEST_TRANSPORT_REQUIRED")
+  }
+
+  const response = await transport(
     `${baseUrl}/v2/${endpoint}`,
     {
       headers: {
@@ -616,7 +626,8 @@ router.post("/webhook", async (req, res) => {
     // =================================================
 
     const paymentResponse = await squareGet(
-      `payments/${encodeURIComponent(incoming.id)}`
+      `payments/${encodeURIComponent(incoming.id)}`,
+      req
     )
 
     const payment = paymentResponse.payment
@@ -656,7 +667,8 @@ router.post("/webhook", async (req, res) => {
     // =================================================
 
     const orderResponse = await squareGet(
-      `orders/${encodeURIComponent(payment.order_id)}`
+      `orders/${encodeURIComponent(payment.order_id)}`,
+      req
     )
 
     const squareOrder = orderResponse.order
@@ -811,6 +823,8 @@ router.post("/webhook", async (req, res) => {
       typeof squareOrder.reference_id === "string" &&
       squareOrder.reference_id.startsWith("signavi-v3-")
 
+    let verifiedV3StorefrontFilter = null
+
     const v3Operation = squareMode === "sandbox"
       ? await SmartShippingV3PaymentOperation.findOne({
           orderId: order._id
@@ -836,6 +850,9 @@ router.post("/webhook", async (req, res) => {
           squareOrder,
           expectedLocationId: locationId
         })
+
+        verifiedV3StorefrontFilter =
+          createV3WebhookStorefrontFilter(order)
 
         // Exact verified payment replay: no second update.
         if (v3Binding.exactPaidReplay) {
@@ -945,6 +962,7 @@ router.post("/webhook", async (req, res) => {
         {
           _id: order._id,
           squareEnvironment: squareMode,
+          ...(verifiedV3StorefrontFilter || {}),
 
           paymentStatus: {
             $nin: ["paid", "refunded"]
