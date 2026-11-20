@@ -188,7 +188,7 @@ const multiParcelServiceKey = (rate) => {
 }
 
 // Every returned option must cover EVERY parcel. Never quote a partial order.
-const combineParcelRates = (shipments) => {
+export const combineParcelRates = (shipments) => {
   const first = new Map()
   for (const rate of shipments[0]?.rates || []) {
     if (!validUsdRate(rate)) continue
